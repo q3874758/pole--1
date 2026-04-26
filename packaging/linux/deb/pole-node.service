@@ -1,0 +1,14 @@
+[Unit]
+Description=PoLE node service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/pole/pole-node service-run /etc/pole/node.json
+WorkingDirectory=/var/lib/pole
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

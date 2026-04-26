@@ -1,0 +1,13 @@
+version: v1
+plugins:
+  - name: gocosmos
+    path: C:\Users\11237\go\bin\protoc-gen-gocosmos.exe
+    out: ..
+    opt:
+      - plugins=grpc,Mgoogle/protobuf/any.proto=github.com/cosmos/gogoproto/types/any
+  - name: grpc-gateway
+    path: C:\Users\11237\go\bin\protoc-gen-grpc-gateway.exe
+    out: ..
+    opt:
+      - logtostderr=true
+      - generate_unbound_methods=true

@@ -1,0 +1,10 @@
+Package: pole-node
+Version: 0.1.0
+Section: net
+Priority: optional
+Architecture: amd64
+Maintainer: PoLE Team <ops@pole.local>
+Depends: systemd
+Description: PoLE node service
+ Production package for running the PoLE node as a managed
+ background service with systemd integration.

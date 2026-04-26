@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+SERVICE_NAME="pole-node.service"
+
+systemctl stop "$SERVICE_NAME" || true
+systemctl disable "$SERVICE_NAME" || true
+systemctl daemon-reload || true
+
+exit 0

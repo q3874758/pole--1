@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package pole.chain.pole.v1;
+
+option go_package = "x/pole/types";
+
+import "pole/chain/pole/v1/state.proto";
+
+message GenesisState {
+  Params params = 1;
+  repeated BatchCommit batch_commits = 2;
+  repeated EpochCommit epoch_commits = 3;
+  repeated RewardRecord reward_records = 4;
+  repeated AggregateRecord aggregate_records = 5;
+  repeated Challenge challenges = 6;
+  repeated AvailabilityRecord availability = 7;
+  repeated GameWeightEntry game_weight_entries = 8;
+  repeated ClaimedReward claimed_rewards = 9;
+  repeated ReplicaReceipt replica_receipts = 10;
+  repeated NodeRecord nodes = 11;
+}

@@ -1,0 +1,11 @@
+{
+  "adjustment_cycle_index": 0,
+  "basis_cycle_index": 0,
+  "basis_total_network_weight_units": 0,
+  "target_total_network_weight_units": 150000000000000,
+  "reward_adjustment_cap_bps": 2000,
+  "adjustment_cycle_blocks": 288,
+  "reward_block_secs": 3600,
+  "base_fixed_player_reward": 18264,
+  "fixed_player_reward": 18264
+}

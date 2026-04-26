@@ -1,0 +1,8 @@
+{
+  "install_root": "C:/Program Files/PoLE",
+  "config_dir": "C:/Program Files/PoLE/config",
+  "data_dir": "C:/Program Files/PoLE/data",
+  "log_dir": "C:/Program Files/PoLE/logs",
+  "update_dir": "C:/Program Files/PoLE/updates",
+  "service_registration_dir": "C:/ProgramData/PoLE/services"
+}

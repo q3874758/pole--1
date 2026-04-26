@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="PoLE Desktop"
+    Language="1033"
+    Version="0.1.0"
+    Manufacturer="PoLE Team"
+    UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+  >
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perUser"
+      Description="PoLE desktop console - Proof of Live Engagement"
+    />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of PoLE Desktop is already installed."
+      Schedule="afterInstallInitialize"
+    />
+
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="PoLEIcon" SourceFile="$(var.RootDir)\packaging\windows\pole.ico" />
+    <Property Id="ARPPRODUCTICON" Value="PoLEIcon" />
+    <Property Id="ARPHELPLINK" Value="https://pole.local" />
+    <UIRef Id="WixUI_FeatureTree" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <Feature Id="Complete" Title="PoLE Desktop" Level="1" Display="expand" Absent="disallow">
+      <Feature Id="CoreFeature" Title="Desktop Application" Level="1" Absent="disallow">
+        <ComponentRef Id="PoleGuiExeComponent" />
+        <ComponentRef Id="PoleClientExeComponent" />
+        <ComponentRef Id="PoleNodeExeComponent" />
+        <ComponentRef Id="InstallFolderCleanupComponent" />
+        <ComponentRef Id="StartMenuShortcutComponent" />
+        <ComponentRef Id="DesktopShortcutComponent" />
+      </Feature>
+      <Feature Id="AutostartFeature" Title="Start with Windows" Level="1" AllowAdvertise="no">
+        <ComponentRef Id="AutostartComponent" />
+      </Feature>
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="INSTALLFOLDER" Name="PoLE" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="PoLEProgramMenuFolder" Name="PoLE" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <Component Id="PoleGuiExeComponent" Directory="INSTALLFOLDER" Guid="8C1C71C8-8D33-4A0D-B31F-C74B87A3B101">
+      <File Id="PoleGuiExe" Source="$(var.SourceDir)\pole-gui.exe" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE\Desktop"
+        Name="PoleGuiExeInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="PoleClientExeComponent" Directory="INSTALLFOLDER" Guid="A4A66AE0-4A65-49A5-90BF-99C5D3A64E01">
+      <File Id="PoleClientExe" Source="$(var.SourceDir)\pole-client.exe" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE\Desktop"
+        Name="PoleClientExeInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="PoleNodeExeComponent" Directory="INSTALLFOLDER" Guid="3B236B8D-6C4A-4F2C-85CC-5CF7D2E3B201">
+      <File Id="PoleNodeExe" Source="$(var.SourceDir)\pole-node.exe" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE\Desktop"
+        Name="PoleNodeExeInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="InstallFolderCleanupComponent" Directory="INSTALLFOLDER" Guid="E7A31A33-EC57-438E-B34D-4E41E7487A01">
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE\Desktop"
+        Name="InstallFolderCleanup"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="StartMenuShortcutComponent" Directory="PoLEProgramMenuFolder" Guid="C4A97577-8888-470D-B2C2-8C5AEE263101">
+      <Shortcut
+        Id="StartMenuShortcut"
+        Name="PoLE Desktop"
+        Description="Open PoLE Desktop"
+        Target="[INSTALLFOLDER]pole-gui.exe"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="PoLEIcon"
+        IconIndex="0"
+      />
+      <RemoveFolder Id="RemovePoLEProgramMenuFolder" Directory="PoLEProgramMenuFolder" On="uninstall" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE"
+        Name="StartMenuShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="B27FB0A7-0F4C-4DFD-95D6-31BE54A2E101">
+      <Shortcut
+        Id="DesktopShortcut"
+        Name="PoLE Desktop"
+        Description="Open PoLE Desktop"
+        Target="[INSTALLFOLDER]pole-gui.exe"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="PoLEIcon"
+        IconIndex="0"
+      />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\PoLE"
+        Name="DesktopShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes"
+      />
+    </Component>
+
+    <Component Id="AutostartComponent" Directory="INSTALLFOLDER" Guid="F0C16438-3E7D-472D-8CF0-98C2E347A901">
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\Microsoft\Windows\CurrentVersion\Run"
+        Name="PoLE GUI"
+        Type="string"
+        Value="&quot;[INSTALLFOLDER]pole-gui.exe&quot; --start-hidden"
+        KeyPath="yes"
+      />
+    </Component>
+  </Product>
+</Wix>

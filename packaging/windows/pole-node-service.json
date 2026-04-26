@@ -1,0 +1,1 @@
+{"service_name":"PoLENode","display_name":"PoLE Node Service","binary_path":"\"C:/Program Files/PoLE/pole-node.exe\" service-run \"C:/Program Files/PoLE/config/node.json\""}

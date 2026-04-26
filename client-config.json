@@ -1,0 +1,79 @@
+{
+  "chain_id": "pole-local",
+  "node_id_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "reward_address_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+  "capabilities": {
+    "collect": true,
+    "store": true,
+    "verify": false,
+    "propose": false,
+    "archive": false
+  },
+  "collect": {
+    "enabled": true,
+    "default_epoch_id": 1,
+    "default_slot_id": 1
+  },
+  "runtime": {
+    "data_dir": "pole-node-data",
+    "poll_interval_secs": 300,
+    "slots_per_epoch": 288,
+    "challenge_window_blocks": 20,
+    "low_impact_mode": true,
+    "os_background_priority": true,
+    "game_active_poll_interval_secs": 900,
+    "game_process_names": [],
+    "target_app_ids": [
+      730
+    ],
+    "p2p_simulation": {
+      "batch_listener_count": 1,
+      "receipt_listener_count": 1,
+      "dual_listener_count": 1
+    },
+    "p2p_socket": {
+      "bind_addr": "127.0.0.1:0",
+      "peers": []
+    },
+    "p2p_libp2p": {
+      "enabled": false,
+      "listen_addrs": [
+        "/ip4/0.0.0.0/tcp/0"
+      ],
+      "bootstrap_peers": [],
+      "discovery": {
+        "kademlia": true,
+        "mdns": true,
+        "rendezvous": false
+      }
+    },
+    "activity_sources": [
+      {
+        "app_id": 730,
+        "source_kind": "Steam",
+        "endpoint_url": "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=730",
+        "inline_json": null
+      }
+    ]
+  },
+  "storage": {
+    "quota_gb": 10,
+    "retention_epochs": 2
+  },
+  "reward": {
+    "reward_source": "tokenomics",
+    "emission_year": 1,
+    "reward_block_secs": 3600,
+    "player_block_reward": 1000,
+    "reward_adjustment_period_blocks": 288,
+    "target_network_weight_units": 150000000000000,
+    "reward_adjustment_cap_bps": 2000,
+    "collect_reward_bps": 5000,
+    "store_reward_bps": 2500,
+    "verify_reward_bps": 1500,
+    "propose_reward_bps": 1000,
+    "tail_emission_start_year": 4,
+    "tail_emission_rate_bps": 200,
+    "game_mappings": []
+  }
+}

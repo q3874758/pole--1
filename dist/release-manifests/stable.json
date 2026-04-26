@@ -1,0 +1,21 @@
+{
+  "channel": "stable",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-node.exe",
+      "sha256": "7fe80242885ea2b4ca9069dbc8e18e053722b1fd53d6ef12f2eed22c559a4402",
+      "size_bytes": 6098432
+    },
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-client.exe",
+      "sha256": "68d46266f0fd30f1734b48039d0369a8ff36fc138c97520a418d9b5a371331c7",
+      "size_bytes": 6731776
+    }
+  ],
+  "signature": "dev-signature"
+}

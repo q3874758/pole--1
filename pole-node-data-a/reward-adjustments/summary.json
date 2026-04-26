@@ -1,0 +1,11 @@
+{
+  "adjustment_artifact_count": 1,
+  "adjustment_cycle_artifact_count": 1,
+  "latest_period_index": 0,
+  "latest_adjustment_cycle_index": 0,
+  "latest_basis_period_index": 0,
+  "latest_basis_cycle_index": 0,
+  "latest_adjusted_player_block_reward": 18264,
+  "latest_fixed_player_reward": 18264,
+  "artifact_index_path": "E:\\pole备用\\pole-node-data-a\\reward-adjustments\\index.json"
+}

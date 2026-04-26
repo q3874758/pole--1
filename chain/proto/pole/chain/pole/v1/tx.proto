@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package pole.chain.pole.v1;
+
+option go_package = "x/pole/types";
+
+import "cosmos/msg/v1/msg.proto";
+import "pole/chain/pole/v1/state.proto";
+
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  rpc UpsertNode(MsgUpsertNode) returns (MsgUpsertNodeResponse);
+  rpc UpsertAggregateRecord(MsgUpsertAggregateRecord) returns (MsgUpsertAggregateRecordResponse);
+  rpc SubmitBatch(MsgSubmitBatch) returns (MsgSubmitBatchResponse);
+  rpc SubmitReplicaReceipt(MsgSubmitReplicaReceipt) returns (MsgSubmitReplicaReceiptResponse);
+  rpc CommitEpoch(MsgCommitEpoch) returns (MsgCommitEpochResponse);
+  rpc OpenChallenge(MsgOpenChallenge) returns (MsgOpenChallengeResponse);
+  rpc ResolveChallenge(MsgResolveChallenge) returns (MsgResolveChallengeResponse);
+  rpc FinalizeEpoch(MsgFinalizeEpoch) returns (MsgFinalizeEpochResponse);
+  rpc ClaimReward(MsgClaimReward) returns (MsgClaimRewardResponse);
+  rpc UpsertGameWeight(MsgUpsertGameWeight) returns (MsgUpsertGameWeightResponse);
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+message MsgUpsertNode {
+  option (cosmos.msg.v1.signer) = "operator";
+
+  string operator = 1;
+  NodeRecord node = 2;
+}
+
+message MsgUpsertNodeResponse {}
+
+message MsgUpsertAggregateRecord {
+  option (cosmos.msg.v1.signer) = "operator";
+
+  string operator = 1;
+  AggregateRecord aggregate_record = 2;
+}
+
+message MsgUpsertAggregateRecordResponse {}
+
+message MsgSubmitBatch {
+  option (cosmos.msg.v1.signer) = "collector";
+
+  string collector = 1;
+  BatchCommit batch_commit = 2;
+}
+
+message MsgSubmitBatchResponse {}
+
+message MsgSubmitReplicaReceipt {
+  option (cosmos.msg.v1.signer) = "storer";
+
+  string storer = 1;
+  ReplicaReceipt replica_receipt = 2;
+}
+
+message MsgSubmitReplicaReceiptResponse {}
+
+message MsgCommitEpoch {
+  option (cosmos.msg.v1.signer) = "proposer";
+
+  string proposer = 1;
+  EpochCommit epoch_commit = 2;
+}
+
+message MsgCommitEpochResponse {}
+
+message MsgOpenChallenge {
+  option (cosmos.msg.v1.signer) = "challenger";
+
+  string challenger = 1;
+  Challenge challenge = 2;
+}
+
+message MsgOpenChallengeResponse {}
+
+message MsgResolveChallenge {
+  option (cosmos.msg.v1.signer) = "resolver";
+
+  string resolver = 1;
+  string challenge_id_hex = 2;
+  uint64 slash_amount = 3;
+  uint64 challenger_reward = 4;
+  string resolution_summary = 5;
+  ChallengeState final_state = 6;
+  uint32 slash_fraction_bps = 7;
+  bool jail_validator = 8;
+}
+
+message MsgResolveChallengeResponse {}
+
+message MsgFinalizeEpoch {
+  option (cosmos.msg.v1.signer) = "finalizer";
+
+  string finalizer = 1;
+  uint64 epoch_id = 2;
+}
+
+message MsgFinalizeEpochResponse {}
+
+message MsgClaimReward {
+  option (cosmos.msg.v1.signer) = "claimer";
+
+  string claimer = 1;
+  uint64 epoch_id = 2;
+  string recipient = 3;
+}
+
+message MsgClaimRewardResponse {
+  RewardRecord reward_record = 1;
+}
+
+message MsgUpsertGameWeight {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  string authority = 1;
+  GameWeightEntry entry = 2;
+}
+
+message MsgUpsertGameWeightResponse {}
+
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  string authority = 1;
+  Params params = 2;
+}
+
+message MsgUpdateParamsResponse {}

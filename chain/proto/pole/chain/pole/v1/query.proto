@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package pole.chain.pole.v1;
+
+option go_package = "x/pole/types";
+import "pole/chain/pole/v1/state.proto";
+
+service Query {
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse);
+  rpc Node(QueryNodeRequest) returns (QueryNodeResponse);
+  rpc BatchCommit(QueryBatchCommitRequest) returns (QueryBatchCommitResponse);
+  rpc AggregateRecord(QueryAggregateRecordRequest) returns (QueryAggregateRecordResponse);
+  rpc ReplicaReceipt(QueryReplicaReceiptRequest) returns (QueryReplicaReceiptResponse);
+  rpc EpochCommit(QueryEpochCommitRequest) returns (QueryEpochCommitResponse);
+  rpc RewardRecord(QueryRewardRecordRequest) returns (QueryRewardRecordResponse);
+  rpc ClaimedReward(QueryClaimedRewardRequest) returns (QueryClaimedRewardResponse);
+  rpc Challenge(QueryChallengeRequest) returns (QueryChallengeResponse);
+  rpc GameWeight(QueryGameWeightRequest) returns (QueryGameWeightResponse);
+}
+
+message QueryParamsRequest {}
+
+message QueryParamsResponse {
+  Params params = 1;
+}
+
+message QueryNodeRequest {
+  string operator_address = 1;
+}
+
+message QueryNodeResponse {
+  NodeRecord node = 1;
+}
+
+message QueryBatchCommitRequest {
+  uint64 epoch_id = 1;
+  string collector_address = 2;
+  string batch_root_hex = 3;
+}
+
+message QueryBatchCommitResponse {
+  BatchCommit batch_commit = 1;
+}
+
+message QueryAggregateRecordRequest {
+  uint64 epoch_id = 1;
+  uint32 app_id = 2;
+}
+
+message QueryAggregateRecordResponse {
+  AggregateRecord aggregate_record = 1;
+}
+
+message QueryReplicaReceiptRequest {
+  uint64 epoch_id = 1;
+  string storer_address = 2;
+  string payload_cid = 3;
+}
+
+message QueryReplicaReceiptResponse {
+  ReplicaReceipt replica_receipt = 1;
+}
+
+message QueryEpochCommitRequest {
+  uint64 epoch_id = 1;
+}
+
+message QueryEpochCommitResponse {
+  EpochCommit epoch_commit = 1;
+}
+
+message QueryRewardRecordRequest {
+  uint64 epoch_id = 1;
+  string recipient = 2;
+}
+
+message QueryRewardRecordResponse {
+  RewardRecord reward_record = 1;
+}
+
+message QueryClaimedRewardRequest {
+  uint64 epoch_id = 1;
+  string recipient = 2;
+}
+
+message QueryClaimedRewardResponse {
+  ClaimedReward claimed_reward = 1;
+}
+
+message QueryChallengeRequest {
+  string challenge_id_hex = 1;
+}
+
+message QueryChallengeResponse {
+  Challenge challenge = 1;
+}
+
+message QueryGameWeightRequest {
+  uint32 app_id = 1;
+  uint64 effective_from_epoch_id = 2;
+}
+
+message QueryGameWeightResponse {
+  GameWeightEntry entry = 1;
+}

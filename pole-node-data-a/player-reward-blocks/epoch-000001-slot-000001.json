@@ -1,0 +1,21 @@
+{
+  "epoch_id": 1,
+  "slot_id": 1,
+  "sampled_interval_secs": 300,
+  "reward_block_secs": 3600,
+  "reward_adjustment_period_index": 0,
+  "adjustment_cycle_index": 0,
+  "reward_adjustment_period_blocks": 288,
+  "adjustment_cycle_blocks": 288,
+  "completed_reward_block_count": 0,
+  "fixed_block_reward_basis_period_index": 0,
+  "fixed_player_reward_basis_cycle_index": 0,
+  "fixed_block_reward_basis_network_weight_units": 0,
+  "fixed_player_reward_basis_total_network_weight_units": 0,
+  "block_reward": 18264,
+  "fixed_player_reward": 18264,
+  "foreground_process": "powershell.exe",
+  "active_game_processes": [],
+  "records": [],
+  "total_player_reward": 0
+}

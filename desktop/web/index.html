@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PoLE 控制台</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">PoLE 生产控制台</p>
+          <h1>节点控制台</h1>
+          <p class="subtitle">
+            本地优先的操作、诊断、配置与发布就绪状态管理。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-all" class="ghost-button" type="button">刷新全部</button>
+          <span id="last-refresh" class="last-refresh">等待首次同步</span>
+        </div>
+      </header>
+
+      <nav class="view-tabs" aria-label="控制台视图">
+        <button class="view-tab active" data-view-target="overview" type="button">概览</button>
+        <button class="view-tab" data-view-target="config" type="button">配置</button>
+        <button class="view-tab" data-view-target="logs" type="button">日志</button>
+        <button class="view-tab" data-view-target="updates" type="button">更新</button>
+      </nav>
+
+      <main class="grid">
+        <section class="view-pane is-visible" data-view="overview">
+          <section class="panel status-panel">
+            <div class="panel-header">
+              <h2>服务状态</h2>
+              <span id="service-state-pill" class="pill">未知</span>
+            </div>
+            <div class="stats">
+              <article class="stat-card">
+                <span class="stat-label">运行状态</span>
+                <strong id="service-state">未知</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">进程 PID</span>
+                <strong id="service-pid">-</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">自动恢复</span>
+                <strong id="service-recoverable">-</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">过期标记</span>
+                <strong id="service-stale">-</strong>
+              </article>
+            </div>
+            <div class="service-actions">
+              <button data-service-action="status" type="button">检查</button>
+              <button data-service-action="install" type="button">安装</button>
+              <button data-service-action="start" type="button">启动</button>
+              <button data-service-action="stop" type="button">停止</button>
+              <button data-service-action="uninstall" type="button">卸载</button>
+            </div>
+            <pre id="service-action-result" class="console-box">尚未执行任何服务操作。</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>节点健康</h2>
+            </div>
+            <dl class="details">
+              <div><dt>链 ID</dt><dd id="node-chain-id">-</dd></div>
+              <div><dt>节点 ID</dt><dd id="node-id">-</dd></div>
+              <div><dt>奖励地址</dt><dd id="node-reward-address">-</dd></div>
+              <div><dt>数据目录</dt><dd id="node-data-dir">-</dd></div>
+              <div><dt>下一 Epoch</dt><dd id="node-next-epoch">-</dd></div>
+              <div><dt>下一 Slot</dt><dd id="node-next-slot">-</dd></div>
+              <div><dt>已完成 Ticks</dt><dd id="node-ticks-completed">-</dd></div>
+              <div><dt>低影响模式</dt><dd id="node-low-impact">-</dd></div>
+              <div><dt>内联验证</dt><dd id="node-inline-verify">-</dd></div>
+              <div><dt>内联提议</dt><dd id="node-inline-propose">-</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>应用与安装信息</h2>
+            </div>
+            <dl class="details">
+              <div><dt>应用名称</dt><dd id="meta-app-name">-</dd></div>
+              <div><dt>版本</dt><dd id="meta-app-version">-</dd></div>
+              <div><dt>平台</dt><dd id="meta-platform">-</dd></div>
+              <div><dt>服务管理器</dt><dd id="meta-service-manager">-</dd></div>
+              <div><dt>默认绑定</dt><dd id="meta-default-bind">-</dd></div>
+              <div><dt>远程默认</dt><dd id="meta-remote-default">-</dd></div>
+              <div><dt>配置目录</dt><dd id="meta-config-dir">-</dd></div>
+              <div><dt>日志目录</dt><dd id="meta-log-dir">-</dd></div>
+              <div><dt>更新目录</dt><dd id="meta-update-dir">-</dd></div>
+            </dl>
+          </section>
+        </section>
+
+        <section class="view-pane" data-view="config">
+          <section class="panel span-full">
+            <div class="panel-header">
+              <h2>核心配置</h2>
+              <span id="config-path" class="muted">-</span>
+            </div>
+            <form id="config-form" class="config-form">
+              <label>
+                <span>目标 App ID</span>
+                <input id="target-app-ids" name="target_app_ids" type="text" placeholder="730,570" />
+              </label>
+              <label>
+                <span>游戏进程名</span>
+                <input id="game-process-names" name="game_process_names" type="text" placeholder="game.exe,steam.exe" />
+              </label>
+              <label>
+                <span>奖励来源</span>
+                <select id="reward-source" name="reward_source">
+                  <option value="static">静态</option>
+                  <option value="tokenomics">代币经济</option>
+                </select>
+              </label>
+              <label>
+                <span>发行年份</span>
+                <input id="emission-year" name="emission_year" type="number" min="0" step="1" />
+              </label>
+              <label class="toggle-row">
+                <input id="low-impact-mode" name="low_impact_mode" type="checkbox" />
+                <span>低影响模式</span>
+              </label>
+              <label class="toggle-row">
+                <input id="os-background-priority" name="os_background_priority" type="checkbox" />
+                <span>后台优先级提升</span>
+              </label>
+              <div class="form-actions">
+                <button id="save-config" type="submit">保存配置</button>
+                <span id="config-status" class="muted">无待保存的更改</span>
+              </div>
+            </form>
+          </section>
+        </section>
+
+        <section class="view-pane" data-view="logs">
+          <section class="panel logs-panel span-full">
+            <div class="panel-header">
+              <h2>运行时日志</h2>
+              <button id="refresh-logs" class="ghost-button" type="button">刷新日志</button>
+            </div>
+            <div id="logs-list" class="logs-list"></div>
+          </section>
+        </section>
+
+        <section class="view-pane" data-view="updates">
+          <section class="panel span-full">
+            <div class="panel-header">
+              <h2>更新</h2>
+              <span id="update-version-badge" class="pill">当前</span>
+            </div>
+            <div class="stats">
+              <article class="stat-card">
+                <span class="stat-label">已安装版本</span>
+                <strong id="update-current-version">-</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">更新目录</span>
+                <strong id="update-dir">-</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">通道</span>
+                <strong id="update-channel">stable</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">回滚</span>
+                <strong id="update-rollback">已计划</strong>
+              </article>
+            </div>
+            <div class="callout-grid">
+              <article class="callout-card">
+                <h3>下一步</h3>
+                <p>
+                  此视图用于签名发布清单、更新检查、分阶段推送控制和回滚证据。
+                </p>
+              </article>
+              <article class="callout-card">
+                <h3>当前状态</h3>
+                <p id="update-summary">
+                  运行时元数据已连接。更新端点将在此处附加。
+                </p>
+              </article>
+            </div>
+            <form id="install-action-form" class="config-form">
+              <label>
+                <span>安装根目录覆盖</span>
+                <input
+                  id="install-root-override"
+                  type="text"
+                  placeholder="E:/PoLE/install-root"
+                />
+              </label>
+              <label>
+                <span>已安装布局根目录覆盖</span>
+                <input
+                  id="installed-layout-root-override"
+                  type="text"
+                  placeholder="E:/PoLE/installed-layout-root"
+                />
+              </label>
+              <label class="toggle-row">
+                <input id="use-installed-layout" type="checkbox" />
+                <span>使用已安装布局策略</span>
+              </label>
+              <label class="toggle-row">
+                <input id="allow-system-install-write" type="checkbox" />
+                <span>允许系统安装写入</span>
+              </label>
+              <label class="toggle-row">
+                <input id="stop-service-before-install" type="checkbox" />
+                <span>安装前停止服务</span>
+              </label>
+              <label class="toggle-row">
+                <input id="start-service-after-install" type="checkbox" />
+                <span>安装后启动服务</span>
+              </label>
+              <label class="toggle-row">
+                <input id="stop-service-before-rollback" type="checkbox" />
+                <span>回滚前停止服务</span>
+              </label>
+              <label class="toggle-row">
+                <input id="start-service-after-rollback" type="checkbox" />
+                <span>回滚后启动服务</span>
+              </label>
+            </form>
+            <div class="form-actions">
+              <button id="stage-update" type="button">准备更新</button>
+              <button id="apply-update" type="button">应用已准备更新</button>
+              <button id="commit-install" type="button">提交安装</button>
+              <button id="rollback-update" type="button">回滚</button>
+              <span id="update-action-status" class="muted">尚未执行任何更新操作</span>
+            </div>
+            <pre id="update-action-result" class="console-box">尚未执行任何更新操作。</pre>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

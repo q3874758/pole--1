@@ -1,0 +1,58 @@
+[package]
+name = "pole"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "PoLE V1 player-first hourly reward client and node runtime"
+
+[lib]
+name = "pole_protocol_draft"
+path = "src/lib.rs"
+
+[dependencies]
+borsh = { version = "1.5", features = ["derive"] }
+ed25519-dalek = "2"
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+scrypt = "0.11"
+thiserror = "1"
+tao = { version = "0.31", optional = true }
+tray-icon = { version = "0.22", optional = true }
+winrt-notification = { version = "0.5", optional = true }
+wry = { version = "0.47", optional = true }
+zeroize = "1.7"
+once_cell = "1"
+rpassword = "7.4"
+libp2p = { version = "0.56.0", default-features = false, features = ["ed25519", "identify", "kad", "macros", "mdns", "noise", "quic", "rendezvous", "serde", "tcp", "tokio", "yamux"], optional = true }
+libp2p-identity = { version = "0.2.13", features = ["ed25519", "peerid"], optional = true }
+multiaddr = { version = "0.18.2", optional = true }
+prost = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.51.0", features = ["rt-multi-thread"], optional = true }
+
+[features]
+default = ["real-libp2p"]
+real-libp2p = ["dep:libp2p", "dep:libp2p-identity", "dep:multiaddr", "dep:tokio"]
+gui = ["dep:tao", "dep:tray-icon", "dep:winrt-notification", "dep:wry"]
+
+[patch.crates-io]
+core2 = { path = "vendor/core2" }
+
+[build-dependencies]
+winres = "0.1"
+
+[[bin]]
+name = "pole-client"
+path = "src/bin/pole-client.rs"
+
+[[bin]]
+name = "pole-node"
+path = "src/bin/pole-node.rs"
+
+[[bin]]
+name = "pole-gui"
+path = "src/bin/pole-gui.rs"
+required-features = ["gui"]
