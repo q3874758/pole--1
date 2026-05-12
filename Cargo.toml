@@ -56,3 +56,7 @@ path = "src/bin/pole-node.rs"
 name = "pole-gui"
 path = "src/bin/pole-gui.rs"
 required-features = ["gui"]
+
+[[bin]]
+name = "pole"
+path = "src/bin/pole.rs"

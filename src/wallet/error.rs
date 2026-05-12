@@ -18,8 +18,8 @@ pub enum WalletError {
     DecryptionFailed,
     #[error("encryption failed: {0}")]
     EncryptionFailed(String),
-    #[error("argon2 KDF error: {0}")]
-    Argon2Error(String),
+    #[error("KDF error: {0}")]
+    KdfError(String),
     #[error("ed25519 signing error: {0}")]
     SigningError(String),
     #[error("IO error: {0}")]

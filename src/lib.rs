@@ -85,10 +85,12 @@ pub use control_api::{
     update_config as update_control_api_config,
 };
 pub use control_api_types::{
-    ApiConfigResponse, ApiLogsResponse, ApiMetaResponse, ApiStatusResponse, ApiUpdateResponse,
-    AppMetaView, ConfigUpdateRequest, ConfigView, InstallLayoutView, LogEntryView, NodeHealthView,
-    ServiceActionRequest, ServiceActionResponse, ServiceStatusView, UpdateActionRequest,
-    UpdateActionResponse, UpdateStatusView,
+    ApiConfigResponse, ApiDashboardResponse, ApiBlockchainResponse, ApiLogsResponse, ApiMetaResponse,
+    ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse, ApiUpdateResponse, AppMetaView,
+    BlockchainStatusView, ChallengeActivityView, ConfigUpdateRequest, ConfigView, DashboardView,
+    InstallLayoutView, LogEntryView, NetworkPeerView, NodeHealthView, P2pNetworkView, RewardPoolView,
+    ServiceActionRequest, ServiceActionResponse, ServiceStatusView, StorageInfoView,
+    TokenomicsSummaryView, UpdateActionRequest, UpdateActionResponse, UpdateStatusView,
 };
 pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};

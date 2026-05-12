@@ -165,7 +165,7 @@ mod tests {
     fn activated_protocol_tier_weights_override_default_gvs_tier_weights() {
         let temp_dir = std::env::temp_dir().join(format!("pole-gvs-tier-{}", std::process::id()));
         if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
+            std::fs::remove_dir_all(&temp_dir).ok();
         }
         let mut config = crate::NodeConfig::default();
         config.runtime.data_dir = temp_dir.to_string_lossy().into_owned();

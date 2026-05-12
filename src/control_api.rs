@@ -2,14 +2,47 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::{
-    ApiConfigResponse, ApiLogsResponse, ApiMetaResponse, ApiStatusResponse, ApiUpdateResponse,
-    AppMetaView, ConfigUpdateRequest, ConfigView, InstallLayoutView, LogEntryView,
-    ManagedServiceStatus, NodeConfig, NodeHealthView, RewardSourceMode, ServiceActionRequest,
-    ServiceActionResponse, ServiceManager, ServiceRuntime, ServiceStatusView, UpdateActionRequest,
-    UpdateActionResponse, UpdateStatusView,
+    ApiBlockchainResponse, ApiConfigResponse, ApiDashboardResponse, ApiLogsResponse, ApiMetaResponse,
+    ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse, ApiUpdateResponse,
+    AppMetaView, BlockchainStatusView, ChallengeActivityView, ConfigUpdateRequest, ConfigView,
+    DashboardView, InstallLayoutView, LogEntryView, ManagedServiceStatus, NodeConfig,
+    NodeHealthView, P2pNetworkView, RewardSourceMode, ServiceActionRequest,
+    ServiceActionResponse, ServiceManager, ServiceRuntime, ServiceStatusView,
+    StorageInfoView, TokenomicsSummaryView, UpdateActionRequest, UpdateActionResponse,
+    UpdateStatusView, TOTAL_SUPPLY,
 };
+
+/// Maximum HTTP request size (headers + body) to prevent memory exhaustion.
+const MAX_REQUEST_SIZE: usize = 65_536;
+
+/// Per-connection timeout for reads.
+const CONNECTION_TIMEOUT_SECS: u64 = 30;
+
+/// Returns the API token from the POLE_API_TOKEN env var, or None if not set.
+/// When a token is configured, all mutating POST requests require it.
+fn read_api_token() -> Option<String> {
+    std::env::var("POLE_API_TOKEN").ok().filter(|t| !t.is_empty())
+}
+
+/// Verify that the Authorization header contains the expected Bearer token.
+/// Returns true if no token is configured (auth disabled), or if the token matches.
+fn verify_auth_token(request_headers: &str, expected_token: &str) -> bool {
+    for line in request_headers.lines() {
+        if let Some(value) = line.strip_prefix("Authorization: Bearer ") {
+            return value.trim() == expected_token;
+        }
+    }
+    // Also check lowercase
+    for line in request_headers.lines() {
+        if let Some(value) = line.strip_prefix("authorization: Bearer ") {
+            return value.trim() == expected_token;
+        }
+    }
+    false
+}
 
 const DASHBOARD_HTML: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -89,6 +122,336 @@ pub fn collect_status(
             low_impact_mode: summary.low_impact_mode,
             inline_verify_enabled: summary.inline_verify_enabled,
             inline_propose_enabled: summary.inline_propose_enabled,
+        },
+    })
+}
+
+pub fn collect_blockchain(
+    _config_path: impl AsRef<Path>,
+) -> Result<ApiBlockchainResponse, Box<dyn std::error::Error>> {
+    use std::net::TcpStream;
+
+    let http_online = TcpStream::connect(("127.0.0.1", 1317)).is_ok();
+    let grpc_online = TcpStream::connect(("127.0.0.1", 9090)).is_ok();
+
+    let (block_height, block_hash, block_time, chain_id) = if http_online {
+        match reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            Ok(client) => {
+                match client.get("http://127.0.0.1:1317/cosmos/base/tendermint/v1beta1/blocks/latest").send() {
+                    Ok(resp) => {
+                        match resp.text() {
+                            Ok(body) => {
+                                match serde_json::from_str::<serde_json::Value>(&body) {
+                                    Ok(json) => {
+                                        let block = &json["block"];
+                                        let block_id = &json["block_id"];
+                                        let height = json["sdk_block_height"]
+                                            .as_u64()
+                                            .or_else(|| json["block"]["header"]["height"].as_u64())
+                                            .unwrap_or(0);
+                                        let hash = block_id["hash"]
+                                            .as_str()
+                                            .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000")
+                                            .to_string();
+                                        let time = block["header"]["time"]
+                                            .as_str()
+                                            .unwrap_or("-")
+                                            .to_string();
+                                        let cid = block["header"]["chain_id"]
+                                            .as_str()
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        (height, hash, time, cid)
+                                    }
+                                    Err(_) => (0, String::new(), String::new(), String::new()),
+                                }
+                            }
+                            Err(_) => (0, String::new(), String::new(), String::new()),
+                        }
+                    }
+                    Err(_) => (0, String::new(), String::new(), String::new()),
+                }
+            }
+            Err(_) => (0, String::new(), String::new(), String::new()),
+        }
+    } else {
+        (0, String::new(), String::new(), String::new())
+    };
+
+    Ok(ApiBlockchainResponse {
+        blockchain: BlockchainStatusView {
+            online: http_online || grpc_online,
+            block_height,
+            block_hash,
+            chain_id,
+            http_online,
+            grpc_online,
+            block_time,
+        },
+    })
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn calculate_dir_size(path: &Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    let mut total = 0u64;
+    if path.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let file_path = entry.path();
+                if file_path.is_dir() {
+                    total += calculate_dir_size(&file_path);
+                } else if let Ok(metadata) = entry.metadata() {
+                    total += metadata.len();
+                }
+            }
+        }
+    } else if let Ok(metadata) = path.metadata() {
+        total = metadata.len();
+    }
+    total
+}
+
+fn count_files_in_dir(path: &Path, pattern: &str) -> usize {
+    if !path.exists() {
+        return 0;
+    }
+    let mut count = 0usize;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let file_path = entry.path();
+            if file_path.is_file() && file_path.to_string_lossy().contains(pattern) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+fn count_dirs_in_dir(path: &Path, prefix: &str) -> usize {
+    if !path.exists() {
+        return 0;
+    }
+    let mut count = 0usize;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let dir_path = entry.path();
+            if dir_path.is_dir() {
+                let name = dir_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if name.starts_with(prefix) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
+pub fn collect_storage(
+    config_path: impl AsRef<Path>,
+) -> Result<ApiStorageResponse, Box<dyn std::error::Error>> {
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+
+    let total_size = calculate_dir_size(&data_dir);
+    let batch_count = count_files_in_dir(&data_dir.join("batches"), ".json");
+    let prepared_epoch_count = count_dirs_in_dir(&data_dir.join("prepared-epochs"), "epoch-");
+    let settlement_count = count_dirs_in_dir(&data_dir.join("settlements"), "epoch-");
+    let log_files_count = count_files_in_dir(&data_dir.join("logs"), ".log");
+    let db_size = calculate_dir_size(&data_dir.join("local-chain"));
+
+    let payload_count = count_files_in_dir(&data_dir.join("payloads"), ".json")
+        + count_files_in_dir(&data_dir.join("payloads"), ".bin");
+
+    Ok(ApiStorageResponse {
+        storage: StorageInfoView {
+            data_dir: config.runtime.data_dir,
+            total_size_bytes: total_size,
+            total_size_formatted: format_bytes(total_size),
+            batch_count,
+            epoch_count: prepared_epoch_count,
+            payload_count,
+            prepared_epoch_count,
+            settlement_count,
+            log_files_count,
+            db_size_bytes: db_size,
+        },
+    })
+}
+
+pub fn collect_tokenomics(
+    config_path: impl AsRef<Path>,
+) -> Result<ApiTokenomicsResponse, Box<dyn std::error::Error>> {
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
+
+    let total_supply = TOTAL_SUPPLY.to_string();
+    let emission_year = config.reward.emission_year;
+
+    let player_reward_budget_per_hour = format!("{} / 小时", config.reward.target_network_weight_units);
+    let service_reward_budget_per_hour = format!("{} / 小时", config.reward.target_network_weight_units);
+    let player_block_reward = format!("{} 原子单位", config.reward.player_block_reward);
+
+    Ok(ApiTokenomicsResponse {
+        tokenomics: TokenomicsSummaryView {
+            total_supply,
+            annual_emission_rate_bps: 500,
+            current_year: 2026,
+            emission_year,
+            player_reward_budget_per_hour,
+            service_reward_budget_per_hour,
+            player_block_reward,
+            tail_emission_active: false,
+            tail_emission_rate_bps: 10,
+        },
+    })
+}
+
+pub fn collect_dashboard(
+    config_path: impl AsRef<Path>,
+) -> Result<ApiDashboardResponse, Box<dyn std::error::Error>> {
+    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
+    let summary = crate::load_status(&config)?;
+
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    let daemon_pid = read_pid(&data_dir.join("daemon.pid"));
+    let runtime = ServiceRuntime::from_observed_process(
+        daemon_pid,
+        daemon_pid.map(process_is_running).unwrap_or(false),
+    );
+    let service_snapshot = runtime.snapshot();
+
+    let total_size = calculate_dir_size(&data_dir);
+    let batch_count = count_files_in_dir(&data_dir.join("batches"), ".json");
+    let prepared_epoch_count = count_dirs_in_dir(&data_dir.join("prepared-epochs"), "epoch-");
+    let settlement_count = count_dirs_in_dir(&data_dir.join("settlements"), "epoch-");
+    let log_files_count = count_files_in_dir(&data_dir.join("logs"), ".log");
+    let db_size = calculate_dir_size(&data_dir.join("local-chain"));
+    let payload_count = count_files_in_dir(&data_dir.join("payloads"), ".json")
+        + count_files_in_dir(&data_dir.join("payloads"), ".bin");
+
+    let layout = crate::runtime_layout_for_config(&config_path, &config.runtime.data_dir);
+    let platform = match crate::current_platform() {
+        crate::Platform::Windows => "windows",
+        crate::Platform::Linux => "linux",
+        crate::Platform::Macos => "macos",
+    };
+    let service_manager = if cfg!(windows) { "windows-service" } else { "systemd" };
+
+    let update_status = crate::collect_update_overview(
+        "0.1.0",
+        "stable",
+        &config.runtime.data_dir,
+        PathBuf::from(&config.runtime.data_dir).join("releases"),
+    );
+
+    Ok(ApiDashboardResponse {
+        dashboard: DashboardView {
+            service: ServiceStatusView {
+                state: service_snapshot.state_label.to_string(),
+                pid: service_snapshot.pid,
+                stale: service_snapshot.stale,
+                recoverable_without_manual_cleanup: service_snapshot.recoverable_without_manual_cleanup,
+            },
+            node: NodeHealthView {
+                chain_id: config.chain_id.clone(),
+                node_id: config.node_id_hex.clone(),
+                reward_address: config.reward_address_hex.clone(),
+                data_dir: config.runtime.data_dir.clone(),
+                next_epoch_id: summary.next_epoch_id,
+                next_slot_id: summary.next_slot_id,
+                ticks_completed: summary.ticks_completed,
+                low_impact_mode: summary.low_impact_mode,
+                inline_verify_enabled: summary.inline_verify_enabled,
+                inline_propose_enabled: summary.inline_propose_enabled,
+            },
+            storage: StorageInfoView {
+                data_dir: config.runtime.data_dir.clone(),
+                total_size_bytes: total_size,
+                total_size_formatted: format_bytes(total_size),
+                batch_count,
+                epoch_count: prepared_epoch_count,
+                payload_count,
+                prepared_epoch_count,
+                settlement_count,
+                log_files_count,
+                db_size_bytes: db_size,
+            },
+            tokenomics: TokenomicsSummaryView {
+                total_supply: TOTAL_SUPPLY.to_string(),
+                annual_emission_rate_bps: 500,
+                current_year: 2026,
+                emission_year: config.reward.emission_year,
+                player_reward_budget_per_hour: format!("{} 权重单位", config.reward.target_network_weight_units),
+                service_reward_budget_per_hour: format!("{} 权重单位", config.reward.target_network_weight_units),
+                player_block_reward: format!("{} 原子", config.reward.player_block_reward),
+                tail_emission_active: false,
+                tail_emission_rate_bps: 10,
+            },
+            network: P2pNetworkView {
+                mode: "socket".to_string(),
+                local_peer_id: config.node_id_hex.clone(),
+                connected_peers: 0,
+                peers: Vec::new(),
+            },
+            challenge_activity: ChallengeActivityView {
+                active_challenges: 0,
+                completed_challenges: 0,
+                failed_challenges: 0,
+                last_challenge_epoch: 0,
+            },
+            meta: AppMetaView {
+                app_name: "PoLE".to_string(),
+                app_version: "0.1.0".to_string(),
+                control_api_default_bind_addr: "127.0.0.1:8787".to_string(),
+                remote_access_default_enabled: false,
+                browser_open_supported: true,
+                service_manager: service_manager.to_string(),
+                install_layout: InstallLayoutView {
+                    platform: platform.to_string(),
+                    mode: "portable".to_string(),
+                    root_dir: layout.root_dir.to_string_lossy().to_string(),
+                    config_dir: layout.config_dir.to_string_lossy().to_string(),
+                    data_dir: layout.data_dir.to_string_lossy().to_string(),
+                    log_dir: layout.log_dir.to_string_lossy().to_string(),
+                    update_dir: layout.update_dir.to_string_lossy().to_string(),
+                },
+            },
+            config: ConfigView {
+                config_path: config_path.to_string_lossy().to_string(),
+                chain_id: config.chain_id.clone(),
+                node_id: config.node_id_hex.clone(),
+                reward_address: config.reward_address_hex.clone(),
+                data_dir: config.runtime.data_dir.clone(),
+                target_app_ids: config.runtime.target_app_ids.clone(),
+                game_process_names: config.runtime.game_process_names.clone(),
+                low_impact_mode: config.runtime.low_impact_mode,
+                os_background_priority: config.runtime.os_background_priority,
+                reward_source: format!("{:?}", config.reward.reward_source),
+                emission_year: config.reward.emission_year,
+            },
+            update_available: update_status.update_available,
+            current_version: update_status.current_version,
         },
     })
 }
@@ -630,7 +993,7 @@ fn write_response(
 ) -> Result<(), Box<dyn std::error::Error>> {
     write!(
         stream,
-        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n{}",
         body.len(),
         body
     )?;
@@ -649,9 +1012,34 @@ pub fn handle_connection(
     mut stream: TcpStream,
     config_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut buffer = [0u8; 4096];
-    let bytes_read = stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    // Set read timeout to prevent slow-loris style attacks
+    stream.set_read_timeout(Some(Duration::from_secs(CONNECTION_TIMEOUT_SECS)))?;
+
+    // Read request with size limit
+    let mut buffer = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        if buffer.len() + n > MAX_REQUEST_SIZE {
+            write_json_response(
+                &mut stream,
+                "HTTP/1.1 413 Payload Too Large",
+                "{\"error\":\"request_too_large\"}",
+            )?;
+            return Ok(());
+        }
+        buffer.extend_from_slice(&chunk[..n]);
+        // Stop reading if we've got a complete HTTP header + body
+        if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let request = String::from_utf8_lossy(&buffer);
+    let request_headers = request.split("\r\n\r\n").next().unwrap_or("");
     let method = request
         .lines()
         .next()
@@ -664,6 +1052,21 @@ pub fn handle_connection(
         .unwrap_or("/");
     let path = path.split('?').next().unwrap_or(path);
     let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+
+    // Authentication: check token for all mutating (POST) endpoints
+    let requires_auth = method == "POST";
+    if requires_auth {
+        if let Some(expected_token) = read_api_token() {
+            if !verify_auth_token(request_headers, &expected_token) {
+                write_json_response(
+                    &mut stream,
+                    "HTTP/1.1 401 Unauthorized",
+                    "{\"error\":\"unauthorized\"}",
+                )?;
+                return Ok(());
+            }
+        }
+    }
 
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => {
@@ -692,6 +1095,22 @@ pub fn handle_connection(
         }
         ("GET", "/api/status") => {
             let body = serde_json::to_string(&collect_status(config_path)?)?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/dashboard") => {
+            let body = serde_json::to_string(&collect_dashboard(config_path)?)?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/blockchain") => {
+            let body = serde_json::to_string(&collect_blockchain(config_path)?)?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/storage") => {
+            let body = serde_json::to_string(&collect_storage(config_path)?)?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/tokenomics") => {
+            let body = serde_json::to_string(&collect_tokenomics(config_path)?)?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/meta") => {
@@ -793,9 +1212,19 @@ pub fn serve(
     config_path: PathBuf,
     max_requests: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if read_api_token().is_some() {
+        eprintln!("[control-api] API token authentication enabled (POLE_API_TOKEN set)");
+    } else {
+        eprintln!("[control-api] WARNING: No POLE_API_TOKEN set — mutating endpoints are unprotected");
+    }
     let mut served = 0usize;
     for stream in listener.incoming() {
-        handle_connection(stream?, &config_path)?;
+        match handle_connection(stream?, &config_path) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("[control-api] connection error: {e}");
+            }
+        }
         served += 1;
         if let Some(limit) = max_requests {
             if served >= limit {

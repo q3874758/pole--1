@@ -56,7 +56,9 @@ pub fn verify_release_manifest_signature(
     if manifest.signature.trim().is_empty() {
         return Ok(ManifestSignatureVerification::Missing);
     }
-    if manifest.signature == "dev-signature" {
+    // In production, signature verification must use proper Ed25519 verification.
+    // The dev-hash check is retained only as a fallback for development/staging.
+    if cfg!(debug_assertions) && manifest.signature == "dev-signature" {
         return Ok(ManifestSignatureVerification::Verified);
     }
     let expected = development_manifest_signature(manifest)?;

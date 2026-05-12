@@ -16,16 +16,17 @@ use serde::{Deserialize, Serialize};
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, current_players_url,
+    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, chain_bridge, current_players_url,
     decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
     effective_reward_adjustment_cap_bps, effective_reward_block_secs,
     effective_target_network_weight_units, export_governance_proposal_artifact,
     export_governance_scheduled_artifact, format_usage_block, governance_index_artifact_path,
-    governance_summary_artifact_path, heartbeat_path, hex_32, infer_reward_game_mapping,
-    is_reward_config_subcommand, KeyPair, latest_local_epoch, load_cached_reward_game_mapping,
-    load_config_and_epoch_arg, load_status, looks_like_hex_32_arg, open_local_protocol_state,
+    governance_summary_artifact_path, heartbeat_path, hex_32, hex_encode, infer_reward_game_mapping,
+    is_reward_config_subcommand, KeyPair, latest_local_epoch, load_batches_for_epoch,
+    load_cached_reward_game_mapping, load_config_and_epoch_arg, load_status, looks_like_hex_32_arg,
+    node_prepare, open_local_protocol_state,
     parse_config_path_and_rest, parse_config_path_and_rest_with_known_first_arg,
     parse_optional_u64_arg, parse_socket_peer_specs, parse_socket_topics, parse_vote_choice,
     prepare_local_epoch,
@@ -108,6 +109,9 @@ const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client wallet-recover [data-dir] [password] <24-word-mnemonic...>",
     "  pole-client wallet-address [data-dir]",
     "  pole-client wallet-set-reward-address [config-path] [data-dir] [password]",
+    "  pole-client submit-batch [config-path] [epoch-id]",
+    "  pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks]",
+    "  pole-client export-tx [config-path] [type] [epoch-id] [current-height] [challenge-window-blocks]",
 ];
 const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("init", init_cmd),
@@ -199,6 +203,9 @@ const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("wallet-recover", wallet_recover_cmd),
     ("wallet-address", wallet_address_cmd),
     ("wallet-set-reward-address", wallet_set_reward_address_cmd),
+    ("submit-batch", submit_batch_cmd),
+    ("submit-epoch", submit_epoch_cmd),
+    ("export-tx", export_tx_cmd),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,15 +246,14 @@ impl ClientProfile {
 }
 
 fn main() {
-    if let Err(err) = run() {
+    if let Err(err) = run(&env::args().collect::<Vec<_>>()) {
         eprintln!("pole-client error: {err}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args = env::args().collect::<Vec<_>>();
-    dispatch_command(&args, CLIENT_COMMANDS, print_usage)
+pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    dispatch_command(args, CLIENT_COMMANDS, print_usage)
 }
 
 fn init_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -3147,6 +3153,134 @@ fn settle_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("local_chain_store_path={}", artifact.local_chain_store_path);
     println!("prepared_epoch_path={}", artifact.prepared_epoch_path);
     println!("progress_next_epoch={}", progress.next_epoch_id);
+
+    Ok(())
+}
+
+fn submit_batch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let (config_path, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
+    if args.len() > start_index + 1 {
+        return Err("usage: pole-client submit-batch [config-path] [epoch-id]".into());
+    }
+
+    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let epoch_id = resolve_epoch_id_arg(args, start_index, &config)?;
+
+    let batches = load_batches_for_epoch(&config, epoch_id)?;
+    if batches.is_empty() {
+        return Err(format!("no batches found for epoch {}", epoch_id).into());
+    }
+
+    let collector_hex = hex_encode(&config.node_id()?);
+    let mut batch_count = 0;
+    for batch in &batches {
+        if batch.batch_commit.epoch_id == epoch_id {
+            let tx_json = chain_bridge::generate_tx_json_for_batch(&collector_hex, &batch.batch_commit)?;
+            println!("{}", tx_json);
+            batch_count += 1;
+        }
+    }
+
+    println!("PoLE client submit-batch");
+    println!("config_path={}", config_path.to_string_lossy());
+    println!("epoch_id={}", epoch_id);
+    println!("batch_count={}", batch_count);
+
+    Ok(())
+}
+
+fn submit_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let (config_path, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
+    if args.len() > start_index + 3 {
+        return Err(
+            "usage: pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks]"
+                .into(),
+        );
+    }
+
+    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let progress = LocalNodeProgress::load_or_default(progress_path(&config), &config)?;
+    let epoch_id = resolve_epoch_id_arg(args, start_index, &config)?;
+    let current_height = resolve_current_height_arg(args, start_index + 1, &progress)?;
+    let challenge_window_blocks =
+        resolve_challenge_window_blocks_arg(args, start_index + 2, &config)?;
+
+    let preparation = node_prepare::compute_local_epoch_preparation(
+        &config,
+        epoch_id,
+        current_height,
+        challenge_window_blocks,
+    )?;
+
+    let proposer_hex = hex_encode(&config.node_id()?);
+    let tx_json = chain_bridge::generate_tx_json_for_epoch_commit(
+        &proposer_hex,
+        &preparation.epoch_commit,
+    )?;
+
+    println!("PoLE client submit-epoch");
+    println!("config_path={}", config_path.to_string_lossy());
+    println!("epoch_id={}", epoch_id);
+    println!("tx_json={}", tx_json);
+
+    Ok(())
+}
+
+fn export_tx_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let (config_path, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
+    if args.len() > start_index + 4 {
+        return Err(
+            "usage: pole-client export-tx [config-path] [type] [epoch-id] [current-height] [challenge-window-blocks]\n  types: batch, epoch"
+                .into(),
+        );
+    }
+
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let progress = LocalNodeProgress::load_or_default(progress_path(&config), &config)?;
+    let tx_type = args
+        .get(start_index)
+        .ok_or("tx type required (batch|epoch)")?;
+    let epoch_id = resolve_epoch_id_arg(args, start_index + 1, &config)?;
+
+    match tx_type.as_str() {
+        "batch" => {
+            let batches = load_batches_for_epoch(&config, epoch_id)?;
+            let collector_hex = hex_encode(&config.node_id()?);
+            for batch in batches {
+                if batch.batch_commit.epoch_id == epoch_id {
+                    let tx_json = chain_bridge::generate_tx_json_for_batch(
+                        &collector_hex,
+                        &batch.batch_commit,
+                    )?;
+                    println!("{}", tx_json);
+                }
+            }
+        }
+        "epoch" => {
+            if args.len() < start_index + 4 {
+                return Err("epoch export requires current-height and challenge-window-blocks".into());
+            }
+            let current_height = resolve_current_height_arg(args, start_index + 2, &progress)?;
+            let challenge_window_blocks =
+                resolve_challenge_window_blocks_arg(args, start_index + 3, &config)?;
+
+            let preparation = node_prepare::compute_local_epoch_preparation(
+                &config,
+                epoch_id,
+                current_height,
+                challenge_window_blocks,
+            )?;
+            let proposer_hex = hex_encode(&config.node_id()?);
+            let tx_json = chain_bridge::generate_tx_json_for_epoch_commit(
+                &proposer_hex,
+                &preparation.epoch_commit,
+            )?;
+            println!("{}", tx_json);
+        }
+        _ => {
+            return Err("tx type must be 'batch' or 'epoch'".into());
+        }
+    }
 
     Ok(())
 }

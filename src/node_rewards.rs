@@ -1292,7 +1292,7 @@ mod tests {
         let data_dir =
             std::env::temp_dir().join(format!("pole-gov-app-weight-{}", std::process::id()));
         if data_dir.exists() {
-            std::fs::remove_dir_all(&data_dir).unwrap();
+            let _ = std::fs::remove_dir_all(&data_dir);
         }
 
         let config = NodeConfig {
@@ -1437,7 +1437,7 @@ mod tests {
 
         assert_eq!(game_coefficient_ppm_for_app(&config, 730), 850_000);
 
-        std::fs::remove_dir_all(&data_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     /// Fixture: one 1h-equivalent tick, single foreground game — `player_reward` is
@@ -1447,7 +1447,7 @@ mod tests {
         let data_dir =
             std::env::temp_dir().join(format!("pole-reward-fixture-{}", std::process::id()));
         if data_dir.exists() {
-            std::fs::remove_dir_all(&data_dir).unwrap();
+            let _ = std::fs::remove_dir_all(&data_dir);
         }
 
         let config = NodeConfig {
@@ -1547,7 +1547,7 @@ mod tests {
         assert_eq!(r.player_reward, expected_share);
         assert_eq!(out.artifact.total_player_reward, expected_share);
 
-        std::fs::remove_dir_all(&data_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     /// Twelve 5-minute slices must match one full reward block (Phase 4 traceability).
@@ -1556,7 +1556,7 @@ mod tests {
         let data_dir =
             std::env::temp_dir().join(format!("pole-reward-12tick-{}", std::process::id()));
         if data_dir.exists() {
-            std::fs::remove_dir_all(&data_dir).unwrap();
+            let _ = std::fs::remove_dir_all(&data_dir);
         }
 
         let config = NodeConfig {
@@ -1663,6 +1663,6 @@ mod tests {
         // Steam 样本每应用 1000 在线 ⇒ 全网权重是本地游玩权重的 1000 倍 ⇒ 份额约 1/1000。
         assert_eq!(last_comp.artifact.records[0].player_reward, 1);
 
-        std::fs::remove_dir_all(&data_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 }

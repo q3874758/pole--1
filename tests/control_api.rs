@@ -110,21 +110,22 @@ fn control_api_serves_dashboard_assets() {
     handle.join().unwrap();
 
     assert!(index.contains("PoLE 控制台"));
-    assert!(index.contains("概览"));
-    assert!(index.contains("更新"));
-    assert!(index.contains("安装根目录覆盖"));
-    assert!(index.contains("使用已安装布局策略"));
-    assert!(index.contains("安装前停止服务"));
-    assert!(index.contains("安装后启动服务"));
-    assert!(index.contains("回滚前停止服务"));
-    assert!(index.contains("回滚后启动服务"));
+    assert!(index.contains("节点仪表盘"));
+    assert!(index.contains("服务状态"));
+    assert!(index.contains("账户信息"));
+    assert!(index.contains("Epoch 进度"));
+    assert!(index.contains("代币经济"));
+    assert!(index.contains("存储信息"));
+    assert!(index.contains("P2P 网络"));
+    assert!(index.contains("运行时配置"));
+    assert!(index.contains("挑战活动"));
+    assert!(index.contains("更新状态"));
     assert!(css.contains(".shell"));
-    assert!(css.contains(".view-pane"));
+    assert!(css.contains(".dashboard-grid"));
     assert!(css.contains(".panel"));
     assert!(js.contains("refreshAll"));
-    assert!(js.contains("syncActiveView"));
-    assert!(js.contains("install_root_override"));
-    assert!(js.contains("/api/status"));
+    assert!(js.contains("renderDashboard"));
+    assert!(js.contains("/api/dashboard"));
 
     std::fs::remove_dir_all(&root).unwrap();
 }

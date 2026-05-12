@@ -176,10 +176,14 @@ const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
 ];
 
 fn main() {
-    if let Err(err) = run() {
+    if let Err(err) = run(&env::args().collect::<Vec<_>>()) {
         eprintln!("pole-node error: {err}");
         std::process::exit(1);
     }
+}
+
+pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    dispatch_command(args, NODE_COMMANDS, print_usage)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,11 +219,6 @@ struct RunOnceExecution {
 struct RunLoopExecution {
     summary: CollectLoopSummary,
     p2p_simulation: Option<P2pSimulationSummary>,
-}
-
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args = env::args().collect::<Vec<_>>();
-    dispatch_command(&args, NODE_COMMANDS, print_usage)
 }
 
 fn init_config_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

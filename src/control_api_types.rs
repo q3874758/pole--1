@@ -197,3 +197,106 @@ pub struct ServiceActionResponse {
     pub service_name: String,
     pub status: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageInfoView {
+    pub data_dir: String,
+    pub total_size_bytes: u64,
+    pub total_size_formatted: String,
+    pub batch_count: usize,
+    pub epoch_count: usize,
+    pub payload_count: usize,
+    pub prepared_epoch_count: usize,
+    pub settlement_count: usize,
+    pub log_files_count: usize,
+    pub db_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenomicsSummaryView {
+    pub total_supply: String,
+    pub annual_emission_rate_bps: u64,
+    pub current_year: u32,
+    pub emission_year: u32,
+    pub player_reward_budget_per_hour: String,
+    pub service_reward_budget_per_hour: String,
+    pub player_block_reward: String,
+    pub tail_emission_active: bool,
+    pub tail_emission_rate_bps: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkPeerView {
+    pub peer_id: String,
+    pub address: String,
+    pub topics: Vec<String>,
+    pub connected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct P2pNetworkView {
+    pub mode: String,
+    pub local_peer_id: String,
+    pub connected_peers: usize,
+    pub peers: Vec<NetworkPeerView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewardPoolView {
+    pub pool_name: String,
+    pub amount: String,
+    pub last_updated_epoch: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChallengeActivityView {
+    pub active_challenges: usize,
+    pub completed_challenges: usize,
+    pub failed_challenges: usize,
+    pub last_challenge_epoch: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DashboardView {
+    pub service: ServiceStatusView,
+    pub node: NodeHealthView,
+    pub storage: StorageInfoView,
+    pub tokenomics: TokenomicsSummaryView,
+    pub network: P2pNetworkView,
+    pub challenge_activity: ChallengeActivityView,
+    pub meta: AppMetaView,
+    pub config: ConfigView,
+    pub update_available: bool,
+    pub current_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiDashboardResponse {
+    pub dashboard: DashboardView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiStorageResponse {
+    pub storage: StorageInfoView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiTokenomicsResponse {
+    pub tokenomics: TokenomicsSummaryView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockchainStatusView {
+    pub online: bool,
+    pub block_height: u64,
+    pub block_hash: String,
+    pub chain_id: String,
+    pub http_online: bool,
+    pub grpc_online: bool,
+    pub block_time: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiBlockchainResponse {
+    pub blockchain: BlockchainStatusView,
+}

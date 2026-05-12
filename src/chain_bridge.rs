@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::primitives::{Amount, EpochId, Height, Hash32, NodeId};
-use crate::records::{AggregateRecord, BatchCommit, Challenge, ChallengeEvidenceRef, EpochCommit, ReplicaReceipt, RewardRecord};
+use crate::primitives::{Amount, EpochId, Height, NodeId};
+use crate::records::{AggregateRecord, BatchCommit, Challenge, EpochCommit, ReplicaReceipt, RewardRecord};
 use crate::node_pipeline::AssembledBatch;
 use crate::node_settlement::EpochSettlementArtifact;
 use crate::node_rewards::EpochRewardArtifact;
-use crate::node_aggregator::EpochAggregationArtifact;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CosmosBridgeConfig {
@@ -576,7 +575,8 @@ pub fn export_replica_receipt_for_cosmos(receipt: &ReplicaReceipt, output_dir: &
     let file_name = format!("receipt-{:06}-{}-tx.json", receipt.epoch_id, receipt.payload_cid);
     let output_path = output_dir.join(&file_name);
 
-    std::fs::write(&output_path, serde_json::to_string_pretty(&cosmos_json).unwrap())?;
+    let output_json = serde_json::to_string_pretty(&cosmos_json).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize cosmos output: {e}")))?;
+    std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -598,7 +598,8 @@ pub fn export_reward_records_for_cosmos(records: &[RewardRecord], output_dir: &P
         "records": cosmos_records,
     });
 
-    std::fs::write(&output_path, serde_json::to_string_pretty(&wrapper).unwrap())?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    std::fs::write(&output_path, output_json)?;
 
     Ok(RewardRecordsOutput {
         json_path: output_path.to_string_lossy().to_string(),
@@ -621,7 +622,8 @@ pub fn export_aggregate_records_for_cosmos(records: &[AggregateRecord], output_d
         "records": cosmos_records,
     });
 
-    std::fs::write(&output_path, serde_json::to_string_pretty(&wrapper).unwrap())?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -665,7 +667,7 @@ pub fn create_cosmos_signed_tx_json(
     })
 }
 
-pub fn generate_submit_batch_tx(collector_id: &NodeId, batch: &BatchCommit, output_dir: &Path) -> Result<BatchCommitOutput, std::io::Error> {
+pub fn generate_submit_batch_tx(_collector_id: &NodeId, batch: &BatchCommit, output_dir: &Path) -> Result<BatchCommitOutput, std::io::Error> {
     export_batch_for_cosmos_submit(&AssembledBatch {
         batch_commit: batch.clone(),
         payload_hash: [0u8; 32],
@@ -675,7 +677,7 @@ pub fn generate_submit_batch_tx(collector_id: &NodeId, batch: &BatchCommit, outp
     }, output_dir)
 }
 
-pub fn generate_commit_epoch_tx(proposer_id: &NodeId, commit: &EpochCommit, output_dir: &Path) -> Result<EpochCommitOutput, std::io::Error> {
+pub fn generate_commit_epoch_tx(_proposer_id: &NodeId, commit: &EpochCommit, output_dir: &Path) -> Result<EpochCommitOutput, std::io::Error> {
     export_epoch_commit_for_cosmos(commit, output_dir)
 }
 
@@ -707,7 +709,8 @@ pub fn generate_open_challenge_tx(challenger_id: &NodeId, challenge: &Challenge,
     let file_name = format!("open-challenge-{}.json", hex_encode(&challenge.challenge_id));
     let output_path = output_dir.join(&file_name);
 
-    std::fs::write(&output_path, serde_json::to_string_pretty(&wrapper).unwrap())?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }

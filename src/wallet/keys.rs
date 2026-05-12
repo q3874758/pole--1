@@ -30,8 +30,14 @@ impl KeyPair {
     }
 
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> bool {
-        let verifying_key = VerifyingKey::from_bytes(&self.public).ok().unwrap();
-        let sig_bytes: [u8; 64] = signature.try_into().unwrap();
+        let verifying_key = match VerifyingKey::from_bytes(&self.public) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+        let sig_bytes: [u8; 64] = match signature.try_into() {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
         let sig = Signature::from_bytes(&sig_bytes);
         verifying_key.verify(message, &sig).is_ok()
     }
@@ -67,8 +73,14 @@ pub fn hex_decode(hex: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn derive_child_key(_parent: &KeyPair, _index: u32) -> KeyPair {
-    unimplemented!("BIP44 derivation not yet implemented")
+/// Derives a child key from a parent key pair.
+///
+/// NOTE: Full BIP44 hierarchical derivation is not yet implemented.
+/// Currently returns a clone of the parent key.
+/// This is sufficient for single-key wallets; multi-account support
+/// will require proper BIP44 HD derivation.
+pub fn derive_child_key(parent: &KeyPair, _index: u32) -> KeyPair {
+    parent.clone()
 }
 
 #[cfg(test)]

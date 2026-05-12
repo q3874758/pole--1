@@ -53,11 +53,11 @@ impl EncryptedKeystore {
     }
 
     fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32]> {
-        let params = scrypt::Params::new(14, 8, 1, 32).map_err(|e| WalletError::Argon2Error(e.to_string()))?;
+        let params = scrypt::Params::new(14, 8, 1, 32).map_err(|e| WalletError::KdfError(e.to_string()))?;
         let mut key = [0u8; 32];
         let res = scrypt::scrypt(password.as_bytes(), salt, &params, &mut key);
         if res.is_err() {
-            return Err(WalletError::Argon2Error(format!("scrypt error")));
+            return Err(WalletError::KdfError(format!("scrypt error")));
         }
         Ok(key)
     }
@@ -83,7 +83,7 @@ impl EncryptedKeystore {
             address: self.keypair.address_hex(),
             crypto: CryptoJson {
                 cipher: "aes-256-gcm".to_string(),
-                kdf: "argon2".to_string(),
+                kdf: "scrypt".to_string(),
                 salt: hex_encode(salt.as_slice()),
                 nonce: hex_encode(&nonce_arr),
                 ciphertext: hex_encode(&ciphertext),
