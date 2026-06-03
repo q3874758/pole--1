@@ -2,8 +2,25 @@
 name = "pole"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 publish = false
 description = "PoLE V1 player-first hourly reward client and node runtime"
+license = "MIT OR Apache-2.0"
+authors = ["PoLE Project Contributors"]
+homepage = "https://github.com/q3874758/pole--1"
+repository = "https://github.com/q3874758/pole--1"
+readme = "README.md"
+keywords = ["blockchain", "cosmos", "gaming", "proof-of-engagement", "validator"]
+categories = ["cryptography", "network-programming", "game-development"]
+exclude = [
+    "/chain/poled.exe",
+    "/chain/.tmp-poled-home/**",
+    "/dist/**",
+    "/target/**",
+    "/pole-node-data/**",
+    "*.log",
+    "*.pid",
+]
 
 [lib]
 name = "pole_protocol_draft"
@@ -11,11 +28,16 @@ path = "src/lib.rs"
 
 [dependencies]
 borsh = { version = "1.5", features = ["derive"] }
+cosmos-sdk-proto = { version = "0.20", default-features = false }
 ed25519-dalek = "2"
 aes-gcm = "0.10"
 argon2 = "0.5"
+base64 = "0.21"
+bech32 = "0.9"
+hex = "0.4"
 rand = "0.8"
 scrypt = "0.11"
+sha2 = "0.10"
 thiserror = "1"
 tao = { version = "0.31", optional = true }
 tray-icon = { version = "0.22", optional = true }
@@ -28,10 +50,14 @@ libp2p = { version = "0.56.0", default-features = false, features = ["ed25519", 
 libp2p-identity = { version = "0.2.13", features = ["ed25519", "peerid"], optional = true }
 multiaddr = { version = "0.18.2", optional = true }
 prost = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.51.0", features = ["rt-multi-thread"], optional = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+jsonschema = { version = "0.46.5", default-features = false }
+cargo_metadata = { version = "0.23.1", default-features = false }
 
 [features]
 default = ["real-libp2p"]
@@ -43,6 +69,10 @@ core2 = { path = "vendor/core2" }
 
 [build-dependencies]
 winres = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.51.0", features = ["rt-multi-thread", "time", "macros"] }
 
 [[bin]]
 name = "pole-client"
@@ -60,3 +90,11 @@ required-features = ["gui"]
 [[bin]]
 name = "pole"
 path = "src/bin/pole.rs"
+
+[[bin]]
+name = "pole-genesis"
+path = "src/bin/pole-genesis.rs"
+
+[[bin]]
+name = "pole-sbom"
+path = "src/bin/pole-sbom.rs"
