@@ -109,7 +109,11 @@ paths=(
 
 echo "==> Paths to remove from history"
 for ((i = 0; i < ${#paths[@]}; i += 2)); do
-  printf "    %s %s\n" "${paths[$i]}" "${paths[$((i+1))]}"
+  if [[ $((i + 1)) -lt ${#paths[@]} ]]; then
+    printf "    %s %s\n" "${paths[$i]}" "${paths[$((i+1))]}"
+  else
+    printf "    %s\n" "${paths[$i]}"
+  fi
 done
 
 # Dry-run: actually run the rewrite in-place in a scratch clone so the
