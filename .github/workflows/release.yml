@@ -126,6 +126,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Required for `cosign sign-blob` keyless signing
+      # (OIDC token from GitHub Actions).
+      id-token: write
+      # Required for `cosign sign-blob` to write the signing
+      # certificate back into the GitHub Actions cache (used to
+      # verify against Rekor).
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -143,6 +150,55 @@ jobs:
           cp artifacts/linux-artifacts/*.sha256 dist/release/
           cp artifacts/windows-artifacts/*.sha256 dist/release/
 
+      - name: Build pole-sbom
+        run: cargo build --release --bin pole-sbom
+
+      - name: Emit CycloneDX SBOM
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --format cyclonedx \
+            --out dist/release/sbom.cyclonedx.json
+
+      - name: Emit SPDX SBOM
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --format spdx \
+            --out dist/release/sbom.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOMs with cosign (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          for sbom in dist/release/sbom.cyclonedx.json dist/release/sbom.spdx.json; do
+            echo "==> Signing $sbom"
+            cosign sign-blob \
+              --output-signature "${sbom}.sig" \
+              --output-certificate "${sbom}.pem" \
+              --yes \
+              "$sbom"
+          done
+
+      - name: Verify signatures
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          for sbom in dist/release/sbom.cyclonedx.json dist/release/sbom.spdx.json; do
+            echo "==> Verifying $sbom"
+            cosign verify-blob \
+              --signature "${sbom}.sig" \
+              --certificate "${sbom}.pem" \
+              --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$sbom"
+          done
+
       - name: Generate release notes
         run: |
           cat > dist/release/RELEASE_NOTES.md << 'EOF'
@@ -152,6 +208,23 @@ jobs:
           - **Windows MSI**: `PoLE-${VERSION}-x64.msi` - Full installer with shortcuts
           - **Windows Portable**: `PoLE-${VERSION}-x64-portable.zip` - No installation required
           - **Linux DEB**: `pole-node_${VERSION}_amd64.deb` - For Debian/Ubuntu systems
+
+          ## Software Bill of Materials (SBOM)
+          - `sbom.cyclonedx.json` — CycloneDX 1.5, signed with [cosign](https://docs.sigstore.dev/)
+          - `sbom.spdx.json` — SPDX 2.3, signed with cosign
+          - Each `.sig` / `.pem` pair proves the SBOM was produced by
+            this repository's CI at tag `${VERSION}`.
+
+          ## Verifying SBOM signatures
+          ```bash
+          # Requires cosign >= 2.0
+          cosign verify-blob \
+            --signature sbom.cyclonedx.json.sig \
+            --certificate sbom.cyclonedx.json.pem \
+            --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            sbom.cyclonedx.json
+          ```
 
           ## What's New
           - Full PoLE protocol implementation with hour-based reward blocks
@@ -181,6 +254,7 @@ jobs:
 
           ## Verification
           Checksums are provided in `.sha256` files alongside each artifact.
+          SBOM signatures are provided as `.sig` / `.pem` pairs.
           EOF
 
       - name: Create GitHub Release

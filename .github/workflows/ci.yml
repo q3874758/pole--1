@@ -36,3 +36,86 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  license:
+    name: license gate
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build pole-sbom
+        run: cargo build --release --bin pole-sbom
+
+      - name: Run license gate (deny GPL / AGPL / SSPL)
+        # pole-sbom exits 2 on denial, 0 on clean.
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --deny-licenses GPL-1.0-only,GPL-2.0-only,GPL-3.0-only,AGPL-1.0-only,AGPL-3.0-only,SSPL-1.0
+
+      - name: Warn on copyleft (MPL / BSL)
+        if: always()
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --warn-licenses MPL-2.0,BSL-1.0 || true
+
+      - name: cargo-deny (advisories + licenses + bans + sources)
+        # Fails the job on advisory, license, banned, or
+        # unknown-source violations per `deny.toml`.
+        run: |
+          cargo install --locked cargo-deny --root ~/.cargo-deny
+          ~/.cargo-deny/bin/cargo-deny check advisories licenses bans sources
+        continue-on-error: false
+
+  sbom:
+    name: emit sbom
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build pole-sbom
+        run: cargo build --release --bin pole-sbom
+
+      - name: Emit CycloneDX SBOM
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --format cyclonedx \
+            --out sbom.cyclonedx.json
+
+      - name: Emit SPDX SBOM
+        run: |
+          ./target/release/pole-sbom \
+            --manifest-path Cargo.toml \
+            --format spdx \
+            --out sbom.spdx.json
+
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.cyclonedx.json
+            sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 30

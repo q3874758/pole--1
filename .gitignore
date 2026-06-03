@@ -1,15 +1,98 @@
+# Build output
 /target/
-/pole-node-data/
+**/target/
 
+# Runtime data
+/pole-node-data/
+**/pole-node-data/
+
+# Logs and pids
 *.log
 *.pid
+*.pid.lock
 
-# Large binaries - use GitHub Releases or LFS
+# ----------------------------------------------------------------------------
+# Go chain (chain/) — built by `cd chain && go build ./cmd/poled`
+# ----------------------------------------------------------------------------
+# Compiled binary (162 MB on Windows). Use GitHub Releases, not LFS.
+chain/poled
 chain/poled.exe
-tools/wix314-binaries.zip
-dist/click-to-run/pole-client.exe
+chain/poled.dSYM/
+# Go build cache & dist
+chain/build/
+chain/dist/
+# Runtime tempdir that poled creates on startup. Holds
+# `data/application.db/`, `config/genesis.json`, etc.
+chain/.tmp-poled-home/
+**/.tmp-poled-home/
 
-dist/click-to-run/poled.exe
-# Binaries (use GitHub Releases)
+# ----------------------------------------------------------------------------
+# Bundled toolchains (extracted once, then ignored)
+# ----------------------------------------------------------------------------
+tools/wix/
+tools/wix314-binaries.zip
+tools/wix.zip
+tools/wix*.zip
+
+# ----------------------------------------------------------------------------
+# Distribution / packaging output
+# ----------------------------------------------------------------------------
+dist/click-to-run/
+dist/packages/
+**/dist/
+
+# ----------------------------------------------------------------------------
+# Binaries in general — keep them out of the source tree
+# ----------------------------------------------------------------------------
 *.exe
 *.zip
+*.tar.gz
+*.tgz
+*.dmg
+*.msi
+*.deb
+*.rpm
+*.appimage
+*.snap
+*.pdb
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+
+# ----------------------------------------------------------------------------
+# IDE / editor
+# ----------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.bundle/
+*.sublime-project
+*.sublime-workspace
+
+# ----------------------------------------------------------------------------
+# OS files
+# ----------------------------------------------------------------------------
+*.tmp
+*.bak
+*.orig
+*.rej
+*.sw?
+
+# ----------------------------------------------------------------------------
+# Secrets — never commit
+# ----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
