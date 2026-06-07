@@ -58,10 +58,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 jsonschema = { version = "0.46.5", default-features = false }
 cargo_metadata = { version = "0.23.1", default-features = false }
+sha3 = "0.10"
 
 [features]
 default = ["real-libp2p"]
 real-libp2p = ["dep:libp2p", "dep:libp2p-identity", "dep:multiaddr", "dep:tokio"]
+# `integration` is referenced by `tests/harness/mod.rs::HARNESS_FEATURE` and
+# gates real-`poled` bring-up tests. It is intentionally empty (no extra deps)
+# because the gated tests only depend on a built `poled` binary on $PATH.
+integration = []
 gui = ["dep:tao", "dep:tray-icon", "dep:winrt-notification", "dep:wry"]
 
 [patch.crates-io]
