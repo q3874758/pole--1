@@ -12,6 +12,7 @@
 //! [`crate::wallet::KeyPair`], builds a [`TxBuilder`], looks up the
 //! account, signs, and broadcasts.
 pub mod address;
+pub mod eip712;
 pub mod error;
 pub mod pole_msgs;
 pub mod proto;
@@ -23,6 +24,7 @@ pub mod tx_signer;
 use std::time::Duration;
 
 pub use address::{bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX, POLE_BECH32_PREFIX};
+pub use eip712::{eip712_sign, hash_struct, keccak256, typed_data_hash, DomainSeparator};
 pub use error::{CosmosError, Result};
 pub use query_client::{AccountInfo, RestClient};
 pub use rpc_client::{AbciQueryResponseInner, BroadcastOptions, BroadcastTxResponse, StatusResponse, TendermintRpc};

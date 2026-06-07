@@ -105,3 +105,30 @@ changing protocol behaviour. Every change is backward compatible.
 - `pole` itself now declares `MIT OR Apache-2.0` in
   `Cargo.toml`; the warning from the previous run is therefore
   resolved.
+
+### Added — Phase 0.3: EIP-712 typed-data signing helper
+
+- `src/cosmos/eip712.rs` — spec-compliant EIP-712 primitives
+  (`DomainSeparator`, `hash_struct`, `typed_data_hash`,
+  `encode_uint256`/`encode_string`/`encode_bytes32`/`encode_address`).
+  Wraps `sha3::Keccak256` (pre-NIST variant — the EIP-712 spec
+  uses the original Keccak padding, not the 2015 SHA3-256
+  padding). The `eip712_sign` helper is curve-agnostic: it
+  accepts any closure that signs the 32-byte digest, so the
+  chain can stay on Ed25519 today and swap in secp256k1
+  without touching the helper.
+- `src/cosmos/mod.rs` — re-exports `keccak256`, `DomainSeparator`,
+  `hash_struct`, `typed_data_hash`, `eip712_sign`.
+- `chain/x/pole/types/eip712.go` — Go mirror of the Rust helper
+  using `golang.org/x/crypto/sha3.NewLegacyKeccak256`. The two
+  sides are pinned together by the shared EIP-712 spec test
+  vector (Mail to CEO): Rust and Go produce byte-identical
+  digests for the same input.
+- `chain/x/pole/types/eip712_test.go` — 9 tests covering the
+  Mail to CEO reference vector, salt-presence domain separator
+  distinction, encoding helpers, and the `EIP712Sign` glue
+  function.
+- `chain/docs/adr/0003-eip712-keccak-variant.md` — ADR for the
+  Keccak-256 vs SHA3-256 decision (pre-NIST Keccak is required
+  by EIP-712; using the SHA3-256 constructor would silently
+  produce digests the chain would reject).
