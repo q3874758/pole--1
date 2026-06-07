@@ -22,12 +22,20 @@ pub mod tx_signer;
 
 use std::time::Duration;
 
-pub use address::{bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX};
+pub use address::{bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX, POLE_BECH32_PREFIX};
 pub use error::{CosmosError, Result};
 pub use query_client::{AccountInfo, RestClient};
 pub use rpc_client::{AbciQueryResponseInner, BroadcastOptions, BroadcastTxResponse, StatusResponse, TendermintRpc};
 pub use tx_builder::{BridgeMessage, FeeConfig, TxBuilder};
 pub use tx_signer::{sign_with_keypair, SignDocInputs, SignedTx};
+
+/// Cargo feature name that gates real-`poled` integration tests in
+/// `tests/harness/mod.rs` and `tests/integration.rs`. Pinning this
+/// constant at the lib root lets `tests/harness_feature_consistency.rs`
+/// cross-check that the `Cargo.toml` `[features]` entry actually
+/// declares the same name. Phase 0.1 closed a latent bug where the
+/// constant existed but the feature was not declared.
+pub const HARNESS_FEATURE_NAME_FOR_TEST: &str = "integration";
 
 use crate::wallet::KeyPair;
 
@@ -53,6 +61,15 @@ impl CosmosEndpoint {
             chain_id: chain_id.into(),
             address_prefix: DEFAULT_BECH32_PREFIX.to_string(),
         }
+    }
+
+    /// Override the bech32 address prefix. Defaults to
+    /// [`DEFAULT_BECH32_PREFIX`] (matches the chain's current
+    /// `"cosmos"` codec); pass [`POLE_BECH32_PREFIX`] when the chain
+    /// is migrated to the forward-looking `pole1...` addresses.
+    pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.address_prefix = prefix.into();
+        self
     }
 }
 
@@ -83,6 +100,12 @@ impl CosmosClient {
         let rpc = TendermintRpc::with_client(endpoint.rpc_url.clone(), rpc_client);
         let rest = RestClient::with_client(endpoint.rest_url.clone(), rest_client);
         Ok(Self { endpoint, rpc, rest })
+    }
+
+    /// Construct a client with a non-default bech32 prefix.
+    /// Convenience wrapper around [`CosmosEndpoint::with_prefix`].
+    pub fn with_prefix(endpoint: CosmosEndpoint, prefix: impl Into<String>) -> Result<Self> {
+        Self::new(endpoint.with_prefix(prefix))
     }
 
     /// Look up the on-chain `account_number`/`sequence` for `address`.

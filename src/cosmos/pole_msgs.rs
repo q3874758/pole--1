@@ -11,9 +11,41 @@
 //!
 //! We provide encoders for the messages used by the bridge skeleton's
 //! happy path. Adding a new message is a matter of writing one more
-//! `encode_msg_xxx` function that lays out its fields.
+//! `encode_msg_xxx` function that lays out its fields. The
+//! [`MessageEncoder`] trait (added in Phase 0.2) is the forward-compatible
+//! hook for plugging in new message types without touching the
+//! `BridgeMessage` enum — used heavily by later phases (session keys,
+//! withdrawals, threshold envelopes, PNT-20).
+//!
+//! Note on `OpenChallenge`: proto field 2 is a nested `Challenge`
+//! message, not a `uint64`, so the older `encode_msg_open_challenge`
+//! stub here writes bytes the chain would misinterpret. It is marked
+//! `#[allow(dead_code)]`; the live `BridgeMessage::OpenChallenge` arm
+//! in [`BridgeMessage::to_any`] emits a typed `Any` with empty value
+//! so the chain rejects the tx deterministically (the `Unsupported` path
+//! is reserved for type-URL fallback only).
 
 use crate::cosmos::proto::Any;
+
+/// Forward-compatible hook for plugging new message types into the
+/// bridge without modifying the `BridgeMessage` enum.
+///
+/// Implementations emit a fully-formed protobuf [`Any`] — the
+/// `type_url` selects the chain-side `MsgServer` handler, and `value`
+/// is the proto3 wire-format byte string.
+///
+/// Phase 0.2 introduces this trait; later phases add `impl
+/// MessageEncoder for` new structs (e.g. `MsgFinalizeEpochV2`,
+/// `MsgDelegateSessionKey`, `MsgBeginWithdraw`, ...). The
+/// `BridgeMessage` enum remains the default for callers that prefer
+/// the single-dispatch path.
+pub trait MessageEncoder {
+    /// The chain-side handler route, e.g. `"/pole.chain.pole.v1.MsgFinalizeEpoch"`.
+    fn type_url(&self) -> &'static str;
+    /// The proto3-encoded message bytes. Must be a well-formed
+    /// `google.protobuf.Any.value` payload.
+    fn encode(&self) -> Vec<u8>;
+}
 
 /// `MsgFinalizeEpoch` — the simplest message in the suite.
 ///   pole.chain.pole.v1.MsgFinalizeEpoch {
@@ -43,13 +75,23 @@ pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_be
 }
 
 /// `MsgOpenChallenge` — referenced by the integration harness for the
-/// challenge path. Kept minimal: only `challenger` + `epoch_id` for
-/// now; the real proto also includes a `Challenge` payload that we'd
-/// add by hand once the rest of the suite is in.
+/// challenge path. **Stub only:** proto field 2 is a nested `Challenge`
+/// message, not a `uint64`, so this encoder would write bytes the
+/// chain would misinterpret. The live `BridgeMessage::OpenChallenge`
+/// path in [`crate::cosmos::BridgeMessage::to_any`] emits a typed
+/// `Any` with empty value, which the chain will reject
+/// deterministically. Kept here (marked `#[allow(dead_code)]`) for
+/// proto-shape reference until the `Challenge` message type is wired
+/// in a later phase.
+#[allow(dead_code)]
 pub fn encode_msg_open_challenge(challenger_bech32: &str, epoch_id: u64) -> Any {
     let mut buf = Vec::with_capacity(challenger_bech32.len() + 16);
     encode_string(1, challenger_bech32, &mut buf);
-    encode_uint64(2, epoch_id, &mut buf);
+    // DO NOT add a `encode_uint64(2, epoch_id, ...)` call here — proto
+    // field 2 is a nested `Challenge` message, not a uint64. This is
+    // intentional dead-store to keep the type_url reference and the
+    // wire-format helpers exercised.
+    let _ = epoch_id;
     Any {
         type_url: "/pole.chain.pole.v1.MsgOpenChallenge".to_string(),
         value: buf,
@@ -126,8 +168,7 @@ mod tests {
         assert_eq!(
             any.value,
             vec![
-                0x0A, 0x0A, b'c', b'o', b's', b'm', b'o', b's', b'1', b'a', b'b', b'c',
-                0x10, 0x2A,
+                0x0A, 0x0A, b'c', b'o', b's', b'm', b'o', b's', b'1', b'a', b'b', b'c', 0x10, 0x2A,
             ]
         );
     }
@@ -139,5 +180,49 @@ mod tests {
         assert!(!any.value.is_empty());
         // Last byte should mark the end of the empty string field
         assert_eq!(any.value.last(), Some(&0x00));
+    }
+
+    /// Phase 0.2: the trait is the forward-compatible hook for
+    /// plugging in new message types without touching `BridgeMessage`.
+    /// This test demonstrates a minimal impl.
+    #[test]
+    fn message_encoder_trait_is_implementable() {
+        struct Hello {
+            who: String,
+        }
+        impl MessageEncoder for Hello {
+            fn type_url(&self) -> &'static str {
+                "/pole.test.v1.MsgHello"
+            }
+            fn encode(&self) -> Vec<u8> {
+                let mut buf = Vec::new();
+                encode_string(1, &self.who, &mut buf);
+                buf
+            }
+        }
+        let h = Hello {
+            who: "world".into(),
+        };
+        assert_eq!(h.type_url(), "/pole.test.v1.MsgHello");
+        // Field 1 string: tag=0x0A, length=5, "world"
+        assert_eq!(h.encode(), vec![0x0A, 0x05, b'w', b'o', b'r', b'l', b'd']);
+    }
+
+    /// Phase 0.2: the `encode_msg_open_challenge` stub must be marked
+    /// dead-code and produce a known-shape output that callers can
+    /// reason about (it is no longer wired into the live
+    /// `BridgeMessage::OpenChallenge` arm, which emits its own
+    /// type_url-only stub from `tx_builder::BridgeMessage::to_any`).
+    #[test]
+    fn open_challenge_stub_emits_challenger_only() {
+        let any = encode_msg_open_challenge("cosmos1abc", 99);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgOpenChallenge");
+        // Field 1 string: tag=0x0A, length=10, "cosmos1abc". Field 2
+        // is intentionally NOT written (proto field 2 is a nested
+        // `Challenge` message, not a uint64).
+        assert_eq!(
+            any.value,
+            vec![0x0A, 0x0A, b'c', b'o', b's', b'm', b'o', b's', b'1', b'a', b'b', b'c']
+        );
     }
 }

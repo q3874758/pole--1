@@ -4,9 +4,19 @@ use serde::{Deserialize, Serialize};
 use crate::cosmos::error::{CosmosError, Result};
 use crate::primitives::{Address, NodeId};
 
-/// Default bech32 prefix for Cosmos mainnet / testnet accounts.
-/// Override via `CosmosClient::with_prefix` for `pole1...` style chains.
+/// Default bech32 prefix for the bridge. Matches the chain's
+/// `addresscodec.NewBech32Codec("cosmos")` call in `chain/app/app.go:112`,
+/// so dev chains boot without a prefix override. The chain-side rename
+/// to `pole` (when the cosmos-sdk bech32 codec is also flipped) will
+/// switch this constant in lockstep with `chain/app/app.go`.
 pub const DEFAULT_BECH32_PREFIX: &str = "cosmos";
+
+/// Forward-looking bech32 prefix for the PoLE mainnet. **Not yet
+/// active** — the chain's `app.go` still uses `"cosmos"`. Kept here so
+/// the Rust client is ready when the chain is renamed. Use
+/// [`CosmosClient::with_prefix`](crate::cosmos::CosmosClient::with_prefix)
+/// to opt in early.
+pub const POLE_BECH32_PREFIX: &str = "pole";
 
 /// Wire format for the 20-byte account address derived from a 32-byte hash.
 pub const ACCOUNT_ADDRESS_LEN: usize = 20;
@@ -24,7 +34,10 @@ pub struct CosmosAddress {
 impl CosmosAddress {
     pub fn prefix(&self) -> &str {
         // safe: bech32 strings are ASCII and always contain a `1`
-        self.bech32.split('1').next().unwrap_or(DEFAULT_BECH32_PREFIX)
+        self.bech32
+            .split('1')
+            .next()
+            .unwrap_or(DEFAULT_BECH32_PREFIX)
     }
 }
 
@@ -48,13 +61,18 @@ impl TryFrom<String> for CosmosAddress {
 }
 
 impl Serialize for CosmosAddress {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.bech32)
     }
 }
 
 impl<'de> Deserialize<'de> for CosmosAddress {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         CosmosAddress::try_from(s).map_err(serde::de::Error::custom)
     }
@@ -157,5 +175,29 @@ mod tests {
         let bech = hex_to_bech32("cosmos", &hex).unwrap();
         let err = decode_bech32("osmo", &bech).unwrap_err();
         assert!(matches!(err, CosmosError::Bech32PrefixMismatch { .. }));
+    }
+
+    /// Phase 0.2: `POLE_BECH32_PREFIX` is the forward-looking prefix
+    /// for when the chain's bech32 codec is renamed. The round-trip
+    /// must work identically to the current default.
+    #[test]
+    fn pole_prefix_roundtrips_like_default() {
+        let hex = "0123456789abcdef0123456789abcdef01234567";
+        let bech = hex_to_bech32(POLE_BECH32_PREFIX, hex).unwrap();
+        assert!(bech.starts_with("pole1"), "got: {bech}");
+        let back = bech32_to_hex(&bech).unwrap();
+        assert_eq!(hex, back);
+    }
+
+    /// Phase 0.2: `CosmosAddress::prefix()` returns the prefix
+    /// embedded in the bech32 string. Phase 0.2 keeps the existing
+    /// fall-back to `DEFAULT_BECH32_PREFIX` when no `1` separator
+    /// is present.
+    #[test]
+    fn cosmos_address_prefix_returns_embedded_segment() {
+        let hex = "00".repeat(20);
+        let bech = hex_to_bech32("pole", &hex).unwrap();
+        let addr = CosmosAddress::try_from(bech).unwrap();
+        assert_eq!(addr.prefix(), "pole");
     }
 }

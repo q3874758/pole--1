@@ -7,9 +7,7 @@ use crate::primitives::EpochId;
 use crate::wallet::KeyPair;
 
 pub use crate::cosmos::proto::Any;
-use crate::cosmos::proto::{
-    mode_info, AuthInfo, Coin, Fee, ModeInfo, SignDoc, SignerInfo, TxBody,
-};
+use crate::cosmos::proto::{mode_info, AuthInfo, Coin, Fee, ModeInfo, SignDoc, SignerInfo, TxBody};
 
 /// Cosmos gas configuration. Real values come from `fee_params` in
 /// `genesis.json`; the defaults here are conservative for a local node.
@@ -72,10 +70,7 @@ pub enum BridgeMessage {
     /// Catch-all for messages we haven't hand-rolled yet. The chain
     /// will reject the broadcast, but the type keeps the API stable
     /// for callers that want to compile against the full surface.
-    Unsupported {
-        type_url: String,
-        note: String,
-    },
+    Unsupported { type_url: String, note: String },
 }
 
 impl BridgeMessage {
@@ -83,9 +78,10 @@ impl BridgeMessage {
     /// `type_url` and proto-encoded `value` bytes.
     pub fn to_any(&self) -> Any {
         match self {
-            BridgeMessage::FinalizeEpoch { finalizer, epoch_id } => {
-                crate::cosmos::pole_msgs::encode_msg_finalize_epoch(&finalizer.bech32, *epoch_id)
-            }
+            BridgeMessage::FinalizeEpoch {
+                finalizer,
+                epoch_id,
+            } => crate::cosmos::pole_msgs::encode_msg_finalize_epoch(&finalizer.bech32, *epoch_id),
             BridgeMessage::ClaimReward {
                 claimer,
                 epoch_id,
@@ -95,10 +91,19 @@ impl BridgeMessage {
                 *epoch_id,
                 &recipient.bech32,
             ),
-            BridgeMessage::OpenChallenge {
-                challenger,
-                epoch_id,
-            } => crate::cosmos::pole_msgs::encode_msg_open_challenge(&challenger.bech32, *epoch_id),
+            BridgeMessage::OpenChallenge { .. } => {
+                // Proto field 2 is a nested `Challenge` message, not a
+                // `uint64` — `encode_msg_open_challenge` would write
+                // bytes the chain would misinterpret. Emit a typed
+                // `Any` with the correct type_url and an empty value
+                // so the chain rejects the tx deterministically. The
+                // full payload will land when the `Challenge` type is
+                // wired in a later phase.
+                Any {
+                    type_url: "/pole.chain.pole.v1.MsgOpenChallenge".to_string(),
+                    value: vec![],
+                }
+            }
             BridgeMessage::Unsupported { type_url, note } => Any {
                 type_url: type_url.clone(),
                 value: note.as_bytes().to_vec(),
@@ -176,12 +181,33 @@ impl<'a> TxBuilder<'a> {
     }
 
     /// Sign a message and return the broadcast-ready `SignedTx`.
+    ///
+    /// `signer` is verified against the public key: the bech32
+    /// encoding of `keypair.public`'s first 20 bytes (using the
+    /// chain's bech32 prefix) must match `signer.bech32`. This is a
+    /// cheap pre-broadcast check that catches key/address mismatches
+    /// before the chain rejects the tx with code 5 (invalid signer).
     pub fn build(
         &self,
         msg: &BridgeMessage,
-        _signer: &CosmosAddress,
+        signer: &CosmosAddress,
         keypair: &KeyPair,
     ) -> Result<SignedTx> {
+        // Derive the bech32 the chain expects from the public key and
+        // compare against the caller-supplied signer. The 32-byte
+        // `keypair.public` is reduced to a 20-byte account id (the
+        // first 20 bytes — matches `address::address_to_bech32`).
+        let expected = crate::cosmos::address::encode_bech32(
+            signer.prefix(),
+            &keypair.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+        )?;
+        if expected != signer.bech32 {
+            return Err(CosmosError::Encode(format!(
+                "signer mismatch: keypair derives '{expected}', caller passed '{}'",
+                signer.bech32
+            )));
+        }
+
         let body = self.build_body(msg)?;
         let auth_info = self.build_auth_info(&keypair.public)?;
 
@@ -201,11 +227,7 @@ impl<'a> TxBuilder<'a> {
 
     /// Build a `SignDoc` for the message. Exposed for tests that want
     /// to assert on the signing bytes without going through signing.
-    pub fn build_sign_doc(
-        &self,
-        msg: &BridgeMessage,
-        signer_pubkey: &[u8; 32],
-    ) -> Result<SignDoc> {
+    pub fn build_sign_doc(&self, msg: &BridgeMessage, signer_pubkey: &[u8; 32]) -> Result<SignDoc> {
         let body = self.build_body(msg)?;
         let auth_info = self.build_auth_info(signer_pubkey)?;
         Ok(SignDoc {
@@ -239,13 +261,17 @@ fn pubkey_pubkey_to_proto_bytes(pubkey: &[u8; 32]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cosmos::address::DEFAULT_BECH32_PREFIX;
     use crate::cosmos::proto::{Message, TxRaw};
 
     fn test_address(byte: u8) -> CosmosAddress {
         let mut account = vec![0u8; 20];
         account[19] = byte;
         let bech = crate::cosmos::address::encode_bech32("cosmos", &account).unwrap();
-        CosmosAddress { account, bech32: bech }
+        CosmosAddress {
+            account,
+            bech32: bech,
+        }
     }
 
     #[test]
@@ -268,21 +294,36 @@ mod tests {
         let bytes = crate::cosmos::proto::encode(&body).unwrap();
         let back = TxBody::decode(bytes.as_slice()).unwrap();
         assert_eq!(back.messages.len(), 1);
-        assert_eq!(back.messages[0].type_url, "/pole.chain.pole.v1.MsgFinalizeEpoch");
+        assert_eq!(
+            back.messages[0].type_url,
+            "/pole.chain.pole.v1.MsgFinalizeEpoch"
+        );
     }
 
     #[test]
     fn build_produces_proto_encoded_signed_tx() {
         use crate::cosmos::proto::Message;
         let kp = KeyPair::from_seed(&[3u8; 32]);
-        let addr = test_address(0xAB);
+        // Phase 0.2: derive the signer from the keypair's actual public
+        // key so the bech32-pubkey check in `build()` passes. The
+        // older `test_address(0xAB)` fixture was a latent bug masked
+        // by `_signer` being unused.
+        let bech = crate::cosmos::address::encode_bech32(
+            DEFAULT_BECH32_PREFIX,
+            &kp.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+        )
+        .unwrap();
+        let addr = CosmosAddress {
+            account: kp.public[..20].to_vec(),
+            bech32: bech,
+        };
         let builder = TxBuilder::new("pole-test").with_sequence(1, 0);
         let msg = BridgeMessage::ClaimReward {
             claimer: addr.clone(),
             epoch_id: 5,
-            recipient: addr,
+            recipient: addr.clone(),
         };
-        let signed = builder.build(&msg, &test_address(0xAB), &kp).unwrap();
+        let signed = builder.build(&msg, &addr, &kp).unwrap();
         assert_eq!(signed.signatures.len(), 1);
         assert_eq!(signed.signatures[0].len(), 64);
 
@@ -314,5 +355,88 @@ mod tests {
         assert_eq!(bytes[0], 0x0A); // field 1, length-delimited
         assert_eq!(bytes[1], 32);
         assert_eq!(&bytes[2..], &pubkey);
+    }
+
+    /// Phase 0.2: the `build()` entry point now verifies that the
+    /// bech32 in `signer` matches the address derived from
+    /// `keypair.public`. A mismatch must fail closed with a clear
+    /// error before any signing or broadcasting.
+    #[test]
+    fn build_rejects_signer_pubkey_mismatch() {
+        let kp = KeyPair::from_seed(&[5u8; 32]);
+        let builder = TxBuilder::new("pole-test").with_sequence(1, 0);
+        let msg = BridgeMessage::FinalizeEpoch {
+            finalizer: test_address(0x11), // deliberately different from kp.public[..20]
+            epoch_id: 1,
+        };
+        // 0x11 test address has a different account bytes than the
+        // keypair-derived one — must produce an Encode error.
+        let err = builder.build(&msg, &test_address(0x11), &kp).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("signer mismatch"),
+            "expected signer-mismatch error, got: {msg}"
+        );
+    }
+
+    /// Phase 0.2: when the caller-supplied signer matches the public
+    /// key's bech32 derivation, `build()` succeeds.
+    #[test]
+    fn build_accepts_signer_matching_pubkey() {
+        let kp = KeyPair::from_seed(&[6u8; 32]);
+        // Derive the canonical bech32 from the public key (first 20 bytes).
+        let bech = crate::cosmos::address::encode_bech32(
+            DEFAULT_BECH32_PREFIX,
+            &kp.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+        )
+        .unwrap();
+        let signer = CosmosAddress {
+            account: kp.public[..20].to_vec(),
+            bech32: bech,
+        };
+        let builder = TxBuilder::new("pole-test").with_sequence(1, 0);
+        let msg = BridgeMessage::FinalizeEpoch {
+            finalizer: signer.clone(),
+            epoch_id: 1,
+        };
+        let signed = builder.build(&msg, &signer, &kp).unwrap();
+        assert_eq!(signed.signatures.len(), 1);
+    }
+
+    /// Phase 0.2: `OpenChallenge` produces a typed `Any` with empty
+    /// value (the chain will reject it deterministically). The
+    /// type_url must still be the real pole-chain path so the chain
+    /// can route and emit a clear "skeleton" error rather than
+    /// silently misparsing bytes.
+    #[test]
+    fn open_challenge_emits_stub_any_with_empty_value() {
+        let msg = BridgeMessage::OpenChallenge {
+            challenger: test_address(0x77),
+            epoch_id: 99,
+        };
+        let any = msg.to_any();
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgOpenChallenge");
+        assert!(
+            any.value.is_empty(),
+            "OpenChallenge must emit empty value (chain rejects deterministically): got {} bytes",
+            any.value.len()
+        );
+    }
+
+    /// Phase 0.2: `BridgeMessage::Unsupported` round-trips through
+    /// `to_any` as a fallback path. The harness uses this for
+    /// messages that have not been hand-rolled yet.
+    #[test]
+    fn unsupported_arm_passes_through_type_url_and_value() {
+        let msg = BridgeMessage::Unsupported {
+            type_url: "/pole.node.v1.MsgUpsertNode".into(),
+            note: "{\"operator_address\":\"x\"}".into(),
+        };
+        let any = msg.to_any();
+        assert_eq!(any.type_url, "/pole.node.v1.MsgUpsertNode");
+        assert_eq!(
+            std::str::from_utf8(&any.value).unwrap(),
+            "{\"operator_address\":\"x\"}"
+        );
     }
 }
