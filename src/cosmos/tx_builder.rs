@@ -4,6 +4,7 @@ use crate::cosmos::address::CosmosAddress;
 use crate::cosmos::error::{CosmosError, Result};
 use crate::cosmos::tx_signer::{sign_with_keypair, SignedTx};
 use crate::primitives::EpochId;
+use crate::records::Challenge;
 use crate::wallet::KeyPair;
 
 pub use crate::cosmos::proto::Any;
@@ -65,7 +66,7 @@ pub enum BridgeMessage {
     },
     OpenChallenge {
         challenger: CosmosAddress,
-        epoch_id: EpochId,
+        challenge: Challenge,
     },
     /// Catch-all for messages we haven't hand-rolled yet. The chain
     /// will reject the broadcast, but the type keeps the API stable
@@ -91,19 +92,10 @@ impl BridgeMessage {
                 *epoch_id,
                 &recipient.bech32,
             ),
-            BridgeMessage::OpenChallenge { .. } => {
-                // Proto field 2 is a nested `Challenge` message, not a
-                // `uint64` — `encode_msg_open_challenge` would write
-                // bytes the chain would misinterpret. Emit a typed
-                // `Any` with the correct type_url and an empty value
-                // so the chain rejects the tx deterministically. The
-                // full payload will land when the `Challenge` type is
-                // wired in a later phase.
-                Any {
-                    type_url: "/pole.chain.pole.v1.MsgOpenChallenge".to_string(),
-                    value: vec![],
-                }
-            }
+            BridgeMessage::OpenChallenge {
+                challenger,
+                challenge,
+            } => crate::cosmos::pole_msgs::encode_msg_open_challenge(&challenger.bech32, challenge),
             BridgeMessage::Unsupported { type_url, note } => Any {
                 type_url: type_url.clone(),
                 value: note.as_bytes().to_vec(),
@@ -409,18 +401,38 @@ mod tests {
     /// can route and emit a clear "skeleton" error rather than
     /// silently misparsing bytes.
     #[test]
-    fn open_challenge_emits_stub_any_with_empty_value() {
+    fn open_challenge_emits_well_formed_proto_any() {
+        let challenge = Challenge {
+            challenge_id: [0xAAu8; 32],
+            kind: crate::primitives::ChallengeKind::BadBatch,
+            epoch_id: 99,
+            target_node: Some([0x11u8; 32]),
+            challenger: [0xBBu8; 32],
+            bond: 1_000,
+            opened_at_height: 10,
+            deadline_height: 20,
+            state: crate::primitives::ChallengeState::Open,
+            evidence: crate::records::ChallengeEvidenceRef {
+                batch_root: Some([0xCCu8; 32]),
+                aggregate_root: None,
+                reward_root: None,
+                payload_cid: None,
+                merkle_proof: Vec::new(),
+            },
+        };
         let msg = BridgeMessage::OpenChallenge {
             challenger: test_address(0x77),
-            epoch_id: 99,
+            challenge,
         };
         let any = msg.to_any();
         assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgOpenChallenge");
         assert!(
-            any.value.is_empty(),
-            "OpenChallenge must emit empty value (chain rejects deterministically): got {} bytes",
+            !any.value.is_empty(),
+            "OpenChallenge must emit non-empty proto bytes (was a dead-code stub): got {} bytes",
             any.value.len()
         );
+        // First byte must be the outer challenger field tag (0x0A).
+        assert_eq!(any.value[0], 0x0A);
     }
 
     /// Phase 0.2: `BridgeMessage::Unsupported` round-trips through
