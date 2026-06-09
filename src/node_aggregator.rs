@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::node_config::NodeConfig;
 use crate::node_daemon::NodeDaemonError;
 use crate::node_gvs::compute_gvs_factors;
-use crate::node_pipeline::{merkle_root, stable_hash32};
+use crate::node_pipeline::{merkle_leaf_sha256, merkle_root};
 use crate::primitives::{ActivitySourceKind, AppId, EpochId, Hash32, NodeId, SlotId};
 use crate::records::{AggregateRecord, BatchCommit, ObservationRecord};
 
@@ -243,13 +243,13 @@ pub fn aggregate_record_root(records: &[AggregateRecord]) -> Result<Hash32, Node
 fn hash_aggregate_record(record: &AggregateRecord) -> Result<Hash32, NodeAggregationError> {
     let encoded =
         borsh::to_vec(record).map_err(|err| NodeAggregationError::Borsh(err.to_string()))?;
-    Ok(stable_hash32(&encoded))
+    Ok(merkle_leaf_sha256(&encoded))
 }
 
 fn hash_batch_commit(batch_commit: &BatchCommit) -> Result<Hash32, NodeAggregationError> {
     let encoded =
         borsh::to_vec(batch_commit).map_err(|err| NodeAggregationError::Borsh(err.to_string()))?;
-    Ok(stable_hash32(&encoded))
+    Ok(merkle_leaf_sha256(&encoded))
 }
 
 fn deduplicate_by_collector(inputs: Vec<AggregateInput>) -> Vec<AggregateInput> {

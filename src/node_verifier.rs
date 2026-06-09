@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::node_config::NodeConfig;
 use crate::node_daemon::{CollectTickArtifact, NodeDaemonError};
-use crate::node_pipeline::{merkle_root, stable_hash32};
+use crate::node_pipeline::{merkle_leaf_sha256, merkle_root, stable_hash32};
 use crate::primitives::Hash32;
 use crate::records::ObservationRecord;
 use crate::storage_book::{LocalRetentionBook, StorageBookError};
@@ -138,7 +138,7 @@ pub fn verify_local_epoch(
             let observation_hashes = observations
                 .iter()
                 .map(|observation| {
-                    stable_hash32(&borsh::to_vec(observation).expect("observation encoding"))
+                    merkle_leaf_sha256(&borsh::to_vec(observation).expect("observation encoding"))
                 })
                 .collect::<Vec<_>>();
             let batch_root = merkle_root(&observation_hashes);

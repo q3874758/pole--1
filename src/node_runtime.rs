@@ -2,8 +2,8 @@ use std::fmt;
 
 use crate::node_config::{NodeConfig, NodeConfigError};
 use crate::node_pipeline::{
-    merkle_root, stable_hash32, AssembledBatch, BatchBuilder, NodePipelineError,
-    SteamCurrentPlayersSample,
+    merkle_leaf_sha256, merkle_root, stable_hash32, AssembledBatch, BatchBuilder,
+    NodePipelineError, SteamCurrentPlayersSample,
 };
 use crate::node_rewards::effective_min_retention_epochs;
 use crate::p2p::{
@@ -238,7 +238,7 @@ impl LocalNodeRuntime {
                 .batches
                 .iter()
                 .map(|batch| {
-                    stable_hash32(
+                    merkle_leaf_sha256(
                         &borsh::to_vec(&batch.batch_commit).expect("batch commit encoding"),
                     )
                 })
@@ -258,7 +258,7 @@ impl LocalNodeRuntime {
                 .stored_payloads
                 .iter()
                 .map(|record| {
-                    stable_hash32(&borsh::to_vec(record).expect("stored payload encoding"))
+                    merkle_leaf_sha256(&borsh::to_vec(record).expect("stored payload encoding"))
                 })
                 .collect::<Vec<_>>(),
         );
@@ -326,7 +326,7 @@ fn publish_best_effort(
 }
 
 fn hash_observation(observation: &ObservationRecord) -> Hash32 {
-    stable_hash32(&borsh::to_vec(observation).expect("observation encoding"))
+    merkle_leaf_sha256(&borsh::to_vec(observation).expect("observation encoding"))
 }
 
 fn development_signature_placeholder(

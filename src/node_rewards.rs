@@ -708,7 +708,7 @@ pub fn reward_record_root(records: &[RewardRecord]) -> Result<Hash32, NodeReward
         .iter()
         .map(|record| {
             borsh::to_vec(record)
-                .map(|encoded| crate::stable_hash32(&encoded))
+                .map(|encoded| crate::node_pipeline::merkle_leaf_sha256(&encoded))
                 .map_err(|err: std::io::Error| NodeRewardError::Borsh(err.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
