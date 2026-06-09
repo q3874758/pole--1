@@ -1,0 +1,3 @@
+To https://github.com/q3874758/pole--1
+ ! [remote rejected] main -> main (cannot lock ref 'refs/heads/main': reference already exists)
+error: failed to push some refs to 'https://github.com/q3874758/pole--1'

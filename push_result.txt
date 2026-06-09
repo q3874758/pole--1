@@ -1,0 +1,7 @@
+remote: error: Trace: 2e8b1b74e50d514e91bf0df835b8ec081453c25cce1721eddd9074b1c1b85617        
+remote: error: See https://gh.io/lfs for more information.        
+remote: error: File chain/poled.exe is 162.16 MB; this exceeds GitHub's file size limit of 100.00 MB        
+remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+To https://github.com/q3874758/pole--1
+ ! [remote rejected] main -> main (pre-receive hook declined)
+error: failed to push some refs to 'https://github.com/q3874758/pole--1'

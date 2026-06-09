@@ -126,7 +126,10 @@ impl TendermintRpc {
     ) -> Result<BroadcastTxResponse> {
         let mut last_err = String::new();
         for attempt in 1..=opts.max_retries.max(1) {
-            match self.broadcast_tx_sync_once(tx_bytes, opts.request_timeout).await {
+            match self
+                .broadcast_tx_sync_once(tx_bytes, opts.request_timeout)
+                .await
+            {
                 Ok(resp) if resp.is_ok() => return Ok(resp),
                 Ok(resp) => {
                     last_err = format!("code={} log={}", resp.code, resp.log);
@@ -179,8 +182,8 @@ impl TendermintRpc {
                 message: err.to_string(),
             });
         }
-        let parsed: BroadcastTxResponseWrapper = serde_json::from_value(raw)
-            .map_err(|e| CosmosError::Decode(e.to_string()))?;
+        let parsed: BroadcastTxResponseWrapper =
+            serde_json::from_value(raw).map_err(|e| CosmosError::Decode(e.to_string()))?;
         Ok(parsed.result)
     }
 
@@ -200,8 +203,8 @@ impl TendermintRpc {
             .await?
             .json()
             .await?;
-        let parsed: StatusResponse = serde_json::from_value(raw)
-            .map_err(|e| CosmosError::Decode(e.to_string()))?;
+        let parsed: StatusResponse =
+            serde_json::from_value(raw).map_err(|e| CosmosError::Decode(e.to_string()))?;
         parsed
             .result
             .sync_info
@@ -240,8 +243,8 @@ impl TendermintRpc {
             .await?
             .json()
             .await?;
-        let parsed: AbciQueryResponse = serde_json::from_value(raw)
-            .map_err(|e| CosmosError::Decode(e.to_string()))?;
+        let parsed: AbciQueryResponse =
+            serde_json::from_value(raw).map_err(|e| CosmosError::Decode(e.to_string()))?;
         Ok(parsed.result.response)
     }
 

@@ -31,7 +31,12 @@ pub fn encode<M: MessageEncode>(msg: &M) -> Result<Vec<u8>, String> {
 ///   bytes_to_sign = sha256( body_bytes || auth_info_bytes || chain_id || account_number_be )
 ///
 /// This is the exact byte sequence that gets signed by the signer.
-pub fn sign_doc_hash(body_bytes: &[u8], auth_info_bytes: &[u8], chain_id: &str, account_number: u64) -> [u8; 32] {
+pub fn sign_doc_hash(
+    body_bytes: &[u8],
+    auth_info_bytes: &[u8],
+    chain_id: &str,
+    account_number: u64,
+) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(body_bytes);

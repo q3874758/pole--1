@@ -284,11 +284,8 @@ impl GenesisBuilder {
 fn default_pole_params() -> serde_json::Value {
     // base_hourly_reward = total_supply * 0.02 / (365 * 24) in micro-units
     // = 1e15 * 0.02 / 8760 ≈ 2_283_105_022.83 → 2_283_105_022
-    let base_hourly_reward: u128 = (DEFAULT_TOTAL_SUPPLY_UPOLES
-        * MICROS_PER_UPOLES
-        * 2
-        / 100)
-        / (365 * 24);
+    let base_hourly_reward: u128 =
+        (DEFAULT_TOTAL_SUPPLY_UPOLES * MICROS_PER_UPOLES * 2 / 100) / (365 * 24);
 
     serde_json::json!({
         "reward_block_duration_seconds": 3600,
@@ -360,18 +357,9 @@ mod tests {
 
     #[test]
     fn build_produces_valid_skeleton() {
-        let csv = tmp_csv(&[
-            "cosmos1abc,1000",
-            "cosmos1def,2000",
-        ]);
+        let csv = tmp_csv(&["cosmos1abc,1000", "cosmos1def,2000"]);
         let vals = tmp_json_validators();
-        let builder = GenesisBuilder::from_paths(
-            "pole-test".into(),
-            csv,
-            vals,
-            None,
-        )
-        .unwrap();
+        let builder = GenesisBuilder::from_paths("pole-test".into(), csv, vals, None).unwrap();
         let doc = builder.build().unwrap();
         let balances = doc["app_state"]["bank"]["balances"].as_array().unwrap();
         assert_eq!(balances.len(), 2);
@@ -382,30 +370,16 @@ mod tests {
     fn rejects_empty_validator_set() {
         let csv = tmp_csv(&["cosmos1abc,100"]);
         let empty_vals = tmp_empty_validators();
-        let builder = GenesisBuilder::from_paths(
-            "pole-test".into(),
-            csv,
-            empty_vals,
-            None,
-        )
-        .unwrap();
+        let builder =
+            GenesisBuilder::from_paths("pole-test".into(), csv, empty_vals, None).unwrap();
         assert!(builder.build().is_err());
     }
 
     #[test]
     fn rejects_overallocation() {
-        let csv = tmp_csv(&[&format!(
-            "cosmos1abc,{}",
-            DEFAULT_TOTAL_SUPPLY_UPOLES + 1
-        )]);
+        let csv = tmp_csv(&[&format!("cosmos1abc,{}", DEFAULT_TOTAL_SUPPLY_UPOLES + 1)]);
         let vals = tmp_json_validators();
-        let builder = GenesisBuilder::from_paths(
-            "pole-test".into(),
-            csv,
-            vals,
-            None,
-        )
-        .unwrap();
+        let builder = GenesisBuilder::from_paths("pole-test".into(), csv, vals, None).unwrap();
         let err = builder.build().unwrap_err();
         assert!(matches!(err, GenesisError::Validation(_)));
     }
@@ -415,7 +389,9 @@ mod tests {
         let json = default_pole_params();
         // 1e15 upole * 1e6 microupole/upole * 0.02 / 8760 ≈ 2.28e15
         let v: u128 = json["base_hourly_reward"].as_u64().unwrap() as u128;
-        assert!(v >= 2_000_000_000_000_000 && v <= 2_500_000_000_000_000,
-                "base_hourly_reward out of range: {v}");
+        assert!(
+            v >= 2_000_000_000_000_000 && v <= 2_500_000_000_000_000,
+            "base_hourly_reward out of range: {v}"
+        );
     }
 }

@@ -250,9 +250,7 @@ mod tests {
     fn schema_rejects_missing_required_field() {
         let cfg = minimal_config();
         let mut v = serde_json::to_value(&cfg).unwrap();
-        v.as_object_mut()
-            .unwrap()
-            .remove("chain_id");
+        v.as_object_mut().unwrap().remove("chain_id");
         let err = validate_schema(&v).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("chain_id"), "got: {s}");
@@ -281,7 +279,10 @@ mod tests {
     /// Resolve a JSON Schema fragment, following a single level of
     /// `$ref` indirection. Refs in this schema look like
     /// `"#/$defs/foo"` — we only support local refs.
-    fn resolve_ref<'a>(schema: &'a serde_json::Value, root: &'a serde_json::Value) -> &'a serde_json::Value {
+    fn resolve_ref<'a>(
+        schema: &'a serde_json::Value,
+        root: &'a serde_json::Value,
+    ) -> &'a serde_json::Value {
         if let Some(r) = schema.get("$ref").and_then(|v| v.as_str()) {
             if let Some(rest) = r.strip_prefix("#/") {
                 let mut cur = root;
@@ -332,8 +333,7 @@ mod tests {
     /// told exactly which key drifted.
     #[test]
     fn schema_and_rust_struct_do_not_drift() {
-        let schema: serde_json::Value = serde_json::from_str(SCHEMA_TEXT)
-            .expect("schema parses");
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA_TEXT).expect("schema parses");
         let cfg = NodeConfig::default();
         let value = serde_json::to_value(&cfg).expect("config serialises");
 
@@ -400,7 +400,10 @@ mod tests {
         v.as_object_mut().unwrap().remove("chain_id");
         let err = validate_schema(&v).unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("chain_id"), "missing chain_id should be flagged, got: {s}");
+        assert!(
+            s.contains("chain_id"),
+            "missing chain_id should be flagged, got: {s}"
+        );
     }
 
     /// Drift check for additionalProperties: the schema marks
@@ -417,6 +420,9 @@ mod tests {
             .insert("not_a_real_field".into(), serde_json::json!(true));
         let err = validate_schema(&v).unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("not_a_real_field") || s.contains("additional"), "got: {s}");
+        assert!(
+            s.contains("not_a_real_field") || s.contains("additional"),
+            "got: {s}"
+        );
     }
 }

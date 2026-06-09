@@ -27,11 +27,9 @@ pub fn load_allocations_csv(path: &Path) -> Result<Vec<Allocation>> {
                 message: "too many columns (expected 2)".into(),
             });
         }
-        let amount_upole: u128 = amount_str.trim().parse().map_err(|e| {
-            GenesisError::Csv {
-                line: i + 1,
-                message: format!("invalid amount `{amount_str}`: {e}"),
-            }
+        let amount_upole: u128 = amount_str.trim().parse().map_err(|e| GenesisError::Csv {
+            line: i + 1,
+            message: format!("invalid amount `{amount_str}`: {e}"),
         })?;
         out.push(Allocation {
             address: address.trim().to_string(),

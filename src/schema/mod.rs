@@ -25,7 +25,5 @@ pub mod version;
 
 pub use loader::{load_versioned, load_with_migrations, save_versioned, LoadError, SaveError};
 pub use migration::{MigrationError, MigrationRegistry, Step};
-pub use registries::{
-    local_chain_runtime_registry, node_config_registry, storage_book_registry,
-};
+pub use registries::{local_chain_runtime_registry, node_config_registry, storage_book_registry};
 pub use version::{SchemaVersion, Versioned, CURRENT};

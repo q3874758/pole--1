@@ -133,9 +133,13 @@ impl IntegrationHarnessBuilder {
 
     /// Boot the harness. Returns once `/status` returns 200.
     pub async fn boot(self) -> Result<IntegrationHarness, HarnessError> {
-        let chain_id = self.chain_id.unwrap_or_else(|| DEFAULT_CHAIN_ID.to_string());
+        let chain_id = self
+            .chain_id
+            .unwrap_or_else(|| DEFAULT_CHAIN_ID.to_string());
         let rpc_url = self.rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
-        let rest_url = self.rest_url.unwrap_or_else(|| DEFAULT_REST_URL.to_string());
+        let rest_url = self
+            .rest_url
+            .unwrap_or_else(|| DEFAULT_REST_URL.to_string());
         let prefix = self
             .address_prefix
             .unwrap_or_else(|| pole_protocol_draft::cosmos::DEFAULT_BECH32_PREFIX.to_string());
@@ -389,12 +393,12 @@ impl IntegrationHarness {
     /// tests that want to assert "the chain processed N txs".
     pub async fn current_sequence(&self, address: &str) -> Result<u64, HarnessError> {
         let info = self.client.account(address).await?;
-        info.sequence
-            .parse::<u64>()
-            .map_err(|e| HarnessError::Json(serde_json::Error::io(std::io::Error::new(
+        info.sequence.parse::<u64>().map_err(|e| {
+            HarnessError::Json(serde_json::Error::io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 e.to_string(),
-            ))))
+            )))
+        })
     }
 }
 

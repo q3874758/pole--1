@@ -121,12 +121,14 @@ fn service_managers_default_to_not_installed_status() {
         )
         .with_service_root(root.join("windows-services")),
     );
-    let linux = SystemdServiceManager::new(SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    )
-    .with_unit_root(root.join("systemd")));
+    let linux = SystemdServiceManager::new(
+        SystemdUnitDefinition::new(
+            "/opt/pole/pole-node",
+            "/etc/pole/node.json",
+            "/var/lib/pole",
+        )
+        .with_unit_root(root.join("systemd")),
+    );
 
     assert_eq!(
         windows.status().unwrap(),

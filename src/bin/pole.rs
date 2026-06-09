@@ -2,19 +2,22 @@
 
 use std::env;
 use std::net::TcpStream;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 const POLED_HTTP_PORT: u16 = 1317;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let program_path = env::args().next().map(PathBuf::from).unwrap();
-    let program_name = program_path.file_stem().and_then(|s| s.to_str()).unwrap_or("pole");
+    let program_name = program_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pole");
 
     let mode = if program_name == "pole-client" || program_name == "pole-client.exe" {
         "client"
@@ -124,7 +127,10 @@ fn run_full(binary_dir: &Path, _args: &[String]) -> i32 {
         match output {
             Ok(out) => {
                 if !out.status.success() {
-                    eprintln!("[PoLE] Failed to initialize chain (exit code: {:?})", out.status.code());
+                    eprintln!(
+                        "[PoLE] Failed to initialize chain (exit code: {:?})",
+                        out.status.code()
+                    );
                     return 1;
                 }
             }
@@ -149,7 +155,10 @@ fn run_full(binary_dir: &Path, _args: &[String]) -> i32 {
         }
     };
 
-    println!("[PoLE] Waiting for blockchain RPC to be ready (port {})...", POLED_HTTP_PORT);
+    println!(
+        "[PoLE] Waiting for blockchain RPC to be ready (port {})...",
+        POLED_HTTP_PORT
+    );
     let max_wait = 60;
     for i in 0..max_wait {
         if TcpStream::connect(("localhost", POLED_HTTP_PORT)).is_ok() {
@@ -159,14 +168,20 @@ fn run_full(binary_dir: &Path, _args: &[String]) -> i32 {
         match poled.try_wait() {
             Ok(Some(status)) if i > 2 => {
                 let code = status.code().unwrap_or(-1);
-                eprintln!("[PoLE] poled crashed (exit {}), cleaning up and retrying...", code);
+                eprintln!(
+                    "[PoLE] poled crashed (exit {}), cleaning up and retrying...",
+                    code
+                );
                 drop(poled);
                 let _ = std::fs::remove_dir_all(&chain_home);
                 let init_out = Command::new(&poled_exe)
                     .args(["init", "--home", &chain_home.to_string_lossy()])
                     .creation_flags(0x08000000)
                     .output();
-                let init_ok = init_out.as_ref().map(|o| o.status.success()).unwrap_or(false);
+                let init_ok = init_out
+                    .as_ref()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
                 if !init_ok {
                     eprintln!("[PoLE] Failed to reinitialize chain");
                     return 1;
@@ -176,14 +191,22 @@ fn run_full(binary_dir: &Path, _args: &[String]) -> i32 {
                     .creation_flags(0x08000000)
                     .spawn();
                 match retry {
-                    Ok(c) => { poled = c; }
-                    Err(e) => { eprintln!("[PoLE] Failed to restart poled: {}", e); return 1; }
+                    Ok(c) => {
+                        poled = c;
+                    }
+                    Err(e) => {
+                        eprintln!("[PoLE] Failed to restart poled: {}", e);
+                        return 1;
+                    }
                 }
             }
             _ => {}
         }
         if i == max_wait - 1 {
-            eprintln!("[PoLE] Timeout waiting for blockchain RPC after {}s", max_wait);
+            eprintln!(
+                "[PoLE] Timeout waiting for blockchain RPC after {}s",
+                max_wait
+            );
             let _ = poled.kill();
             return 1;
         }

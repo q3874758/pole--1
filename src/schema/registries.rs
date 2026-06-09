@@ -102,7 +102,11 @@ mod tests {
                 SchemaVersion::V0_RAW,
                 "{label}: expected V0_RAW"
             );
-            assert_eq!(reg.head(), CURRENT, "{label}: registry head should be CURRENT");
+            assert_eq!(
+                reg.head(),
+                CURRENT,
+                "{label}: registry head should be CURRENT"
+            );
             // Post-conditions: after migration, the data is loadable
             // as a generic JSON object.
             let _: Value = load_with_migrations(&path, &reg).unwrap().unwrap();

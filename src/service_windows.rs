@@ -150,9 +150,13 @@ impl ServiceManager for WindowsServiceManager {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
                 let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-                let msg = if stdout.contains("access is denied") || stderr.contains("access is denied") {
+                let msg = if stdout.contains("access is denied")
+                    || stderr.contains("access is denied")
+                {
                     "requires administrator privileges. right-click pole-client and choose 'run as administrator', or install the service from an elevated command prompt."
-                } else if stdout.contains("service has not been started") || stderr.contains("service has not been started") {
+                } else if stdout.contains("service has not been started")
+                    || stderr.contains("service has not been started")
+                {
                     "service failed to start. check windows event viewer for details."
                 } else {
                     "failed to start service. ensure you have administrator privileges."
@@ -179,14 +183,18 @@ impl ServiceManager for WindowsServiceManager {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
                 let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-                let msg = if stdout.contains("access is denied") || stderr.contains("access is denied") {
-                    "requires administrator privileges"
-                } else {
-                    "failed to stop service"
-                };
+                let msg =
+                    if stdout.contains("access is denied") || stderr.contains("access is denied") {
+                        "requires administrator privileges"
+                    } else {
+                        "failed to stop service"
+                    };
                 Err(ServiceManagerError::Io(msg.to_string()))
             }
-            Err(e) => Err(ServiceManagerError::Io(format!("failed to execute sc stop: {}", e))),
+            Err(e) => Err(ServiceManagerError::Io(format!(
+                "failed to execute sc stop: {}",
+                e
+            ))),
         }
     }
 

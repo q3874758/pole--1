@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-
 #[derive(Serialize, Deserialize)]
 struct CryptoJson {
     cipher: String,
@@ -53,7 +52,8 @@ impl EncryptedKeystore {
     }
 
     fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32]> {
-        let params = scrypt::Params::new(14, 8, 1, 32).map_err(|e| WalletError::KdfError(e.to_string()))?;
+        let params =
+            scrypt::Params::new(14, 8, 1, 32).map_err(|e| WalletError::KdfError(e.to_string()))?;
         let mut key = [0u8; 32];
         let res = scrypt::scrypt(password.as_bytes(), salt, &params, &mut key);
         if res.is_err() {
@@ -110,8 +110,7 @@ impl EncryptedKeystore {
 
         let key = Self::derive_key(password, &salt)?;
 
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|_| WalletError::DecryptionFailed)?;
+        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| WalletError::DecryptionFailed)?;
 
         let nonce = Nonce::from_slice(&nonce_bytes);
         let plaintext = cipher
@@ -136,7 +135,10 @@ impl EncryptedKeystore {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 fn hex_decode(hex: &str) -> Result<Vec<u8>> {

@@ -1,0 +1,325 @@
+version: 1
+plan:
+  name: 'PoLE 项目全景调研 —— 5 维并行 + 汇总'
+  max_concurrency: 6
+  max_consecutive_failures: 2
+  max_cycles: 8
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+
+tasks:
+  - id: cli-runtime
+    title: 'CLI 运行时调研（pole-client / pole-node / pole / pole-genesis / pole-sbom）'
+    assigned_to: coder
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      调研目标：搞清楚 PoLE 项目里所有 CLI 二进制的职责、入口、核心模块、数据流。这是"上手地图"的 CLI 运行时维度。
+
+      调研范围（必须覆盖）：
+      - `src/bin/` 下所有二进制入口（pole-client、pole-node、pole、pole-genesis、pole-sbom、pole-gui）
+        - 每个二进制的启动入口、主命令树、关键子命令
+        - 它们共享 `src/lib.rs`（name = pole_protocol_draft）哪些类型/函数
+      - CLI 支持层：`src/cli_output.rs`、`src/cli_parsing.rs`、`src/cli_support.rs`、`src/executor.rs`
+      - 安装与升级路径：`src/install_layout.rs`、`src/app_paths.rs`、`src/updater.rs`、`src/update_manifest.rs`
+      - 跨平台服务管理：`src/service_runtime.rs`、`src/service_systemd.rs`、`src/service_windows.rs`
+      - 控制面 HTTP API：`src/control_api.rs`、`src/control_api_types.rs`（包含 endpoints、鉴权、错误码）
+      - 与白皮书正交的部分：日志/可观测性（`src/observability/`）、配置 schema 路径
+
+      强制要求（不要省略）：
+      1. 不要复制粘贴整个文件——只摘关键片段（10–30 行）佐证
+      2. 每个核心论断必须带 file:line 引用（例如 `src/bin/pole-node.rs:42`）
+      3. 必须输出到工作区根目录的 `deliverable-cli-runtime.md`，并按以下结构组织：
+
+      ```
+      # CLI 运行时调研
+
+      ## 1. 二进制清单
+      | 二进制 | 路径 | 职责一句话 | 关键命令 |
+
+      ## 2. 共享 lib（pole_protocol_draft）导出的关键 API
+      ## 3. CLI 子系统拆解
+        - 命令解析层
+        - 输出格式化层
+        - 执行器（executor）
+      ## 4. 安装 / 升级 / 跨平台服务
+      ## 5. 控制面 HTTP API
+        - endpoints 列表
+        - 鉴权机制
+        - 错误处理
+      ## 6. 与其他维度的接口（链、GUI、协议的边界）
+      ## 7. 风险 / TODO（看代码注释、TODO/FIXME、unimplemented!()）
+      ## 8. 引用清单（关键 file:line 列表）
+      ```
+
+      4. 关键数字（文件数、命令数、endpoints 数等）必须由你实际 grep/read 得出，不要拍脑袋
+      5. 如果某个文件读不到或代码不完整，明确标注"未读"——不要瞎编
+      6. 完成后写明"调研完成"和 deliverable 绝对路径
+    verify_prompt: |
+      独立验证 producer 的报告，不要只是复读。任务：
+
+      1. 打开 `E:\pole备用\src\bin\` 目录，确认 producer 列出的二进制数量和名称是否真实
+      2. 打开 `E:\pole备用\src\lib.rs` 顶部，验证 `pole_protocol_draft` 的 lib 名是否正确
+      3. 在 `src/control_api.rs` 中独立 grep `fn handle` 或路由注册函数，对比 producer 列出的 endpoints 数量，允许 ±2 的误差，超过就 FAIL
+      4. 抽查 producer 报告中的 3 个 file:line 引用，确认引用位置和 producer 描述一致
+      5. 检查 producer 是否遗漏了 `pole-gui` 二进制（如果漏了算 FAIL，因为用户要全景）
+      6. 给出 PASS / FAIL + 理由
+
+      不要只读 producer 报告就下结论。
+
+  - id: chain
+    title: '链（chain/poled）调研'
+    assigned_to: coder
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      调研目标：理解 chain/ 目录下 poled 节点的结构、模块划分、状态机、proto、构建方式。这是"上手地图"的链维度。
+
+      调研范围（必须覆盖）：
+      - `chain/README.md`
+      - `chain/go.mod` 依赖（cosmos-sdk 版本、关键 module 依赖）
+      - `chain/app/` —— application 入口（sdk.BaseApp 装配、模块注册、BeginBlock/EndBlock）
+      - `chain/pole/` —— pole 自定义模块（keeper、msg、query、genesis、types、handler、abci 钩子）
+      - `chain/proto/` —— protobuf 定义（pole 模块的所有 proto 文件，message、query、tx、genesis）
+      - `chain/docs/` —— 链相关的设计文档
+      - `chain/poled.exe` —— 编译产物（注意：这是 binary，不读二进制内容，只确认存在）
+      - 链上 reward / challenge / settlement / validator / governance 的实现位置
+
+      强制要求：
+      1. 标注每个 proto 文件的 message/service 名字（不要全部展开）
+      2. 标注 keeper 的存储 key 前缀（典型 `sdk.StoreKey`）
+      3. 标注 BeginBlock/EndBlock 钩子里调了哪些 keeper 方法
+      4. proto 字段 → Rust 侧（src/proto.rs, src/cosmos/）的映射
+      5. 链和 player / node 的交互边界（transaction 类型、query 类型）
+      6. 输出到 `deliverable-chain.md`，结构：
+
+      ```
+      # 链（poled）调研
+
+      ## 1. 概览（语言、SDK 版本、模块清单）
+      ## 2. proto 层（message 列表、service 列表）
+      ## 3. app 装配（模块注册顺序、BeginBlock/EndBlock 钩子）
+      ## 4. pole 自定义模块拆解
+        - Keeper 列表与存储前缀
+        - Msg handler 列表
+        - Query handler 列表
+        - Genesis 状态
+      ## 5. 关键流程（reward 发放、challenge 处理、settlement、validator 行为）
+      ## 6. 与 Rust 侧的边界（tx 类型映射、query 映射）
+      ## 7. 构建 / 启动 / 链数据目录
+      ## 8. 风险 / TODO
+      ## 9. 引用清单
+      ```
+    verify_prompt: |
+      独立验证：
+      1. 打开 `chain/go.mod`，核对 cosmos-sdk 版本号，producer 报告里写的是否一致
+      2. 列出 `chain/proto/` 下的所有 .proto 文件，统计 producer 报告的 message 数量，允许 ±2 误差
+      3. 抽查 2 个 producer 提到的 keeper 函数，确认 `chain/pole/<module>/keeper/` 下确实存在
+      4. 确认 `chain/app/` 下存在 `app.go` 之类的入口文件
+      5. PASS / FAIL + 理由
+
+  - id: gui-desktop
+    title: 'GUI 与桌面端调研（pole-gui + desktop/）'
+    assigned_to: coder
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      调研目标：理解 pole-gui 二进制和 desktop/web/ 本地控制台的架构、与 node/client 的交互方式。
+
+      调研范围：
+      - `src/bin/pole-gui.rs` —— GUI 入口
+      - 启用了 `gui` feature（tao + tray-icon + wry + winrt-notification）
+      - `desktop/web/` —— 本地静态资源（HTML/JS/CSS）
+      - 关键交互：tray menu、notification、嵌入式 webview、IPC（webview ↔ Rust 后端）
+      - 状态文件：`pole-gui-state.json`（看里面有什么）
+      - 与 control_api 的关系
+
+      强制要求：
+      1. 标注 webview 加载的是哪个本地文件 / URL
+      2. 标注 Rust ↔ JS 之间的 IPC 命令/事件列表
+      3. 标注托盘菜单项、点击行为
+      4. Windows 通知触发条件
+      5. 输出到 `deliverable-gui.md`：
+
+      ```
+      # GUI 与桌面端调研
+
+      ## 1. 启动与生命周期
+      ## 2. 托盘菜单 / 通知
+      ## 3. 嵌入式 webview（desktop/web/）
+      ## 4. Rust ↔ JS IPC 边界
+      ## 5. 与 control_api / node 客户端的协作
+      ## 6. 平台差异（Windows 通知 vs 其他）
+      ## 7. 风险 / TODO
+      ## 8. 引用清单
+      ```
+    verify_prompt: |
+      独立验证：
+      1. 打开 `src/bin/pole-gui.rs` 确认 producer 提到的关键 API 真实存在
+      2. 列出 `desktop/web/` 下的所有文件，producer 是否覆盖
+      3. 抽查 1 个 IPC 命令/事件名，确认双向引用存在
+      4. 确认 `gui` feature 描述与 `Cargo.toml` 一致
+      5. PASS / FAIL
+
+  - id: protocol-whitepaper
+    title: '协议与白皮书调研（docs_PoLE_Whitepaper.md → 代码映射）'
+    assigned_to: coder
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      调研目标：把白皮书的协议描述和 Rust 代码对应起来，明确"白皮书说 X，代码里在 Y 文件的 Z 函数实现"。
+
+      调研范围：
+      - `docs_PoLE_Whitepaper.md`（重点章节：奖励规则、挑战机制、状态机、签名、结算）
+      - `src/lib.rs`（pole_protocol_draft 入口）
+      - `src/primitives.rs`（基本类型）
+      - `src/records.rs`（领域记录）
+      - `src/transactions.rs`（交易类型）
+      - `src/state.rs`（节点 / 客户端本地状态机）
+      - `src/transitions.rs`（状态转移）
+      - `src/tokenomics.rs`（奖励 / challenge 经济模型）
+      - `src/signing.rs`（签名方案）
+      - `src/schema/`（数据 schema、JSON Schema）
+      - `src/proto.rs` + `src/cosmos/`（链上 ↔ 链下映射）
+      - `src/p2p.rs` + `src/p2p_libp2p.rs`（节点间 p2p 通信）
+      - `src/activity_collector.rs` + `src/steam_collector.rs`（参与信号采集）
+      - `src/chain_bridge.rs`（链上链下桥）
+
+      强制要求：
+      1. 至少覆盖 5 个白皮书核心概念（每个对应一个或多个代码模块 + file:line）
+      2. 标注"白皮书说……→ 代码在……"
+      3. 标注 Rust 协议层（`pole_protocol_draft`）和 chain 模块（`chain/pole/`）的字段命名差异（如果有）
+      4. 标注 `chain_bridge` 是怎么把客户端数据结构映射到链上 tx 的
+      5. 标注 p2p 协议（Noise/QUIC/Yamux/KAD/mDNS/rendezvous）的实际使用位置
+      6. 输出到 `deliverable-protocol.md`：
+
+      ```
+      # 协议与白皮书调研
+
+      ## 1. 白皮书核心概念清单
+      ## 2. 白皮书 → 代码映射表
+      | 白皮书概念 | 实现位置（file:line）| 关键函数 / 类型 |
+      ## 3. 状态机（state.rs / transitions.rs）
+      ## 4. Tokenomics 落地
+      ## 5. 签名 / 加密方案
+      ## 6. p2p 协议使用
+      ## 7. 链上链下桥（chain_bridge）
+      ## 8. 风险 / TODO / 与白皮书未对齐处
+      ## 9. 引用清单
+      ```
+    verify_prompt: |
+      独立验证：
+      1. 打开白皮书前 50 行，确认 producer 报告里引用的"白皮书说 X"片段确实存在
+      2. 在 `src/lib.rs` 验证 `pub mod` 列表，覆盖 producer 提到的所有子模块
+      3. 抽查 producer 报告中 3 个 file:line 引用，确认存在且语义一致
+      4. 确认 producer 是否覆盖了"白皮书 V1 奖励规则（1 小时区块）"——漏了算 FAIL
+      5. PASS / FAIL
+
+  - id: ops-release
+    title: '运维 / 发布 / 合规调研（docs/operations、packaging、SBOM、deny、CI、脚本）'
+    assigned_to: coder
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      调研目标：把"如何把这个项目发布出去、跑起来、监控住"的所有线索摸清楚。
+
+      调研范围：
+      - `docs/operations/`（install.md、service-management.md、troubleshooting.md 等）
+      - `docs/SBOM.md` 和 `sbom.cdx.json` / `sbom.spdx.json`
+      - `deny.toml`（cargo-deny 配置）
+      - `build.rs`（Windows 资源、release 构建）
+      - `packaging/windows/`（WiX MSI 打包）
+      - `packaging/linux/`（deb 打包）
+      - `tools/wix/`（WiX 工具）
+      - `scripts/`（PowerShell 启动/停止/状态/打包/安装）
+      - `scripts/release/`（发布脚本）
+      - `.github/workflows/`（CI 流水线）
+      - `.omx/` 和 `.tmp-pole-node.json`（运行时临时文件）
+      - `RELEASE_NOTES.md` 和 `CHANGELOG.md`
+      - `TRACEABILITY.md`（需求 → 代码追溯）
+      - `IMPLEMENTATION_PLAN.md`
+      - `DEVELOPMENT_DOCS.md`
+      - `LICENSE-*`、`README.md`
+
+      强制要求：
+      1. 给出"开发者从 0 到发布"的完整步骤（开发 → 测试 → 打包 → MSI/deb → 发布说明）
+      2. 给出"运维从 0 到运行"的完整步骤（下载 → 安装 → 启动服务 → 监控 → 故障排查）
+      3. 标注 SBOM 是怎么生成的（用哪个工具、什么命令）
+      4. 标注 cargo-deny 的策略（advisories/bans/licenses/sources）
+      5. 列出所有 PowerShell 脚本的用途
+      6. CI 流水线跑哪些检查
+      7. 标注便携版目录布局（`node.json` / `client.json` / `pole-node-data/`）
+      8. 输出到 `deliverable-ops.md`：
+
+      ```
+      # 运维 / 发布 / 合规调研
+
+      ## 1. 开发者路径（开发 → 发布）
+      ## 2. 运维路径（安装 → 监控 → 故障排查）
+      ## 3. 打包工具链（WiX MSI、deb、SBOM、deny）
+      ## 4. 脚本清单与用途
+      ## 5. CI 流水线
+      ## 6. 便携版目录布局
+      ## 7. 合规（SBOM、deny、LICENSE）
+      ## 8. 待办 / 风险
+      ## 9. 引用清单
+      ```
+    verify_prompt: |
+      独立验证：
+      1. 列出 `scripts/` 下的所有 .ps1 文件，对比 producer 报告覆盖度
+      2. 打开 `deny.toml` 验证 producer 提到的策略项
+      3. 列出 `.github/workflows/` 下的所有 yml 文件，统计 producer 报告的 CI 步骤
+      4. 抽查 producer 引用的 `docs/operations/` 文档路径，确认文件存在
+      5. 确认 `TRACEABILITY.md` 和 `IMPLEMENTATION_PLAN.md` 是否被引用——漏了算 FAIL
+      6. PASS / FAIL
+
+  - id: synthesis
+    title: '汇总：PoLE 项目"上手地图"全景报告'
+    assigned_to: coder
+    depends_on: [cli-runtime, chain, gui-desktop, protocol-whitepaper, ops-release]
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      任务：基于 5 路并行调研的 deliverable 文件（`deliverable-cli-runtime.md` / `deliverable-chain.md` / `deliverable-gui.md` / `deliverable-protocol.md` / `deliverable-ops.md`），合成一份 PoLE 项目"上手地图"——给"负责全部"的全栈开发者用。
+
+      目标读者：用户角色是"全栈 owner"，要 cover CLI + 链 + GUI + 协议 + 运维 所有维度。
+
+      强制要求：
+      1. 报告用中文，目标长度 4000-8000 字（可长不可短，不要压缩）
+      2. 必须按 evidence-heavy report 标准组织：traceability、synthesis not concatenation、fact vs analysis 标记、executive summary first
+      3. 必须包含：
+         - 执行摘要（3-5 段，每段不超过 5 行）
+         - 架构总览（一张文字图 / 模块拓扑）
+         - 5 维度速查（CLI / 链 / GUI / 协议 / 运维 各一段话 + 指向详细 deliverable 的链接）
+         - 核心流程（至少 3 个：玩家参与 → 1 小时奖励结算 → Challenge）
+         - 白皮书 → 代码 → 链 三方映射关键路径
+         - 关键风险 / TODO 汇总（跨 5 维度的）
+         - 新接手者推荐阅读顺序（带 file:line）
+         - Coverage Matrix（5 路调研 → 本报告章节的对应）
+         - Evidence Inventory（最关键 20-30 个 file:line 引用）
+         - Open Questions（没覆盖到的、互相矛盾的、用户该亲自确认的）
+      4. 跨维度发现要交叉引用（"CLI 的 X 触发了协议的 Y，落库到链模块 Z"），不要 5 段独立罗列
+      5. 矛盾点必须明确 surface（如果某维度报告里说"已实现 X"，另一维度说"TODO X"，要指出来）
+      6. 输出到 `deliverable-overview.md`
+      7. 最后给出 3-5 条给用户的具体可执行建议（如"先看 X"、"建议补 Y 测试"、"建议把 Z 文档化"）
+    verify_prompt: |
+      独立验证：
+      1. 打开 5 份 producer deliverable，确认 synthesis 报告确实读了它们（不是凭空编的）
+      2. 检查 synthesis 是否包含所有强制要求章节（执行摘要、架构总览、5 维度速查、核心流程、映射、风险、阅读顺序、Coverage Matrix、Evidence Inventory、Open Questions）
+      3. 抽查 5 个 file:line 引用，确认在原文件存在
+      4. 检查 synthesis 报告是否 surface 了矛盾（如果各 producer 报告完全一致、没有任何矛盾标注，要警惕）
+      5. 检查"推荐阅读顺序"是否合理、是否覆盖 5 维度
+      6. PASS / FAIL

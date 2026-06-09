@@ -1,0 +1,35 @@
+# PoLE 仓库 — AI 助手约定
+
+本文件取代原 oh-my-codex（OMX）生成的 `AGENTS.md`，不再依赖 `.codex/` 技能树或 `omx` CLI。
+
+## 自主执行
+
+在任务边界清晰、可逆时直接推进实现与验证；仅在不可逆操作、破坏性变更或需求存在实质分歧时向维护者确认。
+
+## 工作方式
+
+- 以证据为准：结论应能由代码、测试或命令输出支撑。
+- 改动尽量小、可审查、可回滚；非请求不引入新依赖。
+- 清理/重构前先理清影响面；若行为未由测试保护，优先补回归测试再改。
+- 完成后运行与改动相关的 `cargo` 检查（如 `cargo test`、相关 crate 的 clippy 等）。
+
+## 提交说明（可选 Lore 风格）
+
+需要记录决策时，首行写**动机**（为什么改），正文可含约束与取舍；可使用 Git trailer，例如：`Tested:`、`Not-tested:`、`Confidence:`。
+
+## 仓库范围
+
+PoLE（Proof of Live Engagement）Rust 工作区：玩家/节点 CLI、可选 GUI、链与运维文档等。具体模块以 `Cargo.toml` 与各 crate 内说明为准。
+
+## V1 发布前必修（已发现的合规 / 打包风险）
+
+2026-06-07 调研（`docs/operations-ops-2026-06-07`）确认以下问题在 V1 正式 tag 前必须处理，否则发布物不可信：
+
+1. **MSI `UpgradeCode` 仍是占位符**：`packaging/windows/Product.wxs:9` 写死 `A1B2C3D4-E5F6-7890-ABCD-EF1234567890`。`MajorUpgrade` 升级路径依赖 UpgradeCode 稳定性，正式版必须替换并锁定。
+2. **`dist/release-manifests/stable.json` 签名占位**：`signature = "dev-signature"`。`docs/operations/update.md:72-73` 明确说明"正式版需替换为真实 PGP/GPG 签名"。
+3. **MSI 路径与文档路径不一致**：`Product.wxs`（`InstallScope=perUser`）+ `packaging/windows/layout.json` 实际安装到 `%LOCALAPPDATA%\PoLE`，但 `docs/operations/install.md` / `service-management.md` 大量引用 `C:\Program Files\PoLE\...` / `C:\ProgramData\PoLE\services`。以 `Product.wxs` + `src/app_paths.rs::installed_install_layout` 为准，文档需回改。
+4. **WiX 工具链 (`tools/wix/`, ~17 MB) 已入库，与 `.gitignore` 规则冲突**：`.gitignore:32-35` 排除 `tools/wix/`，但 `tools/wix/` 已 commit（200+ 二进制）。`release.yml:78-83` 已经有自拉兜底，应 `git rm -r tools/wix` 并完全依赖自动下载。
+5. **License 黑名单需要双向同步**：`pole-sbom --deny-licenses`（CI 走 `src/bin/pole-sbom.rs`）只覆盖 `GPL/AGPL/SSPL`，而 `deny.toml` 还多 `Commons-Clause` 与 `Elastic-2.0`。新增 license 黑白名单时必须两处同步。
+6. **`core2` 是路径依赖 + 无 license 表达式**：`Cargo.toml:72-73` 的 `[patch.crates-io] core2 = { path = "vendor/core2" }`。`deny.toml` 的 `[[licenses.clarify]]` 仅声明 `MIT`，无 hash 校验；`Cargo.toml` 的 `package.exclude` 未显式列 `vendor/**`，下游 `cargo install` 不会带 vendor。
+
+完整 16 项风险与对应证据见 `C:\Users\11237\.mavis\plans\plan_06890004\outputs\ops-release\deliverable-ops.md` §8。

@@ -16,21 +16,20 @@ use serde::{Deserialize, Serialize};
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, chain_bridge, current_players_url,
-    decode_hex32, default_data_dir_for_config, detect_active_game_processes,
+    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, chain_bridge,
+    current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
     effective_reward_adjustment_cap_bps, effective_reward_block_secs,
     effective_target_network_weight_units, export_governance_proposal_artifact,
     export_governance_scheduled_artifact, format_usage_block, governance_index_artifact_path,
-    governance_summary_artifact_path, heartbeat_path, hex_32, hex_encode, infer_reward_game_mapping,
-    is_reward_config_subcommand, KeyPair, latest_local_epoch, load_batches_for_epoch,
-    load_cached_reward_game_mapping, load_config_and_epoch_arg, load_status, looks_like_hex_32_arg,
-    node_prepare, open_local_protocol_state,
+    governance_summary_artifact_path, heartbeat_path, hex_32, hex_encode,
+    infer_reward_game_mapping, is_reward_config_subcommand, latest_local_epoch,
+    load_batches_for_epoch, load_cached_reward_game_mapping, load_config_and_epoch_arg,
+    load_status, looks_like_hex_32_arg, node_prepare, open_local_protocol_state,
     parse_config_path_and_rest, parse_config_path_and_rest_with_known_first_arg,
     parse_optional_u64_arg, parse_socket_peer_specs, parse_socket_topics, parse_vote_choice,
-    prepare_local_epoch,
-    print_command_header, print_data_dir_path, print_governance_index,
+    prepare_local_epoch, print_command_header, print_data_dir_path, print_governance_index,
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_path_entry, print_reward_adjustment_index,
     print_reward_adjustment_summary, progress_path, prune_retention, recognition_cache_path,
@@ -41,9 +40,9 @@ use pole_protocol_draft::{
     suggested_settlement_height, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceConfig,
     ActivitySourceKind, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
-    GovernanceArtifactIndex, GovernanceArtifactSummary, LocalNodeProgress, NodeConfig, P2pNetwork,
-    ProtocolStore, ReqwestHttpTextClient, RewardAdjustmentArtifactSummary, RewardSourceMode,
-    ServiceRuntime, ServiceSnapshot, SocketP2pNetwork, INITIAL_EMISSION_RATE_BPS,
+    GovernanceArtifactIndex, GovernanceArtifactSummary, KeyPair, LocalNodeProgress, NodeConfig,
+    P2pNetwork, ProtocolStore, ReqwestHttpTextClient, RewardAdjustmentArtifactSummary,
+    RewardSourceMode, ServiceRuntime, ServiceSnapshot, SocketP2pNetwork, INITIAL_EMISSION_RATE_BPS,
     LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR, TOTAL_SUPPLY,
 };
 type ClientCommandHandler = pole_protocol_draft::CommandHandler;
@@ -331,8 +330,13 @@ fn repair_identity_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>
     }
 
     eprintln!("WARNING: Repairing node identity will invalidate all previously stored data.");
-    eprintln!("WARNING: All previously submitted observations and payloads will become unverifiable.");
-    eprintln!("WARNING: Clear the data directory ({}) after repair to avoid verification errors.", config.runtime.data_dir);
+    eprintln!(
+        "WARNING: All previously submitted observations and payloads will become unverifiable."
+    );
+    eprintln!(
+        "WARNING: Clear the data directory ({}) after repair to avoid verification errors.",
+        config.runtime.data_dir
+    );
 
     let identity_keypair = generate_identity_keypair();
     config.node_id_hex = node_id_hex_from_identity(&identity_keypair);
@@ -1335,7 +1339,10 @@ fn doctor_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "hint=run `pole-client init` for a fresh workspace or fix the config fields above"
         );
         if placeholder_node_identity {
-            println!("hint_identity=run `pole-client repair-identity {}` to replace placeholder node id", config_path.to_string_lossy());
+            println!(
+                "hint_identity=run `pole-client repair-identity {}` to replace placeholder node id",
+                config_path.to_string_lossy()
+            );
         }
     }
 
@@ -1394,7 +1401,8 @@ fn collect_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(foreground) = detect_foreground_process_name() {
         if should_capture_foreground_process(&foreground) {
             let game_process = canonical_process_name(&foreground);
-            let merged = merge_process_names(&config.runtime.game_process_names, &[game_process.clone()]);
+            let merged =
+                merge_process_names(&config.runtime.game_process_names, &[game_process.clone()]);
             if !merged.is_empty() && merged != config.runtime.game_process_names {
                 configure_game_process_awareness(&mut config);
                 config.runtime.game_process_names = merged;
@@ -1403,7 +1411,10 @@ fn collect_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 config.save_json(&config_path)?;
                 config_changed = true;
                 println!("game_process_detected={}", game_process);
-                println!("game_mappings_updated={}", !config.reward.game_mappings.is_empty());
+                println!(
+                    "game_mappings_updated={}",
+                    !config.reward.game_mappings.is_empty()
+                );
             }
         }
     }
@@ -2496,12 +2507,20 @@ fn p2p_socket_add_peer_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Er
     let _ = decode_hex32(&peer_id_hex, "peer_id_hex")?;
     let _ = pole_protocol_draft::parse_socket_addr(&peer_addr, "peer_addr")?;
 
-    config.runtime.p2p_socket.peers.retain(|peer| peer.peer_id_hex != peer_id_hex);
-    config.runtime.p2p_socket.peers.push(pole_protocol_draft::P2pSocketPeerConfig {
-        peer_id_hex: peer_id_hex.clone(),
-        addr: peer_addr.clone(),
-        topics: topics.clone(),
-    });
+    config
+        .runtime
+        .p2p_socket
+        .peers
+        .retain(|peer| peer.peer_id_hex != peer_id_hex);
+    config
+        .runtime
+        .p2p_socket
+        .peers
+        .push(pole_protocol_draft::P2pSocketPeerConfig {
+            peer_id_hex: peer_id_hex.clone(),
+            addr: peer_addr.clone(),
+            topics: topics.clone(),
+        });
     config
         .runtime
         .p2p_socket
@@ -3175,7 +3194,8 @@ fn submit_batch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut batch_count = 0;
     for batch in &batches {
         if batch.batch_commit.epoch_id == epoch_id {
-            let tx_json = chain_bridge::generate_tx_json_for_batch(&collector_hex, &batch.batch_commit)?;
+            let tx_json =
+                chain_bridge::generate_tx_json_for_batch(&collector_hex, &batch.batch_commit)?;
             println!("{}", tx_json);
             batch_count += 1;
         }
@@ -3213,10 +3233,8 @@ fn submit_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let proposer_hex = hex_encode(&config.node_id()?);
-    let tx_json = chain_bridge::generate_tx_json_for_epoch_commit(
-        &proposer_hex,
-        &preparation.epoch_commit,
-    )?;
+    let tx_json =
+        chain_bridge::generate_tx_json_for_epoch_commit(&proposer_hex, &preparation.epoch_commit)?;
 
     println!("PoLE client submit-epoch");
     println!("config_path={}", config_path.to_string_lossy());
@@ -3258,7 +3276,9 @@ fn export_tx_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         "epoch" => {
             if args.len() < start_index + 4 {
-                return Err("epoch export requires current-height and challenge-window-blocks".into());
+                return Err(
+                    "epoch export requires current-height and challenge-window-blocks".into(),
+                );
             }
             let current_height = resolve_current_height_arg(args, start_index + 2, &progress)?;
             let challenge_window_blocks =
@@ -4190,12 +4210,14 @@ fn print_usage() {
 }
 
 fn wallet_create_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args.get(2).map(PathBuf::from).unwrap_or_else(|| {
-        default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into()
-    });
-    let password = args.get(3).cloned().unwrap_or_else(|| {
-        rpassword::prompt_password("password: ").unwrap_or_default()
-    });
+    let data_dir = args
+        .get(2)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
+    let password = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| rpassword::prompt_password("password: ").unwrap_or_default());
     let comment = args.get(4).map(String::clone);
 
     let mnemonic = pole_protocol_draft::create_wallet(&data_dir, comment, &password)?;
@@ -4206,10 +4228,14 @@ fn wallet_create_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 fn wallet_recover_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args.get(2).map(PathBuf::from).ok_or("usage: wallet-recover [data-dir] [password] <24-word-mnemonic...>")?;
-    let password = args.get(3).cloned().unwrap_or_else(|| {
-        rpassword::prompt_password("password: ").unwrap_or_default()
-    });
+    let data_dir = args
+        .get(2)
+        .map(PathBuf::from)
+        .ok_or("usage: wallet-recover [data-dir] [password] <24-word-mnemonic...>")?;
+    let password = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| rpassword::prompt_password("password: ").unwrap_or_default());
     let words: Vec<String> = args[4..].to_vec();
     if words.len() != 24 {
         return Err("mnemonic must be exactly 24 words".into());
@@ -4223,25 +4249,32 @@ fn wallet_recover_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
 }
 
 fn wallet_address_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args.get(2).map(PathBuf::from).unwrap_or_else(|| {
-        default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into()
-    });
-    let password = args.get(3).cloned().unwrap_or_else(|| {
-        rpassword::prompt_password("wallet password: ").unwrap_or_default()
-    });
+    let data_dir = args
+        .get(2)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
+    let password = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| rpassword::prompt_password("wallet password: ").unwrap_or_default());
     let address = pole_protocol_draft::show_address_with_password(&data_dir, &password)?;
     println!("{}", address);
     Ok(())
 }
 
 fn wallet_set_reward_address_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = PathBuf::from(args.get(2).ok_or("usage: wallet-set-reward-address <config-path> [data-dir] [password]")?);
-    let data_dir = args.get(3).map(PathBuf::from).unwrap_or_else(|| {
-        default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into()
-    });
-    let password = args.get(4).cloned().unwrap_or_else(|| {
-        rpassword::prompt_password("wallet password: ").unwrap_or_default()
-    });
+    let config_path = PathBuf::from(
+        args.get(2)
+            .ok_or("usage: wallet-set-reward-address <config-path> [data-dir] [password]")?,
+    );
+    let data_dir = args
+        .get(3)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
+    let password = args
+        .get(4)
+        .cloned()
+        .unwrap_or_else(|| rpassword::prompt_password("wallet password: ").unwrap_or_default());
 
     let address = pole_protocol_draft::set_reward_address(&data_dir, &config_path, &password)?;
     println!("reward_address_updated");

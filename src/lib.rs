@@ -3,13 +3,13 @@
 pub mod activity_collector;
 pub mod app_paths;
 pub mod chain_bridge;
-pub mod config;
 pub mod cli_output;
-pub mod cosmos;
 pub mod cli_parsing;
 pub mod cli_support;
+pub mod config;
 pub mod control_api;
 pub mod control_api_types;
+pub mod cosmos;
 pub mod executor;
 pub mod genesis_builder;
 mod governance_runtime;
@@ -24,11 +24,11 @@ pub mod node_gvs;
 pub mod node_pipeline;
 pub mod node_prepare;
 pub mod node_rewards;
-pub mod observability;
 pub mod node_runtime;
 pub mod node_settlement;
 pub mod node_storage_audit;
 pub mod node_verifier;
+pub mod observability;
 pub mod p2p;
 pub mod p2p_libp2p;
 pub mod params;
@@ -58,10 +58,6 @@ pub use activity_collector::{
     CommunityJsonCollector, EaLiveCollector, EpicLiveCollector, GogLiveCollector,
     LiveActivityCollector, ThirdPartyJsonCollector,
 };
-pub use install_layout::{
-    current_platform, normalize_path, portable_layout_for_config, resolve_install_layout,
-    resolve_runtime_data_dir, runtime_layout_for_config, InstallLayout, InstallMode, Platform,
-};
 pub use cli_output::{
     dispatch_command, format_usage_block, parse_vote_choice, print_governance_index,
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
@@ -90,15 +86,20 @@ pub use control_api::{
     update_config as update_control_api_config,
 };
 pub use control_api_types::{
-    ApiConfigResponse, ApiDashboardResponse, ApiBlockchainResponse, ApiLogsResponse, ApiMetaResponse,
-    ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse, ApiUpdateResponse, AppMetaView,
-    BlockchainStatusView, ChallengeActivityView, ConfigUpdateRequest, ConfigView, DashboardView,
-    InstallLayoutView, LogEntryView, NetworkPeerView, NodeHealthView, P2pNetworkView, RewardPoolView,
-    ServiceActionRequest, ServiceActionResponse, ServiceStatusView, StorageInfoView,
-    TokenomicsSummaryView, UpdateActionRequest, UpdateActionResponse, UpdateStatusView,
+    ApiBlockchainResponse, ApiConfigResponse, ApiDashboardResponse, ApiLogsResponse,
+    ApiMetaResponse, ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse,
+    ApiUpdateResponse, AppMetaView, BlockchainStatusView, ChallengeActivityView,
+    ConfigUpdateRequest, ConfigView, DashboardView, InstallLayoutView, LogEntryView,
+    NetworkPeerView, NodeHealthView, P2pNetworkView, RewardPoolView, ServiceActionRequest,
+    ServiceActionResponse, ServiceStatusView, StorageInfoView, TokenomicsSummaryView,
+    UpdateActionRequest, UpdateActionResponse, UpdateStatusView,
 };
 pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};
+pub use install_layout::{
+    current_platform, normalize_path, portable_layout_for_config, resolve_install_layout,
+    resolve_runtime_data_dir, runtime_layout_for_config, InstallLayout, InstallMode, Platform,
+};
 pub use node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
@@ -220,7 +221,7 @@ pub use updater::{
     UpdateOverview,
 };
 pub use wallet::{
-    create_wallet, derive_child_key, EncryptedKeystore, export_secret, generate_mnemonic,
-    hex_decode, hex_encode, word_to_index, KeyPair, Mnemonic, recover_wallet, set_reward_address,
-    show_address, show_address_with_password, sign_transaction, WalletError,
+    create_wallet, derive_child_key, export_secret, generate_mnemonic, hex_decode, hex_encode,
+    recover_wallet, set_reward_address, show_address, show_address_with_password, sign_transaction,
+    word_to_index, EncryptedKeystore, KeyPair, Mnemonic, WalletError,
 };

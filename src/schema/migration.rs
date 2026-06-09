@@ -20,22 +20,31 @@ use super::version::SchemaVersion;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationError {
     /// No path of registered steps connects `from` to `to`.
-    NoPath { from: SchemaVersion, to: SchemaVersion },
+    NoPath {
+        from: SchemaVersion,
+        to: SchemaVersion,
+    },
     /// A registered step returned an error.
-    StepFailed { from: SchemaVersion, to: SchemaVersion, reason: String },
+    StepFailed {
+        from: SchemaVersion,
+        to: SchemaVersion,
+        reason: String,
+    },
     /// The step registered for a transition is missing.
-    MissingStep { from: SchemaVersion, to: SchemaVersion },
+    MissingStep {
+        from: SchemaVersion,
+        to: SchemaVersion,
+    },
 }
 
 impl fmt::Display for MigrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoPath { from, to } =>
-                write!(f, "no migration path from {from} to {to}"),
-            Self::MissingStep { from, to } =>
-                write!(f, "missing migration step {from} -> {to}"),
-            Self::StepFailed { from, to, reason } =>
-                write!(f, "migration {from} -> {to} failed: {reason}"),
+            Self::NoPath { from, to } => write!(f, "no migration path from {from} to {to}"),
+            Self::MissingStep { from, to } => write!(f, "missing migration step {from} -> {to}"),
+            Self::StepFailed { from, to, reason } => {
+                write!(f, "migration {from} -> {to} failed: {reason}")
+            }
         }
     }
 }
@@ -59,7 +68,10 @@ pub struct MigrationRegistry {
 
 impl MigrationRegistry {
     pub fn new(name: &'static str) -> Self {
-        Self { name, steps: BTreeMap::new() }
+        Self {
+            name,
+            steps: BTreeMap::new(),
+        }
     }
 
     /// Register a single step. Panics if a step for the same
@@ -71,10 +83,7 @@ impl MigrationRegistry {
             "{}: step must be to the immediate next version (got {from} -> {to})",
             self.name,
         );
-        self.steps
-            .entry(from)
-            .or_default()
-            .insert(to, step);
+        self.steps.entry(from).or_default().insert(to, step);
         self
     }
 
@@ -149,7 +158,9 @@ mod tests {
     fn empty_registry_is_a_noop_when_from_equals_to() {
         let reg = MigrationRegistry::new("test");
         let v = json!({});
-        assert!(reg.migrate(SchemaVersion::V0_RAW, SchemaVersion::V0_RAW, v.clone()).is_ok());
+        assert!(reg
+            .migrate(SchemaVersion::V0_RAW, SchemaVersion::V0_RAW, v.clone())
+            .is_ok());
     }
 
     #[test]
@@ -168,9 +179,7 @@ mod tests {
             .register(0, 1, bump_value)
             .register(1, 2, bump_value);
         let v = json!({ "v": 0 });
-        let out = reg
-            .migrate(SchemaVersion(0), SchemaVersion(2), v)
-            .unwrap();
+        let out = reg.migrate(SchemaVersion(0), SchemaVersion(2), v).unwrap();
         assert_eq!(out["v"], json!(2));
     }
 
@@ -186,9 +195,8 @@ mod tests {
 
     #[test]
     fn step_must_target_immediate_next() {
-        let result = std::panic::catch_unwind(|| {
-            MigrationRegistry::new("test").register(0, 2, bump_value)
-        });
+        let result =
+            std::panic::catch_unwind(|| MigrationRegistry::new("test").register(0, 2, bump_value));
         assert!(result.is_err());
     }
 }

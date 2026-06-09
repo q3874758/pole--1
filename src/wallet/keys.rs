@@ -2,7 +2,6 @@ use crate::wallet::error::{Result, WalletError};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyPair {
     pub secret: [u8; 32],
@@ -56,7 +55,10 @@ impl KeyPair {
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 pub fn hex_decode(hex: &str) -> Result<Vec<u8>> {

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::primitives::{Amount, EpochId, Height, NodeId};
-use crate::records::{AggregateRecord, BatchCommit, Challenge, EpochCommit, ReplicaReceipt, RewardRecord};
 use crate::node_pipeline::AssembledBatch;
-use crate::node_settlement::EpochSettlementArtifact;
 use crate::node_rewards::EpochRewardArtifact;
+use crate::node_settlement::EpochSettlementArtifact;
+use crate::primitives::{Amount, EpochId, Height, NodeId};
+use crate::records::{
+    AggregateRecord, BatchCommit, Challenge, EpochCommit, ReplicaReceipt, RewardRecord,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CosmosBridgeConfig {
@@ -73,10 +75,14 @@ impl CosmosBridge {
     }
 }
 
-pub fn assemble_batch_to_json(batch: &AssembledBatch, output_path: &Path) -> Result<BatchCommitOutput, std::io::Error> {
+pub fn assemble_batch_to_json(
+    batch: &AssembledBatch,
+    output_path: &Path,
+) -> Result<BatchCommitOutput, std::io::Error> {
     let rust_batch = batch.batch_commit.clone();
 
-    let json = serde_json::to_string_pretty(&rust_batch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let json = serde_json::to_string_pretty(&rust_batch)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     std::fs::write(output_path, &json)?;
 
@@ -89,7 +95,9 @@ pub fn assemble_batch_to_json(batch: &AssembledBatch, output_path: &Path) -> Res
     })
 }
 
-pub fn epoch_settlement_to_commit_output(settlement: &EpochSettlementArtifact) -> EpochCommitOutput {
+pub fn epoch_settlement_to_commit_output(
+    settlement: &EpochSettlementArtifact,
+) -> EpochCommitOutput {
     EpochCommitOutput {
         json_path: settlement.local_chain_store_path.clone(),
         epoch_id: settlement.epoch_id,
@@ -102,7 +110,11 @@ pub fn epoch_settlement_to_commit_output(settlement: &EpochSettlementArtifact) -
     }
 }
 
-pub fn reward_records_to_json(artifact: &EpochRewardArtifact, records: &[RewardRecord], output_path: &Path) -> Result<RewardRecordsOutput, std::io::Error> {
+pub fn reward_records_to_json(
+    artifact: &EpochRewardArtifact,
+    records: &[RewardRecord],
+    output_path: &Path,
+) -> Result<RewardRecordsOutput, std::io::Error> {
     #[derive(Serialize)]
     struct RewardRecordsWrapper<'a> {
         epoch_id: EpochId,
@@ -120,7 +132,8 @@ pub fn reward_records_to_json(artifact: &EpochRewardArtifact, records: &[RewardR
         records,
     };
 
-    let json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let json = serde_json::to_string_pretty(&wrapper)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     std::fs::write(output_path, &json)?;
 
@@ -132,7 +145,11 @@ pub fn reward_records_to_json(artifact: &EpochRewardArtifact, records: &[RewardR
     })
 }
 
-pub fn aggregate_records_to_json(records: &[AggregateRecord], aggregate_root_hex: &str, output_path: &Path) -> Result<String, std::io::Error> {
+pub fn aggregate_records_to_json(
+    records: &[AggregateRecord],
+    aggregate_root_hex: &str,
+    output_path: &Path,
+) -> Result<String, std::io::Error> {
     #[derive(Serialize)]
     struct AggregateRecordsWrapper<'a> {
         aggregate_root_hex: &'a str,
@@ -144,15 +161,20 @@ pub fn aggregate_records_to_json(records: &[AggregateRecord], aggregate_root_hex
         records,
     };
 
-    let json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let json = serde_json::to_string_pretty(&wrapper)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     std::fs::write(output_path, &json)?;
 
     Ok(aggregate_root_hex.to_string())
 }
 
-pub fn replica_receipt_to_json(receipt: &ReplicaReceipt, output_path: &Path) -> Result<String, std::io::Error> {
-    let json = serde_json::to_string_pretty(receipt).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+pub fn replica_receipt_to_json(
+    receipt: &ReplicaReceipt,
+    output_path: &Path,
+) -> Result<String, std::io::Error> {
+    let json = serde_json::to_string_pretty(receipt)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     std::fs::write(output_path, &json)?;
 
@@ -179,7 +201,10 @@ fn challenge_state_name(state: crate::primitives::ChallengeState) -> &'static st
     }
 }
 
-pub fn challenge_to_json(challenge: &Challenge, output_path: &Path) -> Result<String, std::io::Error> {
+pub fn challenge_to_json(
+    challenge: &Challenge,
+    output_path: &Path,
+) -> Result<String, std::io::Error> {
     #[derive(Serialize)]
     struct ChallengeWrapper {
         challenge_id_hex: String,
@@ -227,7 +252,8 @@ pub fn challenge_to_json(challenge: &Challenge, output_path: &Path) -> Result<St
         evidence: evidence_json,
     };
 
-    let json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let json = serde_json::to_string_pretty(&wrapper)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     std::fs::write(output_path, &json)?;
 
@@ -240,7 +266,10 @@ pub struct CosmosTxMessage {
 }
 
 impl CosmosTxMessage {
-    pub fn submit_batch(collector: &str, batch_commit_json: &serde_json::Value) -> Result<Self, serde_json::Error> {
+    pub fn submit_batch(
+        collector: &str,
+        batch_commit_json: &serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgSubmitBatch {
             collector: String,
@@ -261,7 +290,10 @@ impl CosmosTxMessage {
         })
     }
 
-    pub fn commit_epoch(proposer: &str, epoch_commit_json: &serde_json::Value) -> Result<Self, serde_json::Error> {
+    pub fn commit_epoch(
+        proposer: &str,
+        epoch_commit_json: &serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgCommitEpoch {
             proposer: String,
@@ -282,7 +314,11 @@ impl CosmosTxMessage {
         })
     }
 
-    pub fn claim_reward(claimer: &str, epoch_id: u64, recipient: &str) -> Result<Self, serde_json::Error> {
+    pub fn claim_reward(
+        claimer: &str,
+        epoch_id: u64,
+        recipient: &str,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgClaimReward {
             claimer: String,
@@ -305,7 +341,10 @@ impl CosmosTxMessage {
         })
     }
 
-    pub fn open_challenge(challenger: &str, challenge_json: &serde_json::Value) -> Result<Self, serde_json::Error> {
+    pub fn open_challenge(
+        challenger: &str,
+        challenge_json: &serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgOpenChallenge {
             challenger: String,
@@ -325,7 +364,10 @@ impl CosmosTxMessage {
         })
     }
 
-    pub fn submit_replica_receipt(storer: &str, receipt_json: &serde_json::Value) -> Result<Self, serde_json::Error> {
+    pub fn submit_replica_receipt(
+        storer: &str,
+        receipt_json: &serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgSubmitReplicaReceipt {
             storer: String,
@@ -346,7 +388,10 @@ impl CosmosTxMessage {
         })
     }
 
-    pub fn upsert_game_weight(authority: &str, game_weight_json: &serde_json::Value) -> Result<Self, serde_json::Error> {
+    pub fn upsert_game_weight(
+        authority: &str,
+        game_weight_json: &serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
         #[derive(Serialize)]
         struct MsgUpsertGameWeight {
             authority: String,
@@ -367,27 +412,46 @@ impl CosmosTxMessage {
     }
 }
 
-pub fn build_batch_submit_tx(collector_hex: &str, batch_commit_json: &serde_json::Value) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_batch_submit_tx(
+    collector_hex: &str,
+    batch_commit_json: &serde_json::Value,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::submit_batch(collector_hex, batch_commit_json)
 }
 
-pub fn build_epoch_commit_tx(proposer_hex: &str, epoch_commit_json: &serde_json::Value) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_epoch_commit_tx(
+    proposer_hex: &str,
+    epoch_commit_json: &serde_json::Value,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::commit_epoch(proposer_hex, epoch_commit_json)
 }
 
-pub fn build_claim_reward_tx(claimer_hex: &str, epoch_id: u64, recipient_hex: &str) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_claim_reward_tx(
+    claimer_hex: &str,
+    epoch_id: u64,
+    recipient_hex: &str,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::claim_reward(claimer_hex, epoch_id, recipient_hex)
 }
 
-pub fn build_open_challenge_tx(challenger_hex: &str, challenge_json: &serde_json::Value) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_open_challenge_tx(
+    challenger_hex: &str,
+    challenge_json: &serde_json::Value,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::open_challenge(challenger_hex, challenge_json)
 }
 
-pub fn build_replica_receipt_tx(storer_hex: &str, receipt_json: &serde_json::Value) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_replica_receipt_tx(
+    storer_hex: &str,
+    receipt_json: &serde_json::Value,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::submit_replica_receipt(storer_hex, receipt_json)
 }
 
-pub fn build_game_weight_tx(authority_hex: &str, game_weight_json: &serde_json::Value) -> Result<CosmosTxMessage, serde_json::Error> {
+pub fn build_game_weight_tx(
+    authority_hex: &str,
+    game_weight_json: &serde_json::Value,
+) -> Result<CosmosTxMessage, serde_json::Error> {
     CosmosTxMessage::upsert_game_weight(authority_hex, game_weight_json)
 }
 
@@ -403,11 +467,15 @@ pub fn parse_reward_record_from_json(json_str: &str) -> Result<RewardRecord, ser
     serde_json::from_str(json_str)
 }
 
-pub fn parse_aggregate_record_from_json(json_str: &str) -> Result<AggregateRecord, serde_json::Error> {
+pub fn parse_aggregate_record_from_json(
+    json_str: &str,
+) -> Result<AggregateRecord, serde_json::Error> {
     serde_json::from_str(json_str)
 }
 
-pub fn parse_replica_receipt_from_json(json_str: &str) -> Result<ReplicaReceipt, serde_json::Error> {
+pub fn parse_replica_receipt_from_json(
+    json_str: &str,
+) -> Result<ReplicaReceipt, serde_json::Error> {
     serde_json::from_str(json_str)
 }
 
@@ -492,10 +560,17 @@ pub fn replica_receipt_to_cosmos_json(receipt: &ReplicaReceipt) -> serde_json::V
 }
 
 fn hex_encode<T: AsRef<[u8]>>(bytes: &T) -> String {
-    bytes.as_ref().iter().map(|b| format!("{:02x}", b)).collect()
+    bytes
+        .as_ref()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
 }
 
-pub fn generate_tx_json_for_batch(collector_hex: &str, batch: &BatchCommit) -> Result<String, serde_json::Error> {
+pub fn generate_tx_json_for_batch(
+    collector_hex: &str,
+    batch: &BatchCommit,
+) -> Result<String, serde_json::Error> {
     let cosmos_json = batch_commit_to_cosmos_json(batch);
     let tx = build_batch_submit_tx(collector_hex, &cosmos_json)?;
     let wrapper = serde_json::json!({
@@ -505,7 +580,10 @@ pub fn generate_tx_json_for_batch(collector_hex: &str, batch: &BatchCommit) -> R
     serde_json::to_string_pretty(&wrapper)
 }
 
-pub fn generate_tx_json_for_epoch_commit(proposer_hex: &str, commit: &EpochCommit) -> Result<String, serde_json::Error> {
+pub fn generate_tx_json_for_epoch_commit(
+    proposer_hex: &str,
+    commit: &EpochCommit,
+) -> Result<String, serde_json::Error> {
     let cosmos_json = epoch_commit_to_cosmos_json(commit);
     let tx = build_epoch_commit_tx(proposer_hex, &cosmos_json)?;
     let wrapper = serde_json::json!({
@@ -515,7 +593,11 @@ pub fn generate_tx_json_for_epoch_commit(proposer_hex: &str, commit: &EpochCommi
     serde_json::to_string_pretty(&wrapper)
 }
 
-pub fn generate_tx_json_for_claim_reward(claimer_hex: &str, epoch_id: u64, recipient_hex: &str) -> Result<String, serde_json::Error> {
+pub fn generate_tx_json_for_claim_reward(
+    claimer_hex: &str,
+    epoch_id: u64,
+    recipient_hex: &str,
+) -> Result<String, serde_json::Error> {
     let tx = build_claim_reward_tx(claimer_hex, epoch_id, recipient_hex)?;
     let wrapper = serde_json::json!({
         "type_url": tx.type_url,
@@ -524,13 +606,14 @@ pub fn generate_tx_json_for_claim_reward(claimer_hex: &str, epoch_id: u64, recip
     serde_json::to_string_pretty(&wrapper)
 }
 
-pub fn export_batch_for_cosmos_submit(batch: &AssembledBatch, output_dir: &Path) -> Result<BatchCommitOutput, std::io::Error> {
+pub fn export_batch_for_cosmos_submit(
+    batch: &AssembledBatch,
+    output_dir: &Path,
+) -> Result<BatchCommitOutput, std::io::Error> {
     let rust_batch = &batch.batch_commit;
 
-    let tx_json = generate_tx_json_for_batch(
-        &hex_encode(&rust_batch.collector_id),
-        rust_batch,
-    ).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let tx_json = generate_tx_json_for_batch(&hex_encode(&rust_batch.collector_id), rust_batch)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     let file_name = format!("batch-{:06}-submit-tx.json", rust_batch.epoch_id);
     let output_path = output_dir.join(&file_name);
@@ -546,11 +629,12 @@ pub fn export_batch_for_cosmos_submit(batch: &AssembledBatch, output_dir: &Path)
     })
 }
 
-pub fn export_epoch_commit_for_cosmos(commit: &EpochCommit, output_dir: &Path) -> Result<EpochCommitOutput, std::io::Error> {
-    let tx_json = generate_tx_json_for_epoch_commit(
-        &hex_encode(&commit.proposer_id),
-        commit,
-    ).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+pub fn export_epoch_commit_for_cosmos(
+    commit: &EpochCommit,
+    output_dir: &Path,
+) -> Result<EpochCommitOutput, std::io::Error> {
+    let tx_json = generate_tx_json_for_epoch_commit(&hex_encode(&commit.proposer_id), commit)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     let file_name = format!("epoch-{:06}-commit-tx.json", commit.epoch_id);
     let output_path = output_dir.join(&file_name);
@@ -569,13 +653,24 @@ pub fn export_epoch_commit_for_cosmos(commit: &EpochCommit, output_dir: &Path) -
     })
 }
 
-pub fn export_replica_receipt_for_cosmos(receipt: &ReplicaReceipt, output_dir: &Path) -> Result<String, std::io::Error> {
+pub fn export_replica_receipt_for_cosmos(
+    receipt: &ReplicaReceipt,
+    output_dir: &Path,
+) -> Result<String, std::io::Error> {
     let cosmos_json = replica_receipt_to_cosmos_json(receipt);
 
-    let file_name = format!("receipt-{:06}-{}-tx.json", receipt.epoch_id, receipt.payload_cid);
+    let file_name = format!(
+        "receipt-{:06}-{}-tx.json",
+        receipt.epoch_id, receipt.payload_cid
+    );
     let output_path = output_dir.join(&file_name);
 
-    let output_json = serde_json::to_string_pretty(&cosmos_json).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize cosmos output: {e}")))?;
+    let output_json = serde_json::to_string_pretty(&cosmos_json).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("failed to serialize cosmos output: {e}"),
+        )
+    })?;
     std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())
@@ -585,20 +680,28 @@ pub fn batch_commit_from_assembled_batch(batch: &AssembledBatch) -> BatchCommit 
     batch.batch_commit.clone()
 }
 
-pub fn export_reward_records_for_cosmos(records: &[RewardRecord], output_dir: &Path, epoch_id: EpochId) -> Result<RewardRecordsOutput, std::io::Error> {
+pub fn export_reward_records_for_cosmos(
+    records: &[RewardRecord],
+    output_dir: &Path,
+    epoch_id: EpochId,
+) -> Result<RewardRecordsOutput, std::io::Error> {
     let file_name = format!("reward-records-{:06}.json", epoch_id);
     let output_path = output_dir.join(&file_name);
 
-    let cosmos_records: Vec<serde_json::Value> = records.iter()
-        .map(reward_record_to_cosmos_json)
-        .collect();
+    let cosmos_records: Vec<serde_json::Value> =
+        records.iter().map(reward_record_to_cosmos_json).collect();
 
     let wrapper = serde_json::json!({
         "epoch_id": epoch_id,
         "records": cosmos_records,
     });
 
-    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("failed to serialize output: {e}"),
+        )
+    })?;
     std::fs::write(&output_path, output_json)?;
 
     Ok(RewardRecordsOutput {
@@ -609,11 +712,16 @@ pub fn export_reward_records_for_cosmos(records: &[RewardRecord], output_dir: &P
     })
 }
 
-pub fn export_aggregate_records_for_cosmos(records: &[AggregateRecord], output_dir: &Path, epoch_id: EpochId) -> Result<String, std::io::Error> {
+pub fn export_aggregate_records_for_cosmos(
+    records: &[AggregateRecord],
+    output_dir: &Path,
+    epoch_id: EpochId,
+) -> Result<String, std::io::Error> {
     let file_name = format!("aggregate-records-{:06}.json", epoch_id);
     let output_path = output_dir.join(&file_name);
 
-    let cosmos_records: Vec<serde_json::Value> = records.iter()
+    let cosmos_records: Vec<serde_json::Value> = records
+        .iter()
         .map(aggregate_record_to_cosmos_json)
         .collect();
 
@@ -622,7 +730,12 @@ pub fn export_aggregate_records_for_cosmos(records: &[AggregateRecord], output_d
         "records": cosmos_records,
     });
 
-    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("failed to serialize output: {e}"),
+        )
+    })?;
     std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())
@@ -667,28 +780,49 @@ pub fn create_cosmos_signed_tx_json(
     })
 }
 
-pub fn generate_submit_batch_tx(_collector_id: &NodeId, batch: &BatchCommit, output_dir: &Path) -> Result<BatchCommitOutput, std::io::Error> {
-    export_batch_for_cosmos_submit(&AssembledBatch {
-        batch_commit: batch.clone(),
-        payload_hash: [0u8; 32],
-        payload_cid: batch.payload_cid.clone(),
-        payload_bytes: Vec::new(),
-        observations: Vec::new(),
-    }, output_dir)
+pub fn generate_submit_batch_tx(
+    _collector_id: &NodeId,
+    batch: &BatchCommit,
+    output_dir: &Path,
+) -> Result<BatchCommitOutput, std::io::Error> {
+    export_batch_for_cosmos_submit(
+        &AssembledBatch {
+            batch_commit: batch.clone(),
+            payload_hash: [0u8; 32],
+            payload_cid: batch.payload_cid.clone(),
+            payload_bytes: Vec::new(),
+            observations: Vec::new(),
+        },
+        output_dir,
+    )
 }
 
-pub fn generate_commit_epoch_tx(_proposer_id: &NodeId, commit: &EpochCommit, output_dir: &Path) -> Result<EpochCommitOutput, std::io::Error> {
+pub fn generate_commit_epoch_tx(
+    _proposer_id: &NodeId,
+    commit: &EpochCommit,
+    output_dir: &Path,
+) -> Result<EpochCommitOutput, std::io::Error> {
     export_epoch_commit_for_cosmos(commit, output_dir)
 }
 
-pub fn generate_claim_reward_tx(claimer_id: &NodeId, epoch_id: EpochId, recipient_id: &NodeId, output_dir: &Path) -> Result<String, std::io::Error> {
+pub fn generate_claim_reward_tx(
+    claimer_id: &NodeId,
+    epoch_id: EpochId,
+    recipient_id: &NodeId,
+    output_dir: &Path,
+) -> Result<String, std::io::Error> {
     let tx_json = generate_tx_json_for_claim_reward(
         &hex_encode(claimer_id),
         epoch_id,
         &hex_encode(recipient_id),
-    ).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    )
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-    let file_name = format!("claim-reward-{:06}-{}.json", epoch_id, hex_encode(recipient_id));
+    let file_name = format!(
+        "claim-reward-{:06}-{}.json",
+        epoch_id,
+        hex_encode(recipient_id)
+    );
     let output_path = output_dir.join(&file_name);
 
     std::fs::write(&output_path, &tx_json)?;
@@ -696,8 +830,13 @@ pub fn generate_claim_reward_tx(claimer_id: &NodeId, epoch_id: EpochId, recipien
     Ok(output_path.to_string_lossy().to_string())
 }
 
-pub fn generate_open_challenge_tx(challenger_id: &NodeId, challenge: &Challenge, output_dir: &Path) -> Result<String, std::io::Error> {
-    let challenge_json = serde_json::to_value(challenge).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+pub fn generate_open_challenge_tx(
+    challenger_id: &NodeId,
+    challenge: &Challenge,
+    output_dir: &Path,
+) -> Result<String, std::io::Error> {
+    let challenge_json = serde_json::to_value(challenge)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let tx = build_open_challenge_tx(&hex_encode(challenger_id), &challenge_json)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
@@ -706,10 +845,18 @@ pub fn generate_open_challenge_tx(challenger_id: &NodeId, challenge: &Challenge,
         "value": base64_encode(&tx.value),
     });
 
-    let file_name = format!("open-challenge-{}.json", hex_encode(&challenge.challenge_id));
+    let file_name = format!(
+        "open-challenge-{}.json",
+        hex_encode(&challenge.challenge_id)
+    );
     let output_path = output_dir.join(&file_name);
 
-    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to serialize output: {e}")))?;
+    let output_json = serde_json::to_string_pretty(&wrapper).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("failed to serialize output: {e}"),
+        )
+    })?;
     std::fs::write(&output_path, output_json)?;
 
     Ok(output_path.to_string_lossy().to_string())

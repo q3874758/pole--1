@@ -86,7 +86,9 @@ pub fn generate_mnemonic() -> Mnemonic {
     let list = BIP39_WORDLIST.read().unwrap();
     let mut words_out = Vec::with_capacity(24);
     for chunk in entropy_bits.chunks(11) {
-        let idx: usize = chunk.iter().fold(0usize, |acc, &b| (acc << 1) | (b as usize));
+        let idx: usize = chunk
+            .iter()
+            .fold(0usize, |acc, &b| (acc << 1) | (b as usize));
         words_out.push(list[idx].to_string());
     }
     Mnemonic { words: words_out }

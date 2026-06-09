@@ -64,11 +64,7 @@ fn main() {
     println!("client_exe={}", client_exe_path.display());
     println!("start_hidden={}", start_hidden);
 
-    let mut server_child = spawn_control_api_process(
-        &client_exe_path,
-        &config_path,
-        &data_dir,
-    );
+    let mut server_child = spawn_control_api_process(&client_exe_path, &config_path, &data_dir);
 
     match server_child.as_ref() {
         Some(child) => println!("control-api-serve started, pid={}", child.id()),
@@ -128,11 +124,19 @@ fn main() {
 
         if let Some(saved_state) = load_window_state(&window_state_path) {
             window_builder = window_builder
-                .with_inner_size(tao::dpi::PhysicalSize::new(saved_state.width, saved_state.height))
-                .with_position(tao::dpi::PhysicalPosition::new(saved_state.x, saved_state.y));
+                .with_inner_size(tao::dpi::PhysicalSize::new(
+                    saved_state.width,
+                    saved_state.height,
+                ))
+                .with_position(tao::dpi::PhysicalPosition::new(
+                    saved_state.x,
+                    saved_state.y,
+                ));
         }
 
-        let window = window_builder.build(&event_loop).expect("failed to create window");
+        let window = window_builder
+            .build(&event_loop)
+            .expect("failed to create window");
 
         let _webview = WebViewBuilder::new()
             .with_url("http://127.0.0.1:8787/")
@@ -255,7 +259,11 @@ fn spawn_background_process(executable: &Path, args: &[&str]) -> Option<Child> {
     command.spawn().ok()
 }
 
-fn spawn_control_api_process(executable: &Path, config_path: &Path, data_dir: &Path) -> Option<Child> {
+fn spawn_control_api_process(
+    executable: &Path,
+    config_path: &Path,
+    data_dir: &Path,
+) -> Option<Child> {
     let stdout = File::create(data_dir.join("control-api.out.log")).ok()?;
     let stderr = File::create(data_dir.join("control-api.err.log")).ok()?;
 
@@ -326,7 +334,11 @@ fn open_console(client_exe_path: &std::path::Path, config_path: &std::path::Path
 
     if spawn_background_process(
         client_exe_path,
-        &["control-api-open", &config_path.to_string_lossy(), "127.0.0.1:8787"],
+        &[
+            "control-api-open",
+            &config_path.to_string_lossy(),
+            "127.0.0.1:8787",
+        ],
     )
     .is_none()
     {
@@ -428,7 +440,8 @@ fn build_icon_rgba(size: u32) -> (Vec<u8>, u32, u32) {
                 || y < border_size
                 || x >= size - border_size
                 || y >= size - border_size;
-            let is_center = x >= inner_start && x <= inner_end && y >= inner_start && y <= inner_end;
+            let is_center =
+                x >= inner_start && x <= inner_end && y >= inner_start && y <= inner_end;
             let pixel = if is_center {
                 [0, 173, 181, 255]
             } else if is_border {

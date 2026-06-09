@@ -23,7 +23,10 @@ pub enum LoadError {
     Json(serde_json::Error),
     Migration(MigrationError),
     /// The file's `schema_version` is newer than this build supports.
-    TooNew { found: u32, current: u32 },
+    TooNew {
+        found: u32,
+        current: u32,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -32,8 +35,10 @@ impl std::fmt::Display for LoadError {
             Self::Io(e) => write!(f, "io: {e}"),
             Self::Json(e) => write!(f, "json: {e}"),
             Self::Migration(e) => write!(f, "migration: {e}"),
-            Self::TooNew { found, current } =>
-                write!(f, "file schema_version={found} is newer than supported ({current})"),
+            Self::TooNew { found, current } => write!(
+                f,
+                "file schema_version={found} is newer than supported ({current})"
+            ),
         }
     }
 }
@@ -88,15 +93,15 @@ where
     let value: Value = serde_json::from_str(&raw)?;
     let found = read_schema_version(&value);
     if found.as_u32() > CURRENT {
-        return Err(LoadError::TooNew { found: found.as_u32(), current: CURRENT });
+        return Err(LoadError::TooNew {
+            found: found.as_u32(),
+            current: CURRENT,
+        });
     }
     let migrated = registry.migrate(found, SchemaVersion::new(CURRENT), value)?;
     // After migration, the data is wrapped in the V1 envelope shape:
     // { "schema_version": N, "data": <payload> }.
-    let data = migrated
-        .get("data")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let data = migrated.get("data").cloned().unwrap_or(Value::Null);
     let typed: T = serde_json::from_value(data)?;
     Ok(Some(typed))
 }
@@ -187,7 +192,10 @@ mod tests {
     fn save_then_load_round_trip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("sample.json");
-        let original = Sample { n: 7, label: "ok".into() };
+        let original = Sample {
+            n: 7,
+            label: "ok".into(),
+        };
         save_versioned(&original, &path).unwrap();
         let loaded: Sample = load_versioned(&path).unwrap().unwrap();
         assert_eq!(loaded, original);
@@ -208,7 +216,13 @@ mod tests {
         let raw = r#"{ "schema_version": 9999, "data": { "n": 1, "label": "x" } }"#;
         fs::write(&path, raw).unwrap();
         let err = load_versioned::<Sample, _>(&path).unwrap_err();
-        assert!(matches!(err, LoadError::TooNew { found: 9999, current: 1 }));
+        assert!(matches!(
+            err,
+            LoadError::TooNew {
+                found: 9999,
+                current: 1
+            }
+        ));
     }
 
     #[test]
@@ -231,8 +245,16 @@ mod tests {
         let found = read_schema_version(&value);
         assert_eq!(found, SchemaVersion::V0_RAW);
 
-        let migrated = reg.migrate(found, SchemaVersion::new(CURRENT), value).unwrap();
+        let migrated = reg
+            .migrate(found, SchemaVersion::new(CURRENT), value)
+            .unwrap();
         let loaded: Sample = serde_json::from_value(migrated["data"].clone()).unwrap();
-        assert_eq!(loaded, Sample { n: 4, label: "old".into() });
+        assert_eq!(
+            loaded,
+            Sample {
+                n: 4,
+                label: "old".into()
+            }
+        );
     }
 }

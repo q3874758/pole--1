@@ -165,7 +165,8 @@ fn load_metadata(manifest_path: Option<&PathBuf>) -> Result<Metadata, String> {
     if let Some(p) = manifest_path {
         cmd.manifest_path(p);
     }
-    cmd.exec().map_err(|e| format!("cargo metadata failed: {e}"))
+    cmd.exec()
+        .map_err(|e| format!("cargo metadata failed: {e}"))
 }
 
 fn resolve_license(pkg: &Package) -> Option<String> {
@@ -199,7 +200,9 @@ fn build_components(metadata: &Metadata) -> Vec<(Package, Option<String>)> {
         let key = format!("{}@{}", pkg.name, pkg.version);
         seen.entry(key).or_insert_with(|| pkg.clone());
     }
-    seen.into_values().map(|p| (p.clone(), resolve_license(&p))).collect()
+    seen.into_values()
+        .map(|p| (p.clone(), resolve_license(&p)))
+        .collect()
 }
 
 fn render_cyclonedx(items: &[(Package, Option<String>)]) -> String {
@@ -244,8 +247,7 @@ fn render_spdx(items: &[(Package, Option<String>)]) -> String {
             .map(|(pkg, lic)| {
                 let version = pkg.version.to_string();
                 let name = pkg.name.to_string();
-                let spdx_id = format!("SPDXRef-Package-{}-{}", name, version)
-                    .replace(' ', "-");
+                let spdx_id = format!("SPDXRef-Package-{}-{}", name, version).replace(' ', "-");
                 let lic_str = lic.clone();
                 SpdxPackage {
                     spdx_id,
@@ -294,7 +296,10 @@ fn audit_licenses(
         let tokens = license_tokens(lic);
         for d in deny {
             if tokens.iter().any(|t| t.eq_ignore_ascii_case(d)) {
-                denials.push(format!("{}@{}: license '{}' denied", pkg.name, pkg.version, d));
+                denials.push(format!(
+                    "{}@{}: license '{}' denied",
+                    pkg.name, pkg.version, d
+                ));
             }
         }
         for w in warn {
@@ -328,8 +333,7 @@ fn run() -> Result<i32, String> {
         None => println!("{body}"),
     }
 
-    let (denials, warnings) =
-        audit_licenses(&items, &args.deny_licenses, &args.warn_licenses);
+    let (denials, warnings) = audit_licenses(&items, &args.deny_licenses, &args.warn_licenses);
     if !warnings.is_empty() {
         eprintln!("# License warnings ({}):", warnings.len());
         for w in &warnings {

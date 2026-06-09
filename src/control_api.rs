@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::{
-    ApiBlockchainResponse, ApiConfigResponse, ApiDashboardResponse, ApiLogsResponse, ApiMetaResponse,
-    ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse, ApiUpdateResponse,
-    AppMetaView, BlockchainStatusView, ChallengeActivityView, ConfigUpdateRequest, ConfigView,
-    DashboardView, InstallLayoutView, LogEntryView, ManagedServiceStatus, NodeConfig,
-    NodeHealthView, P2pNetworkView, RewardSourceMode, ServiceActionRequest,
-    ServiceActionResponse, ServiceManager, ServiceRuntime, ServiceStatusView,
+    ApiBlockchainResponse, ApiConfigResponse, ApiDashboardResponse, ApiLogsResponse,
+    ApiMetaResponse, ApiStatusResponse, ApiStorageResponse, ApiTokenomicsResponse,
+    ApiUpdateResponse, AppMetaView, BlockchainStatusView, ChallengeActivityView,
+    ConfigUpdateRequest, ConfigView, DashboardView, InstallLayoutView, LogEntryView,
+    ManagedServiceStatus, NodeConfig, NodeHealthView, P2pNetworkView, RewardSourceMode,
+    ServiceActionRequest, ServiceActionResponse, ServiceManager, ServiceRuntime, ServiceStatusView,
     StorageInfoView, TokenomicsSummaryView, UpdateActionRequest, UpdateActionResponse,
     UpdateStatusView, TOTAL_SUPPLY,
 };
@@ -24,7 +24,9 @@ const CONNECTION_TIMEOUT_SECS: u64 = 30;
 /// Returns the API token from the POLE_API_TOKEN env var, or None if not set.
 /// When a token is configured, all mutating POST requests require it.
 fn read_api_token() -> Option<String> {
-    std::env::var("POLE_API_TOKEN").ok().filter(|t| !t.is_empty())
+    std::env::var("POLE_API_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 /// Verify that the Authorization header contains the expected Bearer token.
@@ -140,38 +142,35 @@ pub fn collect_blockchain(
             .build()
         {
             Ok(client) => {
-                match client.get("http://127.0.0.1:1317/cosmos/base/tendermint/v1beta1/blocks/latest").send() {
-                    Ok(resp) => {
-                        match resp.text() {
-                            Ok(body) => {
-                                match serde_json::from_str::<serde_json::Value>(&body) {
-                                    Ok(json) => {
-                                        let block = &json["block"];
-                                        let block_id = &json["block_id"];
-                                        let height = json["sdk_block_height"]
-                                            .as_u64()
-                                            .or_else(|| json["block"]["header"]["height"].as_u64())
-                                            .unwrap_or(0);
-                                        let hash = block_id["hash"]
+                match client
+                    .get("http://127.0.0.1:1317/cosmos/base/tendermint/v1beta1/blocks/latest")
+                    .send()
+                {
+                    Ok(resp) => match resp.text() {
+                        Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                            Ok(json) => {
+                                let block = &json["block"];
+                                let block_id = &json["block_id"];
+                                let height = json["sdk_block_height"]
+                                    .as_u64()
+                                    .or_else(|| json["block"]["header"]["height"].as_u64())
+                                    .unwrap_or(0);
+                                let hash = block_id["hash"]
                                             .as_str()
                                             .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000")
                                             .to_string();
-                                        let time = block["header"]["time"]
-                                            .as_str()
-                                            .unwrap_or("-")
-                                            .to_string();
-                                        let cid = block["header"]["chain_id"]
-                                            .as_str()
-                                            .unwrap_or("unknown")
-                                            .to_string();
-                                        (height, hash, time, cid)
-                                    }
-                                    Err(_) => (0, String::new(), String::new(), String::new()),
-                                }
+                                let time =
+                                    block["header"]["time"].as_str().unwrap_or("-").to_string();
+                                let cid = block["header"]["chain_id"]
+                                    .as_str()
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                (height, hash, time, cid)
                             }
                             Err(_) => (0, String::new(), String::new(), String::new()),
-                        }
-                    }
+                        },
+                        Err(_) => (0, String::new(), String::new(), String::new()),
+                    },
                     Err(_) => (0, String::new(), String::new(), String::new()),
                 }
             }
@@ -256,7 +255,8 @@ fn count_dirs_in_dir(path: &Path, prefix: &str) -> usize {
         for entry in entries.flatten() {
             let dir_path = entry.path();
             if dir_path.is_dir() {
-                let name = dir_path.file_name()
+                let name = dir_path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 if name.starts_with(prefix) {
@@ -308,8 +308,10 @@ pub fn collect_tokenomics(
     let total_supply = TOTAL_SUPPLY.to_string();
     let emission_year = config.reward.emission_year;
 
-    let player_reward_budget_per_hour = format!("{} / 小时", config.reward.target_network_weight_units);
-    let service_reward_budget_per_hour = format!("{} / 小时", config.reward.target_network_weight_units);
+    let player_reward_budget_per_hour =
+        format!("{} / 小时", config.reward.target_network_weight_units);
+    let service_reward_budget_per_hour =
+        format!("{} / 小时", config.reward.target_network_weight_units);
     let player_block_reward = format!("{} 原子单位", config.reward.player_block_reward);
 
     Ok(ApiTokenomicsResponse {
@@ -356,7 +358,11 @@ pub fn collect_dashboard(
         crate::Platform::Linux => "linux",
         crate::Platform::Macos => "macos",
     };
-    let service_manager = if cfg!(windows) { "windows-service" } else { "systemd" };
+    let service_manager = if cfg!(windows) {
+        "windows-service"
+    } else {
+        "systemd"
+    };
 
     let update_status = crate::collect_update_overview(
         "0.1.0",
@@ -371,7 +377,8 @@ pub fn collect_dashboard(
                 state: service_snapshot.state_label.to_string(),
                 pid: service_snapshot.pid,
                 stale: service_snapshot.stale,
-                recoverable_without_manual_cleanup: service_snapshot.recoverable_without_manual_cleanup,
+                recoverable_without_manual_cleanup: service_snapshot
+                    .recoverable_without_manual_cleanup,
             },
             node: NodeHealthView {
                 chain_id: config.chain_id.clone(),
@@ -402,8 +409,14 @@ pub fn collect_dashboard(
                 annual_emission_rate_bps: 500,
                 current_year: 2026,
                 emission_year: config.reward.emission_year,
-                player_reward_budget_per_hour: format!("{} 权重单位", config.reward.target_network_weight_units),
-                service_reward_budget_per_hour: format!("{} 权重单位", config.reward.target_network_weight_units),
+                player_reward_budget_per_hour: format!(
+                    "{} 权重单位",
+                    config.reward.target_network_weight_units
+                ),
+                service_reward_budget_per_hour: format!(
+                    "{} 权重单位",
+                    config.reward.target_network_weight_units
+                ),
                 player_block_reward: format!("{} 原子", config.reward.player_block_reward),
                 tail_emission_active: false,
                 tail_emission_rate_bps: 10,
@@ -977,7 +990,8 @@ pub fn execute_service_action(
 ) -> Result<ServiceActionResponse, Box<dyn std::error::Error>> {
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
     let manager = build_service_manager(&config_path, &config, &request)?;
-    let status = execute_service_action_with_fallback(&config_path, &config, action, manager.as_ref())?;
+    let status =
+        execute_service_action_with_fallback(&config_path, &config, action, manager.as_ref())?;
     Ok(ServiceActionResponse {
         action: action.to_string(),
         service_name: manager.service_name().to_string(),
@@ -1180,18 +1194,26 @@ pub fn handle_connection(
                 match serde_json::from_str::<ServiceActionRequest>(body) {
                     Ok(r) => r,
                     Err(e) => {
-                        write_json_response(&mut stream, "HTTP/1.1 400 Bad Request", &format!("{{\"error\":\"invalid request: {}\"}}", e))?;
+                        write_json_response(
+                            &mut stream,
+                            "HTTP/1.1 400 Bad Request",
+                            &format!("{{\"error\":\"invalid request: {}\"}}", e),
+                        )?;
                         return Ok(());
                     }
                 }
             };
-match execute_service_action(config_path, action, request) {
+            match execute_service_action(config_path, action, request) {
                 Ok(body) => {
                     let json = serde_json::to_string(&body)?;
                     write_json_response(&mut stream, "HTTP/1.1 200 OK", &json)?;
                 }
                 Err(e) => {
-                    write_json_response(&mut stream, "HTTP/1.1 500 Internal Server Error", &format!("{{\"error\":\"{}\"}}", e))?;
+                    write_json_response(
+                        &mut stream,
+                        "HTTP/1.1 500 Internal Server Error",
+                        &format!("{{\"error\":\"{}\"}}", e),
+                    )?;
                 }
             }
         }
@@ -1215,7 +1237,9 @@ pub fn serve(
     if read_api_token().is_some() {
         eprintln!("[control-api] API token authentication enabled (POLE_API_TOKEN set)");
     } else {
-        eprintln!("[control-api] WARNING: No POLE_API_TOKEN set — mutating endpoints are unprotected");
+        eprintln!(
+            "[control-api] WARNING: No POLE_API_TOKEN set — mutating endpoints are unprotected"
+        );
     }
     let mut served = 0usize;
     for stream in listener.incoming() {

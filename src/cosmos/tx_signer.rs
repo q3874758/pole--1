@@ -70,8 +70,7 @@ impl SignedTx {
             auth_info_bytes: self.auth_info_bytes.clone(),
             signatures: self.signatures.clone(),
         };
-        crate::cosmos::proto::encode(&raw)
-            .map_err(|e| CosmosError::Encode(format!("TxRaw: {e}")))
+        crate::cosmos::proto::encode(&raw).map_err(|e| CosmosError::Encode(format!("TxRaw: {e}")))
     }
 }
 
@@ -142,7 +141,8 @@ mod tests {
         let kp = KeyPair::from_seed(&[9u8; 32]);
         let signed = sign_with_keypair(&kp, vec![1, 2, 3], vec![4, 5, 6], "pole-test", 7).unwrap();
         let b64 = signed.to_base64().unwrap();
-        let raw_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
+        let raw_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
         // The decoded bytes should be a valid TxRaw — re-parse it.
         let parsed = crate::cosmos::proto::TxRaw::decode(raw_bytes.as_slice()).unwrap();
         assert_eq!(parsed.body_bytes, vec![1, 2, 3]);

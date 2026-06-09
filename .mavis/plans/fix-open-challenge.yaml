@@ -1,0 +1,97 @@
+version: 1
+plan:
+  name: '修 MsgOpenChallenge proto3 wire stub（V1 必修 4 个 e2e 缺口的 #1）'
+  max_concurrency: 1
+  max_consecutive_failures: 2
+  max_cycles: 4
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+
+tasks:
+  - id: fix-open-challenge
+    title: '把 src/cosmos/pole_msgs.rs 的 encode_msg_open_challenge 从 dead-code stub 改成真 proto3 wire'
+    assigned_to: pole-cosmos-expert
+    verified_by: verifier
+    timeout_ms: 1800000
+    prompt: |
+      工作区：E:\pole备用
+
+      任务：把 MsgOpenChallenge 的链下 → 链上 proto3 wire 编码从 dead-code stub 改成真实可用的实现。这是 4 个 V1 必修 e2e 缺口里 ROI 最高的（见 deliverable-overview.md §7.1 #1）。
+
+      ## 背景（必读）
+
+      现状：11 个 Msg 里**只有 2 个**（FinalizeEpoch / ClaimReward）有完整的链下 proto3 wire 编码，其余 8 个走 `src/cosmos/tx_builder.rs:70-73` 的 `BridgeMessage::Unsupported` 兜底，**链端会拒**。其中 MsgOpenChallenge 走的 stub 路径在 `src/cosmos/pole_msgs.rs:86-99` 的 `encode_msg_open_challenge`，返回的是 `vec![]` 占位。
+
+      ## 必读上下文（先读完再动）
+
+      1. **`src/cosmos/pole_msgs.rs:55-63`**（`encode_msg_finalize_epoch`）—— 完整 proto3 wire 范例 1
+      2. **`src/cosmos/pole_msgs.rs:66-75`**（`encode_msg_claim_reward`）—— 完整 proto3 wire 范例 2
+      3. **`chain/proto/pole/chain/pole/v1/tx.proto`** —— `MsgOpenChallenge` 的 proto3 定义，看实际字段名/类型
+      4. **`chain/proto/pole/chain/pole/v1/state.proto`** —— `MsgOpenChallenge` 内嵌的 `Challenge` 消息类型定义
+      5. **`chain/x/pole/keeper/msg_server.go::OpenChallenge`**（约 line 230）—— 链端 handler 签名 + 字段校验规则
+      6. **`src/cosmos/tx_builder.rs:94-106`** —— `BridgeMessage::OpenChallenge` 当前如何 dispatch
+      7. **`src/chain_bridge.rs`** —— 看是否有 `build_open_challenge_tx`（如果存在，看是否仍走 JSON 路径，需要同步改 proto bytes 路径）
+      8. **`src/transitions.rs::apply_open_challenge`**（约 line 330-381）—— 链下状态机的 Challenge 字段（6 个变体：bad_batch/omission/bad_aggregate/bad_reward/bad_storage）作为交叉引用
+
+      ## 强制要求
+
+      1. **真实 proto3 wire 编码**：替换 `encode_msg_open_challenge`（`src/cosmos/pole_msgs.rs:86-99`），输出**非空**的 proto3 字节。参考同文件 `encode_msg_finalize_epoch` / `encode_msg_claim_reward` 的写法（手写 varint + length-delimited 编码）。
+      2. **Challenge 嵌套消息也要编码**：`MsgOpenChallenge` 的 `challenge` 字段是嵌套 `Challenge` 消息（看 tx.proto + state.proto），必须**完整**编码 inner message，不能跳过。
+      3. **同步更新 `tx_builder.rs:94-106`**：`BridgeMessage::OpenChallenge` 现在发 `value=vec![]`，修完后必须能调通到新的编码器。
+      4. **同步更新 `chain_bridge.rs`**：如果 `build_open_challenge_tx` 存在，路径 A（JSON 落盘）保持不变；**新增** proto bytes 路径（直接给 `tx_builder` 喂 proto bytes）。
+      5. **新增/扩展 Rust 单测**（在 `src/cosmos/pole_msgs.rs` 末尾 `#[cfg(test)] mod tests` 或独立 test 文件）：
+         - `encode_msg_open_challenge` 输出的字节长度 > 0
+         - 输出的字节能被 proto 解析回原 challenge（可写一个最小 proto3 解码 round-trip 测试，或对比 reference bytes）
+         - 5 个 `ChallengeKind` 变体（bad_batch/omission/bad_aggregate/bad_reward/bad_storage）各跑一次
+      6. **不要改的**：CLI 命令入口（`pole-client open-challenge`）、`transitions::apply_open_challenge` 链下状态机、链端 `msg_server.go::OpenChallenge` handler。
+
+      ## 验收标准（Stop when）
+
+      - `cargo test`（workspace-wide）全过，包括新增的 OpenChallenge 编码测试
+      - `cargo clippy --all-targets` 无新增 warning
+      - 编码器输出**非空字节**（grep 验证 `encode_msg_open_challenge(...).is_empty() == false`）
+      - 5 种 ChallengeKind 各有 1 个 test case
+      - 字段映射对得上 `tx.proto::MsgOpenChallenge` + `state.proto::Challenge`
+      - `BridgeMessage::OpenChallenge` 路径不再发空 value
+      - 报告里写明：改了哪些 file:line、跑了哪些 cargo test、proto3 wire 字节长度的具体数字
+
+      ## 写完报告
+
+      落到工作区根目录 `deliverable-open-challenge-fix.md`，写：
+      - 改动文件清单（file:line）
+      - proto3 wire 编码设计（手写 varint 怎么走、字段怎么排）
+      - 5 个 ChallengeKind 的测试结果（每个的实际字节长度或 hex 前缀）
+      - 已知局限（如果有）：比如 challenge.evidence 字段是嵌套 message，本次没修或简化处理
+      - 后续可做但不阻塞的工作
+
+    verify_prompt: |
+      独立验证，不要只读 producer 的报告。
+
+      ## 必做检查
+
+      1. **读 `src/cosmos/pole_msgs.rs:86-99` 改动后**，确认：
+         - `encode_msg_open_challenge` 函数体的 `vec![]` 占位**已删除**或被真实 proto 编码逻辑替换
+         - 函数有真实的字段读取 + varint/length-delimited 编码
+         - 返回类型仍然是 `Result<Vec<u8>, _>` 且**不返回空字节**
+
+      2. **对照 `chain/proto/pole/chain/pole/v1/tx.proto`** 里的 `MsgOpenChallenge` 定义，验证：
+         - proto 里声明的每个字段都被编码（包括嵌套 `challenge` 字段）
+         - 字段名、字段编号、wire type 跟 proto 对得上
+         - 嵌套 `Challenge` 消息的字段（id/kind/...）也都编码
+
+      3. **读 `src/cosmos/tx_builder.rs:94-106` 改动后**，确认 `BridgeMessage::OpenChallenge` 现在调真实编码器，不再喂 `vec![]`。
+
+      4. **读 producer 加的测试**，挑 1-2 个跑（`cargo test --lib cosmos::pole_msgs::tests` 或类似路径），确认确实在跑、确实在断言字节非空。
+
+      5. **跑 `cargo clippy --all-targets`**，确认无新 warning。
+
+      6. **不要做**：不要试图跑真链上 OpenChallenge（poled 当前不是 daemon，集成测试会卡）。但要确认 producer 报告里写明这一限制。
+
+      ## 输出
+
+      给 PASS / PASS（带 caveat） / FAIL 三种结论之一 + 具体证据：
+      - 哪行哪字段对了
+      - 哪行哪字段错（如果 FAIL）
+      - 测试名 + 跑通/失败
+      - 跨语言字段对账的引用（proto vs Rust 字段名）

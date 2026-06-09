@@ -39,7 +39,12 @@ impl Cli {
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
             match a.as_str() {
-                "--chain-id" => chain_id = args.next().map(PathBuf::from).map(|p| p.to_string_lossy().to_string()),
+                "--chain-id" => {
+                    chain_id = args
+                        .next()
+                        .map(PathBuf::from)
+                        .map(|p| p.to_string_lossy().to_string())
+                }
                 "--allocations" => allocations = args.next().map(PathBuf::from),
                 "--validators" => validators = args.next().map(PathBuf::from),
                 "--params" => params = args.next().map(PathBuf::from),
@@ -82,7 +87,8 @@ fn run() -> Result<(), GenesisError> {
         GenesisBuilder::from_paths(
             cli.chain_id,
             alloc,
-            cli.validators.unwrap_or_else(|| PathBuf::from("validators.json")),
+            cli.validators
+                .unwrap_or_else(|| PathBuf::from("validators.json")),
             cli.params,
         )?
     } else {
