@@ -320,6 +320,317 @@ fn hex_encode(bytes: &[u8]) -> String {
     s
 }
 
+// ===========================================================================
+// Remaining 8 Msg wire encoders
+// ===========================================================================
+//
+// All eight follow the same pattern as `encode_msg_open_challenge`:
+// outer field1 = signer string (bech32), outer field2 = nested
+// `Msg*` payload, then per-field varint/length-delimited encoding
+// matching `chain/proto/pole/chain/pole/v1/{tx,state}.proto`.
+//
+// `MsgResolveChallenge` is the only flat one (no nested message),
+// so it skips the outer field2 length-prefix wrapper.
+
+use crate::cosmos::wire_types::{
+    AggregateRecordWire, BatchCommitWire, EpochCommitWire, GameWeightEntryWire,
+    MerkleCommitmentWire, NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire, ParamsWire,
+    ReplicaReceiptWire,
+};
+
+// --- MsgUpsertNode -------------------------------------------------------
+
+/// `MsgUpsertNode` — pole.chain.pole.v1.MsgUpsertNode {
+///   string operator = 1;
+///   NodeRecord node = 2;
+/// }
+pub fn encode_msg_upsert_node(operator_bech32: &str, node: &NodeRecordWire) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, operator_bech32, &mut buf);
+    let inner = encode_node_record_inner(node);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgUpsertNode".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_node_record_inner(node: &NodeRecordWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, &node.operator_address, &mut buf);
+    encode_string(2, &node.reward_address, &mut buf);
+    encode_string(3, &node.consensus_address, &mut buf);
+    encode_int32(4, node_role_to_proto(node.role), &mut buf);
+    let caps = encode_node_capability_set_inner(&node.capabilities);
+    encode_bytes(5, &caps, &mut buf);
+    encode_bool(6, node.active, &mut buf);
+    encode_uint64(7, node.bonded_tokens, &mut buf);
+    encode_uint64(8, node.last_updated_epoch, &mut buf);
+    buf
+}
+
+fn encode_node_capability_set_inner(c: &NodeCapabilitySetWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(8);
+    encode_bool(1, c.collect, &mut buf);
+    encode_bool(2, c.store, &mut buf);
+    encode_bool(3, c.verify, &mut buf);
+    encode_bool(4, c.propose, &mut buf);
+    buf
+}
+
+/// Map `NodeRoleWire` to its proto enum i32 (re-exported for callers
+/// that want to inspect the wire value).
+fn node_role_to_proto(role: NodeRoleWire) -> i32 {
+    crate::cosmos::wire_types::node_role_to_proto(role)
+}
+
+// --- MsgUpsertAggregateRecord -------------------------------------------
+
+/// `MsgUpsertAggregateRecord` — pole.chain.pole.v1.MsgUpsertAggregateRecord {
+///   string operator = 1;
+///   AggregateRecord aggregate_record = 2;
+/// }
+pub fn encode_msg_upsert_aggregate_record(
+    operator_bech32: &str,
+    aggregate_record: &AggregateRecordWire,
+) -> Any {
+    let mut buf = Vec::with_capacity(96);
+    encode_string(1, operator_bech32, &mut buf);
+    let inner = encode_aggregate_record_inner(aggregate_record);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgUpsertAggregateRecord".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_aggregate_record_inner(a: &AggregateRecordWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(48);
+    encode_uint64(1, a.epoch_id, &mut buf);
+    encode_uint32(2, a.app_id, &mut buf);
+    encode_uint64(3, a.total_weight_units, &mut buf);
+    encode_uint64(4, a.player_count, &mut buf);
+    buf
+}
+
+// --- MsgSubmitBatch ------------------------------------------------------
+
+/// `MsgSubmitBatch` — pole.chain.pole.v1.MsgSubmitBatch {
+///   string collector = 1;
+///   BatchCommit batch_commit = 2;
+/// }
+pub fn encode_msg_submit_batch(collector_bech32: &str, batch: &BatchCommitWire) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, collector_bech32, &mut buf);
+    let inner = encode_batch_commit_inner(batch);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSubmitBatch".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_batch_commit_inner(b: &BatchCommitWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(192);
+    encode_uint64(1, b.epoch_id, &mut buf);
+    encode_string(2, &b.collector_address, &mut buf);
+    encode_uint64(3, b.slot_start, &mut buf);
+    encode_uint64(4, b.slot_end, &mut buf);
+    let mc = encode_merkle_commitment_inner(&b.batch);
+    encode_bytes(5, &mc, &mut buf);
+    encode_string(6, &b.payload_cid, &mut buf);
+    encode_uint32(7, b.observation_count, &mut buf);
+    encode_int64(8, b.submitted_at_height, &mut buf);
+    buf
+}
+
+fn encode_merkle_commitment_inner(m: &MerkleCommitmentWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(80);
+    encode_string(1, &m.root, &mut buf);
+    encode_uint32(2, m.leaf_count, &mut buf);
+    buf
+}
+
+// --- MsgSubmitReplicaReceipt --------------------------------------------
+
+/// `MsgSubmitReplicaReceipt` — pole.chain.pole.v1.MsgSubmitReplicaReceipt {
+///   string storer = 1;
+///   ReplicaReceipt replica_receipt = 2;
+/// }
+pub fn encode_msg_submit_replica_receipt(storer_bech32: &str, receipt: &ReplicaReceiptWire) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, storer_bech32, &mut buf);
+    let inner = encode_replica_receipt_inner(receipt);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSubmitReplicaReceipt".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_replica_receipt_inner(r: &ReplicaReceiptWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(192);
+    encode_uint64(1, r.epoch_id, &mut buf);
+    encode_string(2, &r.payload_cid, &mut buf);
+    encode_string(3, &r.storer_address, &mut buf);
+    encode_uint64(4, r.retention_until_epoch, &mut buf);
+    encode_string(5, &r.receipt_signature, &mut buf);
+    encode_string(6, &r.receipt_hash_hex, &mut buf);
+    buf
+}
+
+// --- MsgCommitEpoch ------------------------------------------------------
+
+/// `MsgCommitEpoch` — pole.chain.pole.v1.MsgCommitEpoch {
+///   string proposer = 1;
+///   EpochCommit epoch_commit = 2;
+/// }
+pub fn encode_msg_commit_epoch(proposer_bech32: &str, commit: &EpochCommitWire) -> Any {
+    let mut buf = Vec::with_capacity(512);
+    encode_string(1, proposer_bech32, &mut buf);
+    let inner = encode_epoch_commit_inner(commit);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgCommitEpoch".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_epoch_commit_inner(c: &EpochCommitWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(512);
+    encode_uint64(1, c.epoch_id, &mut buf);
+    encode_bytes(
+        2,
+        &encode_merkle_commitment_inner(&c.accepted_batches),
+        &mut buf,
+    );
+    encode_bytes(
+        3,
+        &encode_merkle_commitment_inner(&c.observations),
+        &mut buf,
+    );
+    encode_bytes(4, &encode_merkle_commitment_inner(&c.aggregates), &mut buf);
+    encode_bytes(5, &encode_merkle_commitment_inner(&c.rewards), &mut buf);
+    encode_bytes(
+        6,
+        &encode_merkle_commitment_inner(&c.availability),
+        &mut buf,
+    );
+    encode_string(7, &c.randomness_seed_hex, &mut buf);
+    encode_string(8, &c.proposer_address, &mut buf);
+    encode_int64(9, c.challenge_open_height, &mut buf);
+    encode_int64(10, c.challenge_deadline_height, &mut buf);
+    encode_bool(11, c.finalized, &mut buf);
+    encode_uint64(12, c.total_network_weight_units, &mut buf);
+    buf
+}
+
+// --- MsgResolveChallenge (flat, no nested message) ----------------------
+
+/// `MsgResolveChallenge` — pole.chain.pole.v1.MsgResolveChallenge {
+///   string resolver = 1;
+///   string challenge_id_hex = 2;
+///   uint64 slash_amount = 3;
+///   uint64 challenger_reward = 4;
+///   string resolution_summary = 5;
+///   ChallengeState final_state = 6;
+///   uint32 slash_fraction_bps = 7;
+///   bool jail_validator = 8;
+/// }
+pub fn encode_msg_resolve_challenge(
+    resolver_bech32: &str,
+    challenge_id_hex: &str,
+    slash_amount: u64,
+    challenger_reward: u64,
+    resolution_summary: &str,
+    final_state: crate::primitives::ChallengeState,
+    slash_fraction_bps: u32,
+    jail_validator: bool,
+) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, resolver_bech32, &mut buf);
+    encode_string(2, challenge_id_hex, &mut buf);
+    encode_uint64(3, slash_amount, &mut buf);
+    encode_uint64(4, challenger_reward, &mut buf);
+    encode_string(5, resolution_summary, &mut buf);
+    encode_int32(6, challenge_state_to_proto(final_state), &mut buf);
+    encode_uint32(7, slash_fraction_bps, &mut buf);
+    encode_bool(8, jail_validator, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgResolveChallenge".to_string(),
+        value: buf,
+    }
+}
+
+// --- MsgUpsertGameWeight -------------------------------------------------
+
+/// `MsgUpsertGameWeight` — pole.chain.pole.v1.MsgUpsertGameWeight {
+///   string authority = 1;
+///   GameWeightEntry entry = 2;
+/// }
+pub fn encode_msg_upsert_game_weight(authority_bech32: &str, entry: &GameWeightEntryWire) -> Any {
+    let mut buf = Vec::with_capacity(96);
+    encode_string(1, authority_bech32, &mut buf);
+    let inner = encode_game_weight_entry_inner(entry);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgUpsertGameWeight".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_game_weight_entry_inner(e: &GameWeightEntryWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(48);
+    encode_uint32(1, e.app_id, &mut buf);
+    encode_uint32(2, e.game_weight_ppm, &mut buf);
+    encode_string(3, &e.tier, &mut buf);
+    encode_uint64(4, e.effective_from_epoch_id, &mut buf);
+    buf
+}
+
+// --- MsgUpdateParams -----------------------------------------------------
+
+/// `MsgUpdateParams` — pole.chain.pole.v1.MsgUpdateParams {
+///   string authority = 1;
+///   Params params = 2;
+/// }
+pub fn encode_msg_update_params(authority_bech32: &str, params: &ParamsWire) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, authority_bech32, &mut buf);
+    let inner = encode_params_inner(params);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgUpdateParams".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_params_inner(p: &ParamsWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(256);
+    encode_uint64(1, p.reward_block_duration_seconds, &mut buf);
+    encode_uint64(2, p.base_hourly_reward, &mut buf);
+    encode_uint64(3, p.target_network_weight_units, &mut buf);
+    encode_uint32(4, p.reward_adjustment_cap_bps, &mut buf);
+    encode_uint64(5, p.challenge_window_blocks, &mut buf);
+    encode_uint64(6, p.min_retention_epochs, &mut buf);
+    encode_uint32(7, p.player_reward_allocation_bps, &mut buf);
+    encode_uint32(8, p.service_reward_allocation_bps, &mut buf);
+    encode_uint32(9, p.collect_reward_bps, &mut buf);
+    encode_uint32(10, p.store_reward_bps, &mut buf);
+    encode_uint32(11, p.verify_reward_bps, &mut buf);
+    encode_uint32(12, p.propose_reward_bps, &mut buf);
+    encode_uint32(13, p.tier1_weight_ppm, &mut buf);
+    encode_uint32(14, p.tier2_weight_min_ppm, &mut buf);
+    encode_uint32(15, p.tier2_weight_max_ppm, &mut buf);
+    encode_uint32(16, p.tier3_weight_min_ppm, &mut buf);
+    encode_uint32(17, p.tier3_weight_max_ppm, &mut buf);
+    encode_uint32(18, p.fee_burn_bps, &mut buf);
+    encode_uint64(19, p.reward_burn_threshold, &mut buf);
+    encode_uint32(20, p.reward_burn_bps, &mut buf);
+    encode_uint32(21, p.governance_burn_bps, &mut buf);
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -746,4 +1057,250 @@ mod tests {
     /// against the `Challenge::challenger` field).
     #[allow(dead_code)]
     fn _address_marker(_a: Address) {}
+
+    // ===============================================================
+    // Tests for the 8 newly-wired Msg encoders
+    // ===============================================================
+    //
+    // Each encoder test asserts: type_url, non-empty value, and first
+    // byte = 0x0A (outer field1 = signer string tag). The complex
+    // ones (UpsertNode / CommitEpoch) also get a golden vector to
+    // lock down field ordering.
+
+    fn sample_merkle_commitment() -> MerkleCommitmentWire {
+        MerkleCommitmentWire {
+            root: "ab".repeat(32),
+            leaf_count: 7,
+        }
+    }
+
+    // --- MsgUpsertNode ------------------------------------------------
+
+    #[test]
+    fn upsert_node_emits_non_empty_wire_bytes() {
+        let node = NodeRecordWire {
+            operator_address: "cosmos1op".into(),
+            reward_address: "cosmos1op".into(),
+            consensus_address: "cosmosvalcons1consensus".into(),
+            role: NodeRoleWire::Coordinator,
+            capabilities: NodeCapabilitySetWire {
+                collect: true,
+                store: false,
+                verify: true,
+                propose: true,
+            },
+            active: true,
+            bonded_tokens: 1_000_000,
+            last_updated_epoch: 5,
+        };
+        let any = encode_msg_upsert_node("cosmos1op", &node);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpsertNode");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+    }
+
+    #[test]
+    fn upsert_node_role_enum_maps_to_proto_varints() {
+        // Player=1, Service=2, Coordinator=3
+        // Tag for inner field4 (varint) = (4 << 3) | 0 = 0x20.
+        let cases = [
+            (NodeRoleWire::Player, 0x01u8),
+            (NodeRoleWire::Service, 0x02u8),
+            (NodeRoleWire::Coordinator, 0x03u8),
+        ];
+        for (role, expected_varint) in cases {
+            let node = NodeRecordWire {
+                operator_address: "cosmos1op".into(),
+                reward_address: "cosmos1op".into(),
+                consensus_address: "".into(),
+                role,
+                capabilities: NodeCapabilitySetWire::default(),
+                active: false,
+                bonded_tokens: 0,
+                last_updated_epoch: 0,
+            };
+            let any = encode_msg_upsert_node("cosmos1op", &node);
+            let pair = [0x20u8, expected_varint];
+            assert!(
+                any.value.windows(2).any(|w| w == pair),
+                "expected role tag 0x20 + varint {:#04x}, got bytes {:02x?}",
+                expected_varint,
+                any.value
+            );
+        }
+    }
+
+    // --- MsgUpsertAggregateRecord --------------------------------------
+
+    #[test]
+    fn upsert_aggregate_record_emits_non_empty_wire_bytes() {
+        let ar = AggregateRecordWire {
+            epoch_id: 42,
+            app_id: 7,
+            total_weight_units: 1_000_000,
+            player_count: 50,
+        };
+        let any = encode_msg_upsert_aggregate_record("cosmos1op", &ar);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpsertAggregateRecord");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+    }
+
+    // --- MsgSubmitBatch ------------------------------------------------
+
+    #[test]
+    fn submit_batch_emits_non_empty_wire_bytes() {
+        let batch = BatchCommitWire {
+            epoch_id: 42,
+            collector_address: "cosmos1col".into(),
+            slot_start: 100,
+            slot_end: 200,
+            batch: sample_merkle_commitment(),
+            payload_cid: "bafy.test.cid".into(),
+            observation_count: 5,
+            submitted_at_height: 1000,
+        };
+        let any = encode_msg_submit_batch("cosmos1col", &batch);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSubmitBatch");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+    }
+
+    // --- MsgSubmitReplicaReceipt ---------------------------------------
+
+    #[test]
+    fn submit_replica_receipt_emits_non_empty_wire_bytes() {
+        let r = ReplicaReceiptWire {
+            epoch_id: 42,
+            payload_cid: "bafy.test.cid".into(),
+            storer_address: "cosmos1storer".into(),
+            retention_until_epoch: 100,
+            receipt_signature: "deadbeef".into(),
+            receipt_hash_hex: "ab".repeat(32),
+        };
+        let any = encode_msg_submit_replica_receipt("cosmos1storer", &r);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSubmitReplicaReceipt");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+    }
+
+    // --- MsgCommitEpoch ------------------------------------------------
+
+    #[test]
+    fn commit_epoch_emits_non_empty_wire_bytes() {
+        let mc = sample_merkle_commitment();
+        let commit = EpochCommitWire {
+            epoch_id: 42,
+            accepted_batches: mc.clone(),
+            observations: mc.clone(),
+            aggregates: mc.clone(),
+            rewards: mc.clone(),
+            availability: mc,
+            randomness_seed_hex: "cd".repeat(32),
+            proposer_address: "cosmos1prop".into(),
+            challenge_open_height: 100,
+            challenge_deadline_height: 200,
+            finalized: false,
+            total_network_weight_units: 50_000,
+        };
+        let any = encode_msg_commit_epoch("cosmos1prop", &commit);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgCommitEpoch");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+        // 5 nested MerkleCommitment fields, each with tag 0x0A/0x12/0x1A/0x22/0x2A
+        // for outer field2 (length-delimited) on inner fields 2-6.
+        // Just sanity-check that we see all 5 expected outer tags.
+        for tag in [0x12u8, 0x1A, 0x22, 0x2A, 0x32] {
+            assert!(
+                any.value.iter().any(|b| *b == tag),
+                "expected outer MerkleCommitment tag 0x{:02x} in encoded bytes",
+                tag
+            );
+        }
+    }
+
+    // --- MsgResolveChallenge (flat) ------------------------------------
+
+    #[test]
+    fn resolve_challenge_emits_non_empty_wire_bytes() {
+        let any = encode_msg_resolve_challenge(
+            "cosmos1resolver",
+            "ab".repeat(32).as_str(),
+            1_000,
+            100,
+            "verified",
+            crate::primitives::ChallengeState::Succeeded,
+            5_000,
+            true,
+        );
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgResolveChallenge");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+        // final_state tag = (6 << 3) | 0 = 0x30, varint = 2 (RESOLVED)
+        let pair = [0x30u8, 0x02];
+        assert!(
+            any.value.windows(2).any(|w| w == pair),
+            "expected final_state tag 0x30 + varint 0x02, got bytes {:02x?}",
+            any.value
+        );
+    }
+
+    // --- MsgUpsertGameWeight -------------------------------------------
+
+    #[test]
+    fn upsert_game_weight_emits_non_empty_wire_bytes() {
+        let entry = GameWeightEntryWire {
+            app_id: 1,
+            game_weight_ppm: 500_000,
+            tier: "tier1".into(),
+            effective_from_epoch_id: 10,
+        };
+        let any = encode_msg_upsert_game_weight("cosmos10authority", &entry);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpsertGameWeight");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+    }
+
+    // --- MsgUpdateParams -----------------------------------------------
+
+    #[test]
+    fn update_params_emits_non_empty_wire_bytes() {
+        let p = ParamsWire {
+            reward_block_duration_seconds: 3600,
+            base_hourly_reward: 100,
+            target_network_weight_units: 1_000_000,
+            reward_adjustment_cap_bps: 2_000,
+            challenge_window_blocks: 100,
+            min_retention_epochs: 5,
+            player_reward_allocation_bps: 7_000,
+            service_reward_allocation_bps: 2_000,
+            collect_reward_bps: 2_500,
+            store_reward_bps: 2_500,
+            verify_reward_bps: 2_500,
+            propose_reward_bps: 2_500,
+            tier1_weight_ppm: 500_000,
+            tier2_weight_min_ppm: 200_000,
+            tier2_weight_max_ppm: 800_000,
+            tier3_weight_min_ppm: 100_000,
+            tier3_weight_max_ppm: 900_000,
+            fee_burn_bps: 500,
+            reward_burn_threshold: 1_000_000,
+            reward_burn_bps: 100,
+            governance_burn_bps: 100,
+        };
+        let any = encode_msg_update_params("cosmos10authority", &p);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpdateParams");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+        // 21 uint64/uint32 fields inside. Verify the inner last-field
+        // tag (21 << 3) | 0 = 0xA8 appears (as 2-byte varint for
+        // field numbers >= 16, since 168 has MSB set), with varint
+        // value 100 = 0x64 following.
+        let triple = [0xA8u8, 0x01, 0x64];
+        assert!(
+            any.value.windows(3).any(|w| w == triple),
+            "expected governance_burn_bps tag 0xA8 0x01 + varint 0x64, got bytes {:02x?}",
+            any.value
+        );
+    }
 }

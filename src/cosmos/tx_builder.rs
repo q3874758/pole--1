@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::cosmos::address::CosmosAddress;
 use crate::cosmos::error::{CosmosError, Result};
 use crate::cosmos::tx_signer::{sign_with_keypair, SignedTx};
-use crate::primitives::EpochId;
+use crate::cosmos::wire_types::{
+    AggregateRecordWire, BatchCommitWire, EpochCommitWire, GameWeightEntryWire, NodeRecordWire,
+    ParamsWire, ReplicaReceiptWire,
+};
+use crate::primitives::{ChallengeState, EpochId};
 use crate::records::Challenge;
 use crate::wallet::KeyPair;
 
@@ -68,6 +72,44 @@ pub enum BridgeMessage {
         challenger: CosmosAddress,
         challenge: Challenge,
     },
+    UpsertNode {
+        operator: CosmosAddress,
+        node: NodeRecordWire,
+    },
+    UpsertAggregateRecord {
+        operator: CosmosAddress,
+        aggregate_record: AggregateRecordWire,
+    },
+    SubmitBatch {
+        collector: CosmosAddress,
+        batch_commit: BatchCommitWire,
+    },
+    SubmitReplicaReceipt {
+        storer: CosmosAddress,
+        replica_receipt: ReplicaReceiptWire,
+    },
+    CommitEpoch {
+        proposer: CosmosAddress,
+        epoch_commit: EpochCommitWire,
+    },
+    ResolveChallenge {
+        resolver: CosmosAddress,
+        challenge_id_hex: String,
+        slash_amount: u64,
+        challenger_reward: u64,
+        resolution_summary: String,
+        final_state: ChallengeState,
+        slash_fraction_bps: u32,
+        jail_validator: bool,
+    },
+    UpsertGameWeight {
+        authority: CosmosAddress,
+        entry: GameWeightEntryWire,
+    },
+    UpdateParams {
+        authority: CosmosAddress,
+        params: ParamsWire,
+    },
     /// Catch-all for messages we haven't hand-rolled yet. The chain
     /// will reject the broadcast, but the type keeps the API stable
     /// for callers that want to compile against the full surface.
@@ -96,6 +138,56 @@ impl BridgeMessage {
                 challenger,
                 challenge,
             } => crate::cosmos::pole_msgs::encode_msg_open_challenge(&challenger.bech32, challenge),
+            BridgeMessage::UpsertNode { operator, node } => {
+                crate::cosmos::pole_msgs::encode_msg_upsert_node(&operator.bech32, node)
+            }
+            BridgeMessage::UpsertAggregateRecord {
+                operator,
+                aggregate_record,
+            } => crate::cosmos::pole_msgs::encode_msg_upsert_aggregate_record(
+                &operator.bech32,
+                aggregate_record,
+            ),
+            BridgeMessage::SubmitBatch {
+                collector,
+                batch_commit,
+            } => crate::cosmos::pole_msgs::encode_msg_submit_batch(&collector.bech32, batch_commit),
+            BridgeMessage::SubmitReplicaReceipt {
+                storer,
+                replica_receipt,
+            } => crate::cosmos::pole_msgs::encode_msg_submit_replica_receipt(
+                &storer.bech32,
+                replica_receipt,
+            ),
+            BridgeMessage::CommitEpoch {
+                proposer,
+                epoch_commit,
+            } => crate::cosmos::pole_msgs::encode_msg_commit_epoch(&proposer.bech32, epoch_commit),
+            BridgeMessage::ResolveChallenge {
+                resolver,
+                challenge_id_hex,
+                slash_amount,
+                challenger_reward,
+                resolution_summary,
+                final_state,
+                slash_fraction_bps,
+                jail_validator,
+            } => crate::cosmos::pole_msgs::encode_msg_resolve_challenge(
+                &resolver.bech32,
+                challenge_id_hex,
+                *slash_amount,
+                *challenger_reward,
+                resolution_summary,
+                *final_state,
+                *slash_fraction_bps,
+                *jail_validator,
+            ),
+            BridgeMessage::UpsertGameWeight { authority, entry } => {
+                crate::cosmos::pole_msgs::encode_msg_upsert_game_weight(&authority.bech32, entry)
+            }
+            BridgeMessage::UpdateParams { authority, params } => {
+                crate::cosmos::pole_msgs::encode_msg_update_params(&authority.bech32, params)
+            }
             BridgeMessage::Unsupported { type_url, note } => Any {
                 type_url: type_url.clone(),
                 value: note.as_bytes().to_vec(),

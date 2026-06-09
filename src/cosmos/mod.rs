@@ -20,14 +20,20 @@ pub mod query_client;
 pub mod rpc_client;
 pub mod tx_builder;
 pub mod tx_signer;
+pub mod wire_types;
 
 use std::time::Duration;
 
-pub use address::{bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX, POLE_BECH32_PREFIX};
+pub use address::{
+    bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX,
+    POLE_BECH32_PREFIX,
+};
 pub use eip712::{eip712_sign, hash_struct, keccak256, typed_data_hash, DomainSeparator};
 pub use error::{CosmosError, Result};
 pub use query_client::{AccountInfo, RestClient};
-pub use rpc_client::{AbciQueryResponseInner, BroadcastOptions, BroadcastTxResponse, StatusResponse, TendermintRpc};
+pub use rpc_client::{
+    AbciQueryResponseInner, BroadcastOptions, BroadcastTxResponse, StatusResponse, TendermintRpc,
+};
 pub use tx_builder::{BridgeMessage, FeeConfig, TxBuilder};
 pub use tx_signer::{sign_with_keypair, SignDocInputs, SignedTx};
 
@@ -87,7 +93,11 @@ impl CosmosClient {
     pub fn new(endpoint: CosmosEndpoint) -> Result<Self> {
         let rpc = TendermintRpc::new(endpoint.rpc_url.clone())?;
         let rest = RestClient::new(endpoint.rest_url.clone())?;
-        Ok(Self { endpoint, rpc, rest })
+        Ok(Self {
+            endpoint,
+            rpc,
+            rest,
+        })
     }
 
     pub fn with_timeout(endpoint: CosmosEndpoint, timeout: Duration) -> Result<Self> {
@@ -101,7 +111,11 @@ impl CosmosClient {
             .map_err(|e| CosmosError::Http(e.to_string()))?;
         let rpc = TendermintRpc::with_client(endpoint.rpc_url.clone(), rpc_client);
         let rest = RestClient::with_client(endpoint.rest_url.clone(), rest_client);
-        Ok(Self { endpoint, rpc, rest })
+        Ok(Self {
+            endpoint,
+            rpc,
+            rest,
+        })
     }
 
     /// Construct a client with a non-default bech32 prefix.
@@ -141,9 +155,13 @@ impl CosmosClient {
         opts: &BroadcastOptions,
     ) -> Result<BroadcastTxResponse> {
         let info = self.account(&signer.bech32).await?;
-        let account_number: u64 = info.account_number.parse()
+        let account_number: u64 = info
+            .account_number
+            .parse()
             .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
-        let sequence: u64 = info.sequence.parse()
+        let sequence: u64 = info
+            .sequence
+            .parse()
             .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
         let builder = self.builder(account_number, sequence);
         let signed = builder.build(msg, signer, keypair)?;
