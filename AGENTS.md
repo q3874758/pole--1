@@ -26,7 +26,7 @@ PoLE（Proof of Live Engagement）— Rust 链下协议引擎 + Cosmos SDK 链 +
 - `docs/operations/` — 运维文档（install / service-management / troubleshooting / testnet / update）
 - `packaging/windows/` — WiX 3.14 MSI 打包（`Product.wxs` + `layout.json`）
 - `packaging/linux/deb/` — Debian 包 + systemd unit
-- `tools/wix/` — WiX 工具链（**当前已 commit，违反 .gitignore，见 V1 必修**）
+- `tools/wix/` — WiX 3.14 RTM 工具链（**已 untrack，依赖 `release.yml:78-83` 在 runner 上自动下载**；本地 `tools/wix/` 仍存在但被 `.gitignore:32-35` 排除；如要改 wix 版本改 workflow step 即可）
 - `scripts/` — Windows PowerShell 启动 / 停止 / 状态 / 打包 / 安装脚本
 - `dist/release-manifests/` — 升级清单（**`stable.json` 仍是 dev-signature 占位**）
 - `pole-sbom` 自研二进制 — 输出 CycloneDX 1.5 + SPDX 2.3 双格式 SBOM
@@ -62,7 +62,7 @@ PoLE（Proof of Live Engagement）— Rust 链下协议引擎 + Cosmos SDK 链 +
 1. **MSI `UpgradeCode` 仍是占位符** — `packaging/windows/Product.wxs:9` 写死 `A1B2C3D4-E5F6-7890-ABCD-EF1234567890`。`MajorUpgrade` 升级路径依赖 UpgradeCode 稳定性，正式版必须替换并锁定。
 2. **`dist/release-manifests/stable.json` 签名占位** — `signature = "dev-signature"`。`docs/operations/update.md:72-73` 明确说明"正式版需替换为真实 PGP/GPG 签名"。
 3. **MSI 路径与文档路径不一致** — `Product.wxs`（`InstallScope=perUser`）+ `packaging/windows/layout.json` 实际安装到 `%LOCALAPPDATA%\PoLE`，但 `docs/operations/install.md` / `service-management.md` 大量引用 `C:\Program Files\PoLE\...` / `C:\ProgramData\PoLE\services`。以 `Product.wxs` + `src/app_paths.rs::installed_install_layout` 为准，文档需回改。
-4. **WiX 工具链 (`tools/wix/`, ~17 MB) 已入库，与 `.gitignore` 规则冲突** — `.gitignore:32-35` 排除 `tools/wix/`，但已 commit。`release.yml:78-83` 已有自拉兜底，应 `git rm -r tools/wix` 并完全依赖自动下载。
+4. ~~WiX 工具链 (`tools/wix/`, ~17 MB) 已入库，与 `.gitignore` 规则冲突~~ — ✅ 已在 commit `7015164` 中 `git rm -r tools/wix/`（220 files, 47,416 行删除），`release.yml:78-83` 自拉 step 为唯一来源。
 5. **License 黑名单需要双向同步** — `pole-sbom --deny-licenses`（CI 走 `src/bin/pole-sbom.rs`）只覆盖 `GPL/AGPL/SSPL`，而 `deny.toml` 还多 `Commons-Clause` 与 `Elastic-2.0`。新增 license 黑白名单时必须两处同步。
 6. **`core2` 是路径依赖 + 无 license 表达式** — `Cargo.toml:72-73` 的 `[patch.crates-io] core2 = { path = "vendor/core2" }`。`deny.toml` 的 `[[licenses.clarify]]` 仅声明 `MIT`，无 hash 校验；`Cargo.toml` 的 `package.exclude` 未显式列 `vendor/**`，下游 `cargo install` 不会带 vendor。
 

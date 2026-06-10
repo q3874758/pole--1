@@ -18,6 +18,24 @@ use std::process::ExitCode;
 use cargo_metadata::{Metadata, MetadataCommand, Package};
 use serde::Serialize;
 
+/// Default deny list applied when the caller does not pass
+/// `--deny-licenses` on the command line. This must stay in lock-step
+/// with `[licenses] deny = [...]` in `deny.toml` — both gates run in
+/// CI, and a mismatch would let one side miss a violation the other
+/// catches.
+///
+/// Last synced: 2026-06-10 (see V1 blocker #5 — license-list sync).
+pub const DEFAULT_DENY_LICENSES: &[&str] = &[
+    "GPL-1.0",
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+    "SSPL-1.0",
+    "Commons-Clause",
+    "Elastic-2.0",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
     CycloneDx,
@@ -107,7 +125,11 @@ struct Args {
     show_help: bool,
 }
 
-fn parse_args() -> Result<Args, String> {
+fn parse_args_from<I, S>(argv: I) -> Result<Args, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let mut args = Args {
         manifest_path: None,
         out: None,
@@ -116,33 +138,59 @@ fn parse_args() -> Result<Args, String> {
         warn_licenses: Vec::new(),
         show_help: false,
     };
-    let mut iter = std::env::args().skip(1);
+    let mut iter = argv.into_iter();
     while let Some(a) = iter.next() {
-        match a.as_str() {
+        let a = a.as_ref();
+        match a {
             "-h" | "--help" => args.show_help = true,
             "--manifest-path" => {
-                args.manifest_path = iter.next().map(PathBuf::from);
+                args.manifest_path = iter.next().map(|v| PathBuf::from(v.as_ref()));
             }
             "--out" => {
-                args.out = iter.next().map(PathBuf::from);
+                args.out = iter.next().map(|v| PathBuf::from(v.as_ref()));
             }
             "--format" => {
-                let v = iter.next().ok_or("--format requires a value")?;
+                let v = iter
+                    .next()
+                    .ok_or("--format requires a value")?
+                    .as_ref()
+                    .to_string();
                 args.format = Format::parse(&v)
                     .ok_or_else(|| format!("unknown format '{v}' (use cyclonedx or spdx)"))?;
             }
             "--deny-licenses" => {
-                let v = iter.next().ok_or("--deny-licenses requires a value")?;
+                let v = iter
+                    .next()
+                    .ok_or("--deny-licenses requires a value")?
+                    .as_ref()
+                    .to_string();
                 args.deny_licenses = v.split(',').map(|s| s.trim().to_string()).collect();
             }
             "--warn-licenses" => {
-                let v = iter.next().ok_or("--warn-licenses requires a value")?;
+                let v = iter
+                    .next()
+                    .ok_or("--warn-licenses requires a value")?
+                    .as_ref()
+                    .to_string();
                 args.warn_licenses = v.split(',').map(|s| s.trim().to_string()).collect();
             }
             other => return Err(format!("unknown flag: {other}")),
         }
     }
+    // Apply the built-in deny list when the caller didn't pass
+    // `--deny-licenses`. Mirrors `deny.toml` so both gates catch
+    // the same set of forbidden licenses.
+    if args.deny_licenses.is_empty() {
+        args.deny_licenses = DEFAULT_DENY_LICENSES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+    }
     Ok(args)
+}
+
+fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
 }
 
 fn print_help() {
@@ -281,37 +329,53 @@ fn stable_serial() -> String {
     )
 }
 
-fn audit_licenses(
-    items: &[(Package, Option<String>)],
+/// Core license-audit logic. Operates on plain `(name, version,
+/// license)` tuples so it can be unit-tested without constructing
+/// a full `cargo_metadata::Package`. The wrapper `audit_licenses`
+/// adapts the workspace's resolved packages into this shape.
+fn audit_license_entries(
+    entries: &[(String, String, Option<String>)],
     deny: &[String],
     warn: &[String],
 ) -> (Vec<String>, Vec<String>) {
     let mut denials = Vec::new();
     let mut warnings = Vec::new();
-    for (pkg, lic) in items {
+    for (name, version, lic) in entries {
         let Some(lic) = lic else {
-            warnings.push(format!("{}@{}: no license declared", pkg.name, pkg.version));
+            warnings.push(format!("{name}@{version}: no license declared"));
             continue;
         };
         let tokens = license_tokens(lic);
         for d in deny {
             if tokens.iter().any(|t| t.eq_ignore_ascii_case(d)) {
-                denials.push(format!(
-                    "{}@{}: license '{}' denied",
-                    pkg.name, pkg.version, d
-                ));
+                denials.push(format!("{name}@{version}: license '{d}' denied"));
             }
         }
         for w in warn {
             if tokens.iter().any(|t| t.eq_ignore_ascii_case(w)) {
-                warnings.push(format!(
-                    "{}@{}: license '{}' is in warn list",
-                    pkg.name, pkg.version, w
-                ));
+                warnings.push(format!("{name}@{version}: license '{w}' is in warn list"));
             }
         }
     }
     (denials, warnings)
+}
+
+fn audit_licenses(
+    items: &[(Package, Option<String>)],
+    deny: &[String],
+    warn: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let entries: Vec<(String, String, Option<String>)> = items
+        .iter()
+        .map(|(pkg, lic)| {
+            (
+                pkg.name.as_str().to_string(),
+                pkg.version.to_string(),
+                lic.clone(),
+            )
+        })
+        .collect();
+    audit_license_entries(&entries, deny, warn)
 }
 
 fn run() -> Result<i32, String> {
@@ -358,5 +422,163 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn deny_strings() -> Vec<String> {
+        DEFAULT_DENY_LICENSES.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    fn entry(name: &str, version: &str, license: Option<&str>) -> (String, String, Option<String>) {
+        (name.to_string(), version.to_string(), license.map(str::to_string))
+    }
+
+    // --- DEFAULT_DENY_LICENSES sync guard -------------------------------
+
+    #[test]
+    fn default_deny_list_matches_deny_toml() {
+        // Keep this in lock-step with [licenses] deny = [...] in deny.toml.
+        // If you add or remove a license here, update deny.toml too (and
+        // vice versa) — see V1 blocker #5.
+        let expected: &[&str] = &[
+            "GPL-1.0",
+            "GPL-2.0",
+            "GPL-3.0",
+            "AGPL-1.0",
+            "AGPL-3.0",
+            "SSPL-1.0",
+            "Commons-Clause",
+            "Elastic-2.0",
+        ];
+        assert_eq!(DEFAULT_DENY_LICENSES, expected);
+    }
+
+    // --- Per-license denial tests (regression for V1 blocker #5) -------
+
+    #[test]
+    fn commons_clause_license_is_denied() {
+        // "Commons-Clause" was previously missing from pole-sbom's deny
+        // list (only present in deny.toml). CI would let a Commons-Clause
+        // dependency slip through on the pole-sbom gate.
+        let entries = vec![entry("acme-cc", "1.0.0", Some("Apache-2.0 WITH Commons-Clause"))];
+        let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert_eq!(denials.len(), 1, "expected 1 denial, got {denials:?}");
+        assert!(denials[0].contains("Commons-Clause"));
+        assert!(denials[0].contains("acme-cc@1.0.0"));
+        assert!(warnings.is_empty(), "Commons-Clause is a hard denial, not a warning");
+    }
+
+    #[test]
+    fn elastic_license_is_denied() {
+        // Same regression as above, but for Elastic-2.0.
+        let entries = vec![entry("elastic-thing", "0.4.2", Some("Elastic-2.0"))];
+        let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert_eq!(denials.len(), 1, "expected 1 denial, got {denials:?}");
+        assert!(denials[0].contains("Elastic-2.0"));
+        assert!(denials[0].contains("elastic-thing@0.4.2"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn mit_license_is_allowed() {
+        // Sanity: the allow list still works after the deny-list expansion.
+        let entries = vec![entry("serde", "1.0.219", Some("MIT"))];
+        let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert!(denials.is_empty(), "MIT must not be denied: {denials:?}");
+        assert!(warnings.is_empty());
+    }
+
+    // --- Misc hardening for the rest of the deny list --------------------
+
+    #[test]
+    fn gpl3_license_is_denied() {
+        // Regression: GPL-3.0 was already in the deny list; this guards
+        // against the audit_license_entries refactor accidentally
+        // dropping it. Uses the short SPDX form that matches the deny
+        // list entry verbatim; SPDX 3.x forms like "GPL-3.0-only" /
+        // "GPL-3.0-or-later" are not currently normalised by
+        // `license_tokens` and would slip through (out of scope for
+        // V1 blocker #5; tracked as a follow-up).
+        let entries = vec![entry("legacy-c", "2.0.0", Some("GPL-3.0"))];
+        let (denials, _) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert_eq!(denials.len(), 1);
+        assert!(denials[0].contains("GPL-3.0"));
+    }
+
+    #[test]
+    fn sspl_license_is_denied() {
+        let entries = vec![entry("mongo-rs", "1.5.0", Some("SSPL-1.0"))];
+        let (denials, _) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert_eq!(denials.len(), 1);
+        assert!(denials[0].contains("SSPL-1.0"));
+    }
+
+    #[test]
+    fn no_license_emits_warning_not_denial() {
+        let entries = vec![entry("unlicensed", "0.0.1", None)];
+        let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &[]);
+        assert!(denials.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("no license declared"));
+    }
+
+    #[test]
+    fn warn_list_emits_warning_not_denial() {
+        let entries = vec![entry("copyleft", "1.0.0", Some("MPL-2.0"))];
+        let warns = vec!["MPL-2.0".to_string()];
+        let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &warns);
+        assert!(denials.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("MPL-2.0"));
+        assert!(warnings[0].contains("warn list"));
+    }
+
+    // --- parse_args default-deny behaviour -------------------------------
+
+    #[test]
+    fn parse_args_applies_default_deny_when_flag_omitted() {
+        // Drive parse_args_from with an empty argv to confirm the
+        // default-deny kick-in path. Mirrors `parse_args()` reading
+        // `std::env::args().skip(1)` with no flags.
+        let parsed = parse_args_from(Vec::<&str>::new()).expect("parse_args_from empty");
+        let expected: Vec<String> = DEFAULT_DENY_LICENSES.iter().map(|s| (*s).to_string()).collect();
+        assert_eq!(parsed.deny_licenses, expected);
+    }
+
+    #[test]
+    fn parse_args_user_deny_overrides_default() {
+        // When the caller passes --deny-licenses explicitly, the default
+        // list must NOT be merged in — otherwise the explicit list grows
+        // silently every time we add to DEFAULT_DENY_LICENSES.
+        let parsed = parse_args_from(vec!["--deny-licenses", "GPL-3.0-only"]).unwrap();
+        assert_eq!(parsed.deny_licenses, vec!["GPL-3.0-only".to_string()]);
+        assert!(!parsed.deny_licenses.iter().any(|s| s == "Commons-Clause"));
+    }
+
+    #[test]
+    fn parse_args_csv_deny_lists_are_trimmed() {
+        let parsed = parse_args_from(vec!["--deny-licenses", "GPL-3.0-only, AGPL-3.0-only "])
+            .unwrap();
+        assert_eq!(
+            parsed.deny_licenses,
+            vec!["GPL-3.0-only".to_string(), "AGPL-3.0-only".to_string()]
+        );
+    }
+
+    // --- license_tokens helper -------------------------------------------
+
+    #[test]
+    fn license_tokens_splits_expression() {
+        // `audit_license_entries` relies on tokenisation so that
+        // "Apache-2.0 WITH Commons-Clause" matches a deny entry of
+        // "Commons-Clause" without false positives on "Apache-2.0".
+        let toks = license_tokens("Apache-2.0 WITH Commons-Clause");
+        assert!(toks.iter().any(|t| t == "Apache-2.0"));
+        assert!(toks.iter().any(|t| t == "WITH"));
+        assert!(toks.iter().any(|t| t == "Commons-Clause"));
     }
 }
