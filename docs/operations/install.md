@@ -43,6 +43,23 @@
 3. 解压到任意目录
 4. 运行 `pole-gui.exe`
 
+### Windows 安装位置（MSI）
+
+PoLE V1 MSI 是 **perUser 范围**（`InstallScope="perUser"`，`HKCU` 写注册表），不写入系统级 `C:\Program Files\PoLE\` 目录。实际安装根目录为：
+
+```
+%LOCALAPPDATA%\PoLE\        # = C:\Users\<当前用户>\AppData\Local\PoLE\
+├── pole-gui.exe
+├── pole-client.exe
+├── pole-node.exe
+├── config\                  # node.json / client.json
+├── data\                    # 节点运行时数据
+├── logs\                    # pole-node.log 等
+└── updates\                 # 升级包暂存
+```
+
+`%LOCALAPPDATA%` 是 Windows 用户环境变量（PowerShell 中等价于 `$env:LOCALAPPDATA`）。该布局与 `src/app_paths.rs::installed_install_layout(Windows)` 一致。
+
 ## Linux 安装
 
 ### DEB 包（推荐）

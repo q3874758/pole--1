@@ -11,7 +11,7 @@
 1. 检查配置文件存在且格式正确：
    ```bash
    cat /etc/pole/node.json  # Linux
-   type "C:\Program Files\PoLE\config\node.json"  # Windows
+   type "%LOCALAPPDATA%\PoLE\config\node.json"  # Windows（perUser 安装到 %LOCALAPPDATA%\PoLE\）
    ```
 
 2. 检查数据目录权限：
@@ -149,7 +149,7 @@
 
 | 平台 | 路径 |
 |------|------|
-| Windows (服务) | `C:\Program Files\PoLE\logs\` |
+| Windows (MSI 服务) | `%LOCALAPPDATA%\PoLE\logs\` （perUser 安装到 `%LOCALAPPDATA%\PoLE\`） |
 | Windows (绿色版) | `<安装目录>\pole-node-data\logs\` |
 | Linux | `/var/log/pole/` 或 `journalctl -u pole-node` |
 

@@ -1,17 +1,19 @@
 # PoLE 服务管理指南
 
+> **路径约定（Windows MSI 安装）**：PoLE V1 MSI 是 perUser 范围（`InstallScope="perUser"`），实际安装到用户目录 `%LOCALAPPDATA%\PoLE\`（`HKCU`）。本文所有 Windows 命令块中的 `%LOCALAPPDATA%` 都是 Windows 用户环境变量，可直接在 `cmd.exe` / PowerShell / 资源管理器中展开，等价于 PowerShell 中的 `$env:LOCALAPPDATA` 或 `[Environment]::GetFolderPath('LocalApplicationData')`。子目录布局：`config\` / `data\` / `logs\` / `updates\`。
+
 ## Windows Service
 
 ### 安装服务
 
 ```cmd
-"C:\Program Files\PoLE\pole-node.exe" service-install "C:\Program Files\PoLE\config\node.json"
+"%LOCALAPPDATA%\PoLE\pole-node.exe" service-install "%LOCALAPPDATA%\PoLE\config\node.json"
 ```
 
 ### 启动服务
 
 ```cmd
-"C:\Program Files\PoLE\pole-node.exe" service-start "C:\Program Files\PoLE\config\node.json"
+"%LOCALAPPDATA%\PoLE\pole-node.exe" service-start "%LOCALAPPDATA%\PoLE\config\node.json"
 
 # 或使用 sc
 sc start PoLENode
@@ -20,7 +22,7 @@ sc start PoLENode
 ### 停止服务
 
 ```cmd
-"C:\Program Files\PoLE\pole-node.exe" service-stop "C:\Program Files\PoLE\config\node.json"
+"%LOCALAPPDATA%\PoLE\pole-node.exe" service-stop "%LOCALAPPDATA%\PoLE\config\node.json"
 
 # 或使用 sc
 sc stop PoLENode
@@ -29,7 +31,7 @@ sc stop PoLENode
 ### 查看服务状态
 
 ```cmd
-"C:\Program Files\PoLE\pole-node.exe" service-status "C:\Program Files\PoLE\config\node.json"
+"%LOCALAPPDATA%\PoLE\pole-node.exe" service-status "%LOCALAPPDATA%\PoLE\config\node.json"
 
 # 或使用 sc
 sc query PoLENode
@@ -38,7 +40,7 @@ sc query PoLENode
 ### 卸载服务
 
 ```cmd
-"C:\Program Files\PoLE\pole-node.exe" service-uninstall "C:\Program Files\PoLE\config\node.json"
+"%LOCALAPPDATA%\PoLE\pole-node.exe" service-uninstall "%LOCALAPPDATA%\PoLE\config\node.json"
 ```
 
 ### 服务启动类型
@@ -105,7 +107,7 @@ sudo systemctl daemon-reload
 日志位于安装目录的 `logs\` 子目录：
 
 ```cmd
-type "C:\Program Files\PoLE\logs\pole-node.log"
+type "%LOCALAPPDATA%\PoLE\logs\pole-node.log"
 ```
 
 ### Linux

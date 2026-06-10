@@ -1,5 +1,7 @@
 # PoLE 更新与回滚指南
 
+> **路径约定（Windows MSI）**：PoLE V1 MSI 是 perUser 范围（`InstallScope="perUser"`，`HKCU` 写注册表），实际安装到 `%LOCALAPPDATA%\PoLE\`（即 `C:\Users\<当前用户>\AppData\Local\PoLE\`），不写入系统级 Program Files 目录。`%LOCALAPPDATA%` 是 Windows 用户环境变量（PowerShell 中等价于 `$env:LOCALAPPDATA`），在 `cmd.exe` 批处理 / PowerShell / 资源管理器中可直接展开。
+
 ## 自动更新
 
 PoLE 使用签名验证的更新机制。更新包从 release 通道（`stable`）获取。
@@ -50,7 +52,7 @@ pole-node update-rollback /etc/pole/node.json
 net stop PoLENode
 
 # 替换文件
-copy /Y PoLE-new.exe "C:\Program Files\PoLE\pole-node.exe"
+copy /Y PoLE-new.exe "%LOCALAPPDATA%\PoLE\pole-node.exe"
 
 # 启动服务
 net start PoLENode
