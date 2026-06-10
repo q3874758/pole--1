@@ -17,5 +17,13 @@
       "size_bytes": 6731776
     }
   ],
-  "signature": "dev-signature"
+  "signing": {
+    "scheme": "cosign-keyless",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "identity_regexp": "https://github.com/q3874758/pole--1",
+    "signature_file": "stable.json.sig",
+    "certificate_file": "stable.json.cert",
+    "transparency_log": "rekor",
+    "note": "The `signature` / `_cosign_signature` field present in earlier manifests was a dev placeholder (\"dev-signature\"). It has been removed in V1; the real Ed25519-SHA256 cosign keyless signature lives in the sidecar file stable.json.sig, with the corresponding Fulcio certificate in stable.json.cert. Both are produced by the `.github/workflows/release.yml` `Sign stable.json (cosign keyless OIDC + Rekor)` step and shipped alongside stable.json on each GitHub Release. Verifiers MUST run `cosign verify-blob` with the sidecars (see docs/operations/update.md) — there is intentionally no inline signature in this JSON to avoid tampering-by-republish."
+  }
 }

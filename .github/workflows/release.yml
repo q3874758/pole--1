@@ -199,6 +199,39 @@ jobs:
               "$sbom"
           done
 
+      # ---- stable.json (release manifest) cosign keyless signing ----
+      # V1 hard card #2: the `signature = "dev-signature"` placeholder in
+      # dist/release-manifests/stable.json must be replaced by a real
+      # cosign keyless signature at release time. We stage the manifest
+      # under dist/release/, sign it, and let the GH Release glob pick
+      # it up alongside its .sig / .cert sidecars (see `files:` below).
+      - name: Stage release manifest
+        run: |
+          mkdir -p dist/release
+          cp dist/release-manifests/stable.json dist/release/stable.json
+
+      - name: Sign stable.json (cosign keyless OIDC + Rekor)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature dist/release/stable.json.sig \
+            --output-certificate dist/release/stable.json.cert \
+            dist/release/stable.json
+
+      - name: Verify stable.json signature
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --signature dist/release/stable.json.sig \
+            --certificate dist/release/stable.json.cert \
+            --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            dist/release/stable.json
+
       - name: Generate release notes
         run: |
           cat > dist/release/RELEASE_NOTES.md << 'EOF'
