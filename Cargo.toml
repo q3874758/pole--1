@@ -18,6 +18,7 @@ exclude = [
     "/dist/**",
     "/target/**",
     "/pole-node-data/**",
+    "/vendor/**",
     "*.log",
     "*.pid",
 ]

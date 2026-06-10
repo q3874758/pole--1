@@ -71,9 +71,12 @@ license-files = [
 [[licenses.clarify]]
 crate = "core2"
 expression = "MIT"
-license-files = [
-    { path = "LICENSE", hash = 0x0 },
-]
+# Note: Cargo 1.94 does not support `checksum` on `[patch.crates-io]`
+# path deps — emits "unused manifest key" warning, so we cannot
+# pin the path dep contents here. If we later migrate to
+# `[source.crates-io] replace-with = "vendored-sources"`, cargo
+# will verify integrity via `vendor/core2/.cargo-checksum.json`
+# automatically.
 
 [bans]
 # Multiple versions of the same crate are common in Rust
