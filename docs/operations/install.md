@@ -45,7 +45,7 @@
 
 ### Windows 安装位置（MSI）
 
-PoLE V1 MSI 是 **perUser 范围**（`InstallScope="perUser"`，`HKCU` 写注册表），不写入系统级 `C:\Program Files\PoLE\` 目录。实际安装根目录为：
+PoLE V1 MSI 是 **perUser 范围**（`InstallScope="perUser"`，`HKCU` 写注册表），不写入系统级 `Program Files` 目录（仅写入当前用户环境，避免 UAC 提权）。实际安装根目录为：
 
 ```
 %LOCALAPPDATA%\PoLE\        # = C:\Users\<当前用户>\AppData\Local\PoLE\
