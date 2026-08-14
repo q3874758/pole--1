@@ -1,5 +1,5 @@
 use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -36,9 +36,26 @@ pub trait HttpTextClient {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReqwestHttpTextClient;
 
+/// Shared blocking HTTP client with a request timeout and a user agent.
+/// The timeout prevents a stalled upstream endpoint from hanging a collect
+/// tick forever; the user agent keeps servers from rejecting the request.
+fn http_client() -> &'static reqwest::blocking::Client {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("pole-node/0.1 (PoLE activity collector)")
+            .build()
+            .expect("build reqwest blocking client")
+    })
+}
+
 impl HttpTextClient for ReqwestHttpTextClient {
     fn get_text(&self, url: &str) -> Result<String, SteamCollectorError> {
-        let response = reqwest::blocking::get(url)
+        let response = http_client()
+            .get(url)
+            .send()
             .map_err(|err| SteamCollectorError::Http(err.to_string()))?;
         let status = response.status();
         if !status.is_success() {

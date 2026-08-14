@@ -779,12 +779,14 @@ fn collect_tick_uses_configured_activity_sources_when_present() {
             source_kind: ActivitySourceKind::Epic,
             endpoint_url: Some("https://example.invalid/epic?appid={app_id}".into()),
             inline_json: None,
+            retries: 0,
         },
         pole_protocol_draft::ActivitySourceConfig {
             app_id: 9900,
             source_kind: ActivitySourceKind::Community,
             endpoint_url: None,
             inline_json: Some(r#"{"estimated_players":77,"confidence_ppm":120000}"#.into()),
+            retries: 0,
         },
     ];
     let data_dir = PathBuf::from(&config.runtime.data_dir);

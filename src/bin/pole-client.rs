@@ -1607,6 +1607,7 @@ fn activity_sources_add_cmd(args: &[String]) -> Result<(), Box<dyn std::error::E
         endpoint_url: (source_kind != ActivitySourceKind::Community)
             .then_some(source_value.clone()),
         inline_json: (source_kind == ActivitySourceKind::Community).then_some(source_value),
+        retries: 0,
     });
     config.save_json(&config_path)?;
     println!("activity_source_added=true");
@@ -4126,6 +4127,7 @@ fn sync_activity_sources(config: &mut NodeConfig) {
                 source_kind: ActivitySourceKind::Steam,
                 endpoint_url: Some(current_players_url(*app_id)),
                 inline_json: None,
+                retries: 0,
             });
         }
     }

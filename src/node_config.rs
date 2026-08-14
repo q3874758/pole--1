@@ -76,6 +76,11 @@ pub struct ActivitySourceConfig {
     pub endpoint_url: Option<String>,
     #[serde(default)]
     pub inline_json: Option<String>,
+    /// Additional retry attempts for live (HTTP) sources after a
+    /// transient failure. Each retry waits a short backoff before the
+    /// next attempt. Defaults to 0 (single attempt).
+    #[serde(default)]
+    pub retries: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

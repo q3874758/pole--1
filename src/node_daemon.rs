@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity_collector::collect_configured_activity_source;
+use crate::activity_collector::{collect_configured_activity_source, ActivityCollectorError};
 use crate::json_file::{load_json, load_json_or_default, save_pretty_json};
 use crate::node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
@@ -36,9 +36,9 @@ use crate::node_storage_audit::{
 };
 use crate::node_verifier::{verify_local_epoch, EpochVerificationReport, NodeVerificationError};
 use crate::p2p::{P2pMessage, P2pNetwork, P2pTopic};
-use crate::primitives::Hash32;
+use crate::primitives::{ActivitySourceKind, AppId, Hash32, UnixMillis};
 use crate::records::{Challenge, ChallengeEvidenceRef, EpochCommit, ObservationRecord};
-use crate::steam_collector::{fetch_current_players_live, HttpTextClient, SteamCollectorError};
+use crate::steam_collector::{current_players_url, HttpTextClient, SteamCollectorError};
 use crate::storage_book::{LocalRetentionBook, StorageBookError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -932,6 +932,7 @@ impl NodeHeartbeat {
 
 struct TickCollectionContext {
     samples: Vec<crate::node_pipeline::SteamCurrentPlayersSample>,
+    activity_failed_sources: Vec<String>,
     player_reward_tick_artifact: PlayerRewardTickArtifact,
 }
 
@@ -977,8 +978,16 @@ fn run_collect_tick_with_client_inner(
     let mut runtime = LocalNodeRuntime::new(config.clone(), retention_book);
     let TickCollectionContext {
         samples,
+        activity_failed_sources,
         player_reward_tick_artifact,
     } = collect_tick_context(config, progress, client)?;
+    if !activity_failed_sources.is_empty() {
+        eprintln!(
+            "pole-node: {} activity source(s) failed this tick: {}",
+            activity_failed_sources.len(),
+            activity_failed_sources.join("; ")
+        );
+    }
 
     let attached_network = network.is_some();
     let outcome = if let Some(network) = network.as_deref_mut() {
@@ -1307,7 +1316,9 @@ fn collect_tick_context(
     progress: &mut LocalNodeProgress,
     client: &dyn HttpTextClient,
 ) -> Result<TickCollectionContext, NodeDaemonError> {
-    let samples = collect_activity_samples(config, client)?;
+    let report = collect_activity_samples(config, client)?;
+    let samples = report.samples;
+    let activity_failed_sources = report.failed_sources;
     let active_game_processes = detect_active_game_processes(config);
     let foreground_process = detect_foreground_process_name();
     let sampled_interval_secs =
@@ -1345,6 +1356,7 @@ fn collect_tick_context(
 
     Ok(TickCollectionContext {
         samples,
+        activity_failed_sources,
         player_reward_tick_artifact: player_reward_tick.artifact,
     })
 }
@@ -1418,41 +1430,109 @@ fn persist_adjustment_cycle_artifact(
     summary.save_json(adjustment_cycle_summary_path(config))
 }
 
+/// Per-tick activity collection outcome: samples gathered plus a
+/// human-readable list of sources that failed this tick.
+#[derive(Debug)]
+struct ActivityCollectionReport {
+    samples: Vec<crate::node_pipeline::SteamCurrentPlayersSample>,
+    failed_sources: Vec<String>,
+}
+
 fn collect_activity_samples(
     config: &NodeConfig,
     client: &dyn HttpTextClient,
-) -> Result<Vec<crate::node_pipeline::SteamCurrentPlayersSample>, NodeDaemonError> {
-    if config.runtime.activity_sources.is_empty() {
-        return config
-            .runtime
-            .target_app_ids
-            .iter()
-            .map(|app_id| fetch_current_players_live(client, *app_id))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into);
-    }
-
+) -> Result<ActivityCollectionReport, NodeDaemonError> {
     let observed_at_millis = current_unix_millis()?;
-    config
-        .runtime
-        .activity_sources
-        .iter()
-        .map(|source| {
-            let endpoint_url = source
-                .endpoint_url
-                .as_deref()
-                .map(|template| template.replace("{app_id}", &source.app_id.to_string()));
-            collect_configured_activity_source(
+    let mut samples = Vec::new();
+    let mut failed_sources = Vec::new();
+
+    if config.runtime.activity_sources.is_empty() {
+        // Fallback: poll every target app id through the Steam API.
+        for app_id in &config.runtime.target_app_ids {
+            let endpoint = current_players_url(*app_id);
+            match collect_source_with_retry(
+                client,
+                ActivitySourceKind::Steam,
+                *app_id,
+                observed_at_millis,
+                Some(&endpoint),
+                None,
+                0,
+            ) {
+                Ok(sample) => samples.push(sample),
+                Err(err) => failed_sources.push(format!("app_id={app_id} steam: {err}")),
+            }
+        }
+    } else {
+        // Configured sources are collected independently so a single
+        // failing endpoint does not abort the whole tick.
+        for source in &config.runtime.activity_sources {
+            // Steam sources without an explicit endpoint fall back to the
+            // official Steam Web API for the app id.
+            let endpoint_url = match (&source.endpoint_url, source.source_kind) {
+                (Some(template), _) => Some(template.replace("{app_id}", &source.app_id.to_string())),
+                (None, ActivitySourceKind::Steam) => Some(current_players_url(source.app_id)),
+                (None, _) => None,
+            };
+            match collect_source_with_retry(
                 client,
                 source.source_kind,
                 source.app_id,
                 observed_at_millis,
                 endpoint_url.as_deref(),
                 source.inline_json.as_deref(),
-            )
-            .map_err(|err| NodeDaemonError::Steam(SteamCollectorError::Http(err.to_string())))
-        })
-        .collect()
+                source.retries,
+            ) {
+                Ok(sample) => samples.push(sample),
+                Err(err) => failed_sources.push(format!(
+                    "app_id={} kind={:?}: {err}",
+                    source.app_id, source.source_kind
+                )),
+            }
+        }
+    }
+
+    if samples.is_empty() && !failed_sources.is_empty() {
+        return Err(NodeDaemonError::Steam(SteamCollectorError::Http(format!(
+            "all activity sources failed: {}",
+            failed_sources.join("; ")
+        ))));
+    }
+    Ok(ActivityCollectionReport {
+        samples,
+        failed_sources,
+    })
+}
+
+/// Collects from a single source, retrying transient failures up to
+/// `retries` extra times with a short backoff.
+fn collect_source_with_retry(
+    client: &dyn HttpTextClient,
+    source_kind: ActivitySourceKind,
+    app_id: AppId,
+    observed_at_millis: UnixMillis,
+    endpoint_url: Option<&str>,
+    inline_json: Option<&str>,
+    retries: u32,
+) -> Result<crate::node_pipeline::SteamCurrentPlayersSample, ActivityCollectorError> {
+    let mut attempt = 0u32;
+    loop {
+        match collect_configured_activity_source(
+            client,
+            source_kind,
+            app_id,
+            observed_at_millis,
+            endpoint_url,
+            inline_json,
+        ) {
+            Ok(sample) => return Ok(sample),
+            Err(_) if attempt < retries => {
+                attempt += 1;
+                thread::sleep(Duration::from_millis(50 * u64::from(attempt).min(10)));
+            }
+            Err(err) => return Err(err),
+        }
+    }
 }
 
 fn current_fixed_block_reward(
@@ -2969,3 +3049,142 @@ pub struct P2pChallengeHistoryEntry {
 }
 
 const RECENT_P2P_CHALLENGE_HISTORY_LIMIT: usize = 10;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node_config::ActivitySourceConfig;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    /// Scripted HTTP client: each URL may fail a configurable number of
+    /// times before succeeding with a canned body.
+    struct ScriptedHttpClient {
+        failures: Mutex<BTreeMap<String, u32>>,
+        bodies: Mutex<BTreeMap<String, String>>,
+    }
+
+    impl ScriptedHttpClient {
+        fn new() -> Self {
+            Self {
+                failures: Mutex::new(BTreeMap::new()),
+                bodies: Mutex::new(BTreeMap::new()),
+            }
+        }
+
+        fn ok(mut self, url: impl Into<String>, body: impl Into<String>) -> Self {
+            self.bodies.get_mut().unwrap().insert(url.into(), body.into());
+            self
+        }
+
+        fn fail(mut self, url: impl Into<String>, times: u32) -> Self {
+            self.failures.get_mut().unwrap().insert(url.into(), times);
+            self
+        }
+    }
+
+    impl HttpTextClient for ScriptedHttpClient {
+        fn get_text(&self, url: &str) -> Result<String, SteamCollectorError> {
+            let mut failures = self.failures.lock().unwrap();
+            if let Some(remaining) = failures.get_mut(url) {
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    return Err(SteamCollectorError::Http("scripted failure".into()));
+                }
+            }
+            Ok(self
+                .bodies
+                .lock()
+                .unwrap()
+                .get(url)
+                .cloned()
+                .unwrap_or_default())
+        }
+    }
+
+    fn steam_url(app_id: u32) -> String {
+        current_players_url(app_id)
+    }
+
+    fn config_with_sources(sources: Vec<ActivitySourceConfig>) -> NodeConfig {
+        let mut config = NodeConfig::default();
+        config.runtime.activity_sources = sources;
+        config
+    }
+
+    #[test]
+    fn collect_activity_samples_is_isolated_per_source() {
+        let steam = ActivitySourceConfig {
+            app_id: 730,
+            source_kind: ActivitySourceKind::Steam,
+            endpoint_url: None,
+            inline_json: None,
+            retries: 0,
+        };
+        let epic = ActivitySourceConfig {
+            app_id: 730,
+            source_kind: ActivitySourceKind::Epic,
+            endpoint_url: Some("https://example.invalid/epic/{app_id}".into()),
+            inline_json: None,
+            retries: 0,
+        };
+        let config = config_with_sources(vec![steam, epic]);
+        let client = ScriptedHttpClient::new()
+            .ok(steam_url(730), r#"{"response":{"player_count":500000,"result":1}}"#)
+            .fail("https://example.invalid/epic/730", 5);
+
+        let report = collect_activity_samples(&config, &client).unwrap();
+        assert_eq!(report.samples.len(), 1);
+        assert_eq!(report.samples[0].observed_players, 500_000);
+        assert_eq!(report.failed_sources.len(), 1);
+        assert!(report.failed_sources[0].contains("kind=Epic"));
+    }
+
+    #[test]
+    fn collect_activity_samples_retries_transient_failure() {
+        let steam = ActivitySourceConfig {
+            app_id: 730,
+            source_kind: ActivitySourceKind::Steam,
+            endpoint_url: None,
+            inline_json: None,
+            retries: 2,
+        };
+        let config = config_with_sources(vec![steam]);
+        // First two attempts fail, the third succeeds -> with retries=2
+        // the tick must still yield a sample.
+        let client = ScriptedHttpClient::new()
+            .ok(steam_url(730), r#"{"response":{"player_count":123,"result":1}}"#)
+            .fail(steam_url(730), 2);
+
+        let report = collect_activity_samples(&config, &client).unwrap();
+        assert_eq!(report.samples.len(), 1);
+        assert_eq!(report.samples[0].observed_players, 123);
+        assert!(report.failed_sources.is_empty());
+    }
+
+    #[test]
+    fn collect_activity_samples_all_failed_is_an_error() {
+        let epic = ActivitySourceConfig {
+            app_id: 730,
+            source_kind: ActivitySourceKind::Epic,
+            endpoint_url: Some("https://example.invalid/epic".into()),
+            inline_json: None,
+            retries: 0,
+        };
+        let config = config_with_sources(vec![epic]);
+        let client = ScriptedHttpClient::new().fail("https://example.invalid/epic", 5);
+
+        let err = collect_activity_samples(&config, &client).unwrap_err();
+        assert!(err.to_string().contains("all activity sources failed"));
+    }
+
+    #[test]
+    fn activity_source_config_defaults_retries_to_zero() {
+        let json = r#"{"app_id":730,"source_kind":"Steam"}"#;
+        let source: ActivitySourceConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(source.retries, 0);
+        assert_eq!(source.app_id, 730);
+        assert_eq!(source.source_kind, ActivitySourceKind::Steam);
+    }
+}
+
