@@ -103,7 +103,6 @@ id_ed25519
 /.opencode/
 /.mavis/
 /plans/
-/vendor/
 
 # ----------------------------------------------------------------------------
 # Runtime state / generated artifacts (node config, SBOM output, push logs, test data)
@@ -125,3 +124,12 @@ id_ed25519
 
 # poled runtime home (created when run without --home)
 **/.pole/
+
+# ----------------------------------------------------------------------------
+# Vendored dependencies (cargo vendor snapshot)
+# ----------------------------------------------------------------------------
+# Only core2 is committed: it is a patched crate (a minimal MIT stub replacing
+# the upstream no_std core2) referenced via [patch.crates-io], so a fresh clone
+# needs it to build. The rest of vendor/ is a local `cargo vendor` snapshot.
+/vendor/*
+!/vendor/core2/
