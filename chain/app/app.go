@@ -16,10 +16,15 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
+	nodeservice "github.com/cosmos/cosmos-sdk/client/grpc/node"
 	"github.com/cosmos/cosmos-sdk/codec"
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/runtime"
+	"github.com/cosmos/cosmos-sdk/server"
+	"github.com/cosmos/cosmos-sdk/server/api"
+	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	std "github.com/cosmos/cosmos-sdk/std"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -38,6 +43,8 @@ import (
 	epochsmodule "github.com/cosmos/cosmos-sdk/x/epochs"
 	epochskeeper "github.com/cosmos/cosmos-sdk/x/epochs/keeper"
 	epochstypes "github.com/cosmos/cosmos-sdk/x/epochs/types"
+	genutilmodule "github.com/cosmos/cosmos-sdk/x/genutil"
+	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	govmodule "github.com/cosmos/cosmos-sdk/x/gov"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -54,6 +61,23 @@ import (
 )
 
 const AppName = "pole"
+
+// DefaultNodeHome is the default home directory for the poled daemon.
+const DefaultNodeHome = ".pole"
+
+// ModuleBasics is the module manager of module basics, used by the CLI and
+// the app constructor.
+var ModuleBasics = module.NewBasicManager(
+	authmodule.AppModuleBasic{},
+	bankmodule.AppModuleBasic{},
+	stakingmodule.AppModuleBasic{},
+	slashingmodule.AppModuleBasic{},
+	govmodule.AppModuleBasic{},
+	epochsmodule.AppModule{},
+	consensusmodule.AppModuleBasic{},
+	polemodule.AppModuleBasic{},
+	genutilmodule.NewAppModuleBasic(genutiltypes.DefaultMessageValidator),
+)
 
 var moduleAccountPermissions = map[string][]string{
 	authtypes.FeeCollectorName:     nil,
@@ -241,16 +265,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 		poletypes.ModuleName,
 	)
 
-	basicModuleManager := module.NewBasicManager(
-		authAppModule,
-		bankAppModule,
-		stakingAppModule,
-		slashingAppModule,
-		govAppModule,
-		epochsAppModule,
-		consensusAppModule,
-		poleAppModule,
-	)
+	basicModuleManager := ModuleBasics
 	basicModuleManager.RegisterInterfaces(interfaceRegistry)
 
 	configurator := module.NewConfigurator(appCodec, bApp.MsgServiceRouter(), bApp.GRPCQueryRouter())
@@ -406,6 +421,34 @@ func (a *App) ensureModuleAccounts(ctx sdk.Context) {
 		}
 		a.AccountKeeper.SetModuleAccount(ctx, authtypes.NewEmptyModuleAccount(name, perms...))
 	}
+}
+
+// RegisterAPIRoutes registers all application module routes with the provided
+// API server.
+func (a *App) RegisterAPIRoutes(apiSvr *api.Server, _ serverconfig.APIConfig) {
+	clientCtx := apiSvr.ClientCtx
+	authtx.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+	cmtservice.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+	nodeservice.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+	a.BasicModuleManager.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+}
+
+// RegisterTxService registers the tx gRPC query service.
+func (a *App) RegisterTxService(clientCtx client.Context) {
+	authtx.RegisterTxService(a.GRPCQueryRouter(), clientCtx, a.Simulate, a.interfaceRegistry)
+}
+
+// RegisterTendermintService registers the CometBFT gRPC query service.
+func (a *App) RegisterTendermintService(clientCtx client.Context) {
+	cmtApp := server.NewCometABCIWrapper(a)
+	cmtservice.RegisterTendermintService(clientCtx, a.GRPCQueryRouter(), a.interfaceRegistry, cmtApp.Query)
+}
+
+// RegisterNodeService registers the node gRPC query service.
+func (a *App) RegisterNodeService(clientCtx client.Context, cfg serverconfig.Config) {
+	nodeservice.RegisterNodeService(clientCtx, a.GRPCQueryRouter(), cfg, func() int64 {
+		return a.CommitMultiStore().EarliestVersion()
+	})
 }
 
 func (a *App) AppCodec() codec.Codec {
