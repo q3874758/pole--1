@@ -46,10 +46,15 @@ func DefaultParams() Params {
 		RewardBurnThreshold:        10_000,
 		RewardBurnBps:              1000,
 		GovernanceBurnBps:          100,
+		MinVerificationCount:       3,
+		MinPlayerVerifierShareBps:  5000,
 	}
 }
 
 func (p Params) Validate() error {
+	if p.MinPlayerVerifierShareBps > 10_000 {
+		return fmt.Errorf("min_player_verifier_share_bps must be <= 10000")
+	}
 	if p.RewardBlockDurationSeconds == 0 {
 		return fmt.Errorf("reward_block_duration_seconds must be greater than 0")
 	}
@@ -239,6 +244,12 @@ func validateBps(field string, value uint32) error {
 }
 
 func RequiredBondedTokensForNode(node NodeRecord) uint64 {
+	// Player collectors verify with live activity instead of a stake:
+	// their real participation is the bond. Non-player nodes must post
+	// the full bond for service/coordinator/verify/propose roles.
+	if node.IsPlayer {
+		return 0
+	}
 	var required uint64
 	switch node.Role {
 	case NodeRole_NODE_ROLE_SERVICE:

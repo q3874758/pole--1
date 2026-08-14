@@ -18,6 +18,7 @@ func RegisterInterfaces(registry types.InterfaceRegistry) {
 		&MsgOpenChallenge{},
 		&MsgResolveChallenge{},
 		&MsgFinalizeEpoch{},
+		&MsgVerifyBatch{},
 		&MsgClaimReward{},
 		&MsgUpsertGameWeight{},
 		&MsgUpdateParams{},

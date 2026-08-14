@@ -18,6 +18,7 @@ service Msg {
   rpc OpenChallenge(MsgOpenChallenge) returns (MsgOpenChallengeResponse);
   rpc ResolveChallenge(MsgResolveChallenge) returns (MsgResolveChallengeResponse);
   rpc FinalizeEpoch(MsgFinalizeEpoch) returns (MsgFinalizeEpochResponse);
+  rpc VerifyBatch(MsgVerifyBatch) returns (MsgVerifyBatchResponse);
   rpc ClaimReward(MsgClaimReward) returns (MsgClaimRewardResponse);
   rpc UpsertGameWeight(MsgUpsertGameWeight) returns (MsgUpsertGameWeightResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
@@ -100,6 +101,20 @@ message MsgFinalizeEpoch {
 }
 
 message MsgFinalizeEpochResponse {}
+
+message MsgVerifyBatch {
+  option (cosmos.msg.v1.signer) = "verifier";
+
+  string verifier = 1;
+  uint64 epoch_id = 2;
+  string target_batch_root_hex = 3;
+  string target_collector = 4;
+  bool is_player = 5;
+  bool verified = 6;
+  string signature_hex = 7;
+}
+
+message MsgVerifyBatchResponse {}
 
 message MsgClaimReward {
   option (cosmos.msg.v1.signer) = "claimer";

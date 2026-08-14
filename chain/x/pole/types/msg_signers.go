@@ -38,6 +38,10 @@ func (m *MsgFinalizeEpoch) GetSigners() []sdk.AccAddress {
 	return mustAccSigners(m.Finalizer)
 }
 
+func (m *MsgVerifyBatch) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.Verifier)
+}
+
 func (m *MsgClaimReward) GetSigners() []sdk.AccAddress {
 	return mustAccSigners(m.Claimer)
 }

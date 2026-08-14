@@ -355,6 +355,7 @@ fn encode_node_record_inner(node: &NodeRecordWire) -> Vec<u8> {
     encode_bool(6, node.active, &mut buf);
     encode_uint64(7, node.bonded_tokens, &mut buf);
     encode_uint64(8, node.last_updated_epoch, &mut buf);
+    encode_bool(9, node.is_player, &mut buf);
     buf
 }
 
@@ -1074,6 +1075,7 @@ mod tests {
             active: true,
             bonded_tokens: 1_000_000,
             last_updated_epoch: 5,
+            is_player: false,
         };
         let any = encode_msg_upsert_node("cosmos1op", &node);
         assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpsertNode");
@@ -1100,6 +1102,7 @@ mod tests {
                 active: false,
                 bonded_tokens: 0,
                 last_updated_epoch: 0,
+                is_player: false,
             };
             let any = encode_msg_upsert_node("cosmos1op", &node);
             let pair = [0x20u8, expected_varint];

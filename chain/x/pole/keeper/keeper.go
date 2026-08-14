@@ -36,6 +36,7 @@ type Keeper struct {
 	GameWeightEntries collections.Map[collections.Pair[uint64, uint64], types.GameWeightEntry]
 	ClaimedRewards    collections.Map[collections.Pair[uint64, string], types.ClaimedReward]
 	ReplicaReceipts   collections.Map[collections.Triple[uint64, string, string], types.ReplicaReceipt]
+	VerificationRecords collections.Map[collections.Triple[uint64, string, string], types.VerificationRecord]
 }
 
 type bankKeeper interface {
@@ -182,6 +183,20 @@ func NewKeeper(storeService store.KVStoreService, authority string) (Keeper, err
 			),
 			sdkcodec.CollValue[types.ReplicaReceipt](protoCodec),
 		),
+		VerificationRecords: collections.NewMap(
+			sb,
+			types.VerificationRecordsKeyPrefix,
+			"verification_records",
+			collections.NamedTripleKeyCodec(
+				"epoch_id",
+				collections.Uint64Key,
+				"verifier_address",
+				collections.StringKey,
+				"batch_root_hex",
+				collections.StringKey,
+			),
+			sdkcodec.CollValue[types.VerificationRecord](protoCodec),
+		),
 	}
 
 	schema, err := sb.Build()
@@ -297,6 +312,58 @@ func (k Keeper) GetClaimedReward(ctx context.Context, epochId uint64, recipient 
 
 func (k Keeper) HasClaimedReward(ctx context.Context, epochId uint64, recipient string) (bool, error) {
 	return k.ClaimedRewards.Has(ctx, collections.Join(epochId, recipient))
+}
+
+func (k Keeper) SetVerificationRecord(ctx context.Context, record types.VerificationRecord) error {
+	return k.VerificationRecords.Set(ctx, collections.Join3(record.EpochId, record.VerifierAddress, record.TargetBatchRootHex), record)
+}
+
+func (k Keeper) GetVerificationRecord(ctx context.Context, epochId uint64, verifier, batchRoot string) (types.VerificationRecord, error) {
+	return k.VerificationRecords.Get(ctx, collections.Join3(epochId, verifier, batchRoot))
+}
+
+func (k Keeper) verificationRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.VerificationRecord, error) {
+	iter, err := k.VerificationRecords.Iterate(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var records []types.VerificationRecord
+	for ; iter.Valid(); iter.Next() {
+		kv, err := iter.KeyValue()
+		if err != nil {
+			return nil, err
+		}
+		if kv.Value.EpochId == epochId {
+			records = append(records, kv.Value)
+		}
+	}
+	return records, nil
+}
+
+// VerificationCoverage returns the number of distinct verifiers that
+// attested batches for the epoch, plus the share (bps, 10000 = 100%)
+// of those verifiers classified as players.
+func (k Keeper) VerificationCoverage(ctx context.Context, epochId uint64) (int, uint32, error) {
+	records, err := k.verificationRecordsForEpoch(ctx, epochId)
+	if err != nil {
+		return 0, 0, err
+	}
+	verifiers := map[string]struct{}{}
+	playerVerifiers := map[string]struct{}{}
+	for _, record := range records {
+		verifiers[record.VerifierAddress] = struct{}{}
+		if record.IsPlayer {
+			playerVerifiers[record.VerifierAddress] = struct{}{}
+		}
+	}
+	count := len(verifiers)
+	var share uint32
+	if count > 0 {
+		share = uint32(len(playerVerifiers)) * 10_000 / uint32(count)
+	}
+	return count, share, nil
 }
 
 func (k Keeper) SetReplicaReceipt(ctx context.Context, receipt types.ReplicaReceipt) error {
@@ -518,6 +585,29 @@ func (k Keeper) FinalizeEpoch(ctx context.Context, epochId uint64) error {
 	}
 	if err := k.ValidateEpochRoots(ctx, epochId, commit); err != nil {
 		return err
+	}
+
+	// Verification coverage gate: the epoch needs enough independent
+	// verifier attestations, with a minimum share from player verifiers.
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return err
+	}
+	verifierCount, playerShareBps, err := k.VerificationCoverage(ctx, epochId)
+	if err != nil {
+		return err
+	}
+	if params.MinVerificationCount > 0 && uint64(verifierCount) < params.MinVerificationCount {
+		return fmt.Errorf(
+			"epoch %d has insufficient verifications (%d < %d)",
+			epochId, verifierCount, params.MinVerificationCount,
+		)
+	}
+	if params.MinPlayerVerifierShareBps > 0 && playerShareBps < params.MinPlayerVerifierShareBps {
+		return fmt.Errorf(
+			"epoch %d player verifier share %d bps < %d bps",
+			epochId, playerShareBps, params.MinPlayerVerifierShareBps,
+		)
 	}
 
 	commit.Finalized = true

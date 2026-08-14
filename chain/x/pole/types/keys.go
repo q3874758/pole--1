@@ -19,4 +19,5 @@ var (
 	ClaimedRewardsKeyPrefix    = collections.NewPrefix(8)
 	ReplicaReceiptsKeyPrefix   = collections.NewPrefix(9)
 	NodesKeyPrefix             = collections.NewPrefix(10)
+	VerificationRecordsKeyPrefix = collections.NewPrefix(11)
 )

@@ -337,6 +337,41 @@ func (m *msgServer) FinalizeEpoch(ctx context.Context, msg *types.MsgFinalizeEpo
 	return &types.MsgFinalizeEpochResponse{}, nil
 }
 
+// VerifyBatch records a verifier's attestation for a batch inside the
+// challenge window. A verifier may not attest its own batch (no
+// self-audit); player collectors may verify without a separate stake.
+func (m *msgServer) VerifyBatch(ctx context.Context, msg *types.MsgVerifyBatch) (*types.MsgVerifyBatchResponse, error) {
+	if msg == nil || msg.Verifier == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "verifier address is required")
+	}
+	if msg.TargetBatchRootHex == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "target_batch_root_hex is required")
+	}
+	if msg.TargetCollector == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "target_collector is required")
+	}
+	if msg.Verifier == msg.TargetCollector {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "verifier cannot attest its own batch")
+	}
+	if _, err := m.requireNodeCapability(ctx, msg.Verifier, "verify"); err != nil {
+		return nil, err
+	}
+	record := types.VerificationRecord{
+		EpochId:            msg.EpochId,
+		VerifierAddress:    msg.Verifier,
+		TargetBatchRootHex: msg.TargetBatchRootHex,
+		TargetCollector:    msg.TargetCollector,
+		IsPlayer:           msg.IsPlayer,
+		Verified:           msg.Verified,
+		VerifiedAtHeight:   sdk.UnwrapSDKContext(ctx).BlockHeight(),
+		SignatureHex:       msg.SignatureHex,
+	}
+	if err := m.keeper.SetVerificationRecord(ctx, record); err != nil {
+		return nil, err
+	}
+	return &types.MsgVerifyBatchResponse{}, nil
+}
+
 func (m *msgServer) ClaimReward(ctx context.Context, msg *types.MsgClaimReward) (*types.MsgClaimRewardResponse, error) {
 	if msg == nil {
 		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "message is required")

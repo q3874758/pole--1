@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"cosmossdk.io/log/v2"
@@ -110,6 +111,7 @@ func TestClaimRewardMintsTransfersAndMarksClaimed(t *testing.T) {
 	if finalizeHandler == nil {
 		t.Fatalf("expected finalize epoch handler")
 	}
+	seedVerificationCoverage(t, app, ctx, 1)
 	_, err = finalizeHandler(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 1})
 	if err != nil {
 		t.Fatalf("finalize epoch: %v", err)
@@ -303,6 +305,7 @@ func TestFinalizeEpochValidatesRoots(t *testing.T) {
 	if finalize == nil {
 		t.Fatalf("expected finalize epoch handler")
 	}
+	seedVerificationCoverage(t, app, ctx, 9)
 	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: reward.Recipient, EpochId: 9})
 	if err != nil {
 		t.Fatalf("finalize epoch with valid roots: %v", err)
@@ -328,6 +331,117 @@ func TestFinalizeEpochValidatesRoots(t *testing.T) {
 	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: reward.Recipient, EpochId: 10})
 	if err == nil {
 		t.Fatalf("expected finalize epoch to fail on invalid reward root")
+	}
+}
+
+func TestVerifyBatchEnforcesRulesAndStoresRecord(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(100)
+
+	verifier := "pole1verify11111111111111111111111111111111"
+	collector := "pole1collector222222222222222222222222222222"
+	other := "pole1other33333333333333333333333333333333"
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: verifier,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Verify: true, Collect: true},
+		BondedTokens:    types.MinVerifyBondedTokens,
+	}); err != nil {
+		t.Fatalf("set verifier node: %v", err)
+	}
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: other,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Collect: true},
+	}); err != nil {
+		t.Fatalf("set plain collector node: %v", err)
+	}
+
+	handler := app.MsgServiceRouter().Handler(&types.MsgVerifyBatch{})
+	if handler == nil {
+		t.Fatalf("expected verify batch handler")
+	}
+
+	// A verifier may not attest its own batch.
+	_, err := handler(ctx, &types.MsgVerifyBatch{
+		Verifier: verifier, EpochId: 1, TargetBatchRootHex: "ab", TargetCollector: verifier,
+	})
+	if err == nil {
+		t.Fatalf("expected self-audit rejection")
+	}
+
+	// A node without the verify capability may not attest.
+	_, err = handler(ctx, &types.MsgVerifyBatch{
+		Verifier: other, EpochId: 1, TargetBatchRootHex: "ab", TargetCollector: collector,
+	})
+	if err == nil {
+		t.Fatalf("expected non-verify rejection")
+	}
+
+	// Valid attestation is stored.
+	_, err = handler(ctx, &types.MsgVerifyBatch{
+		Verifier: verifier, EpochId: 1, TargetBatchRootHex: "ab", TargetCollector: collector,
+		IsPlayer: true, Verified: true,
+	})
+	if err != nil {
+		t.Fatalf("verify batch: %v", err)
+	}
+	record, err := app.PoleKeeper.GetVerificationRecord(ctx, 1, verifier, "ab")
+	if err != nil {
+		t.Fatalf("get verification record: %v", err)
+	}
+	if !record.IsPlayer || !record.Verified {
+		t.Fatalf("unexpected stored record: %+v", record)
+	}
+}
+
+func TestFinalizeEpochRejectsInsufficientVerifications(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(100)
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{9}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+	reward := types.RewardRecord{EpochId: 11, Recipient: recipient, NetReward: 9}
+	aggregate := types.AggregateRecord{EpochId: 11, AppId: 730, TotalWeightUnits: 9, PlayerCount: 1}
+	if err := app.PoleKeeper.SetRewardRecord(ctx, reward); err != nil {
+		t.Fatalf("set reward record: %v", err)
+	}
+	if err := app.PoleKeeper.SetAggregateRecord(ctx, aggregate); err != nil {
+		t.Fatalf("set aggregate record: %v", err)
+	}
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId:                 11,
+		ProposerAddress:         recipient,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 10,
+		Rewards:                 &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.RewardRecord{reward}), LeafCount: 1},
+		Aggregates:              &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.AggregateRecord{aggregate}), LeafCount: 1},
+		TotalNetworkWeightUnits: 9,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+
+	// Only two credentials: below the default min of 3.
+	for i := 0; i < 2; i++ {
+		verifier := "pole1verify55555555555555555555555555555" + string(rune('a'+i))
+		if err := app.PoleKeeper.SetVerificationRecord(ctx, types.VerificationRecord{
+			EpochId: 11, VerifierAddress: verifier, TargetBatchRootHex: "ab", TargetCollector: recipient,
+			IsPlayer: true, Verified: true, VerifiedAtHeight: 5,
+		}); err != nil {
+			t.Fatalf("seed verification: %v", err)
+		}
+	}
+
+	finalize := app.MsgServiceRouter().Handler(&types.MsgFinalizeEpoch{})
+	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 11})
+	if err == nil {
+		t.Fatalf("expected insufficient-verifications rejection")
+	}
+	if !strings.Contains(err.Error(), "insufficient verifications") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -494,6 +608,30 @@ func TestSubmitReplicaReceiptCreatesAvailabilityRecord(t *testing.T) {
 	}
 	if len(availability) != 1 || availability[0].ReceiptHashHex != "hash-1" {
 		t.Fatalf("expected availability record to be derived from replica receipt")
+	}
+}
+
+// seedVerificationCoverage injects 3 independent verification
+// credentials for an epoch (2 players, 1 non-player) so the finalize
+// verification gate (>= 3 credentials, >= 50% players) passes.
+func seedVerificationCoverage(t *testing.T, app *App, ctx sdk.Context, epochId uint64) {
+	t.Helper()
+	for i, verifier := range []string{
+		"pole1playerverifyaaaaaaaaaaaaaaaaaaaaaa1",
+		"pole1playerverifybbbbbbbbbbbbbbbbbbbbbb2",
+		"pole1nodeverifycccccccccccccccccccccccc3",
+	} {
+		if err := app.PoleKeeper.SetVerificationRecord(ctx, types.VerificationRecord{
+			EpochId:            epochId,
+			VerifierAddress:    verifier,
+			TargetBatchRootHex: "aabbccdd",
+			TargetCollector:    "pole1collectordddddddddddddddddddddddddd4",
+			IsPlayer:           i < 2,
+			Verified:           true,
+			VerifiedAtHeight:   5,
+		}); err != nil {
+			t.Fatalf("seed verification record: %v", err)
+		}
 	}
 }
 

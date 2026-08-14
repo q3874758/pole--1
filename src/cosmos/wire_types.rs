@@ -90,6 +90,10 @@ pub struct NodeRecordWire {
     pub active: bool,
     pub bonded_tokens: u64,
     pub last_updated_epoch: u64,
+    /// Player collectors may take the verify capability without a
+    /// separate stake.
+    #[serde(default)]
+    pub is_player: bool,
 }
 
 // --- AggregateRecord -----------------------------------------------------

@@ -32,6 +32,10 @@ message NodeRecord {
   bool active = 6;
   uint64 bonded_tokens = 7;
   uint64 last_updated_epoch = 8;
+  // True when the operator is a player collector (live activity in the
+  // previous epoch). Player collectors may take the verify capability
+  // without a separate stake; non-player nodes must bond.
+  bool is_player = 9;
 }
 
 message Params {
@@ -56,6 +60,13 @@ message Params {
   uint64 reward_burn_threshold = 19;
   uint32 reward_burn_bps = 20;
   uint32 governance_burn_bps = 21;
+  // Minimum number of independent verification credentials required
+  // before an epoch can be finalized.
+  uint64 min_verification_count = 22;
+  // Minimum share (bps, 10000 = 100%) of verification credentials that
+  // must come from player verifiers (nodes with live activity in the
+  // previous epoch).
+  uint32 min_player_verifier_share_bps = 23;
 }
 
 message BatchCommit {
@@ -174,4 +185,15 @@ message ClaimedReward {
   string recipient = 2;
   int64 claimed_at_height = 3;
   uint64 amount = 4;
+}
+
+message VerificationRecord {
+  uint64 epoch_id = 1;
+  string verifier_address = 2;
+  string target_batch_root_hex = 3;
+  string target_collector = 4;
+  bool is_player = 5;
+  bool verified = 6;
+  int64 verified_at_height = 7;
+  string signature_hex = 8;
 }

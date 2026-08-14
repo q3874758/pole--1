@@ -311,6 +311,7 @@ impl IntegrationHarness {
             active: true,
             bonded_tokens: 0,
             last_updated_epoch: 0,
+            is_player: false,
         };
         let msg = BridgeMessage::UpsertNode {
             operator: self.validator_address.clone(),
