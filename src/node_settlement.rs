@@ -28,6 +28,7 @@ use crate::tokenomics::{
 };
 use crate::transactions::{ClaimRewardTx, CommitEpochTx, SubmitBatchTx};
 use crate::transitions::{ProtocolState, TransitionError};
+use crate::wallet::KeyPair;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalChainRuntimeState {
@@ -317,7 +318,8 @@ pub fn open_local_protocol_state(
         .unwrap_or_else(|| local_protocol_params(config, challenge_window_blocks));
     let current_epoch = runtime.current_epoch.max(config.collect.default_epoch_id);
     let mut state = ProtocolState::with_store(params, runtime.height, current_epoch, store);
-    bootstrap_local_chain_state(config, &mut state)?;
+    let identity = config.identity_keypair()?;
+    bootstrap_local_chain_state(config, &identity, &mut state)?;
     Ok((runtime, state))
 }
 
@@ -509,6 +511,7 @@ pub fn settle_local_epoch(
     submission_height: Height,
     challenge_window_blocks: u32,
 ) -> Result<EpochSettlementArtifact, NodeSettlementError> {
+    let identity = config.identity_keypair()?;
     let preparation = compute_local_epoch_preparation(
         config,
         epoch_id,
@@ -539,7 +542,7 @@ pub fn settle_local_epoch(
     let current_epoch = runtime.current_epoch.max(epoch_id);
     let mut state = ProtocolState::with_store(params, runtime.height, current_epoch, store);
 
-    bootstrap_local_chain_state(config, &mut state)?;
+    bootstrap_local_chain_state(config, &identity, &mut state)?;
     state.height = submission_height;
 
     let batches = load_batches_for_epoch(config, epoch_id)
@@ -547,10 +550,13 @@ pub fn settle_local_epoch(
     let mut batch_submission_count = 0usize;
     let mut batch_already_present_count = 0usize;
     for batch in &batches {
-        match state.apply_submit_batch(SubmitBatchTx {
+        let mut submit_tx = SubmitBatchTx {
             batch_commit: batch.batch_commit.clone(),
-            signature: vec![1],
-        }) {
+            pubkey: identity.public,
+            signature: Vec::new(),
+        };
+        submit_tx.signature = identity.sign(&submit_tx.signing_payload());
+        match state.apply_submit_batch(submit_tx) {
             Ok(_) => batch_submission_count += 1,
             Err(TransitionError::DuplicateBatch(_)) => batch_already_present_count += 1,
             Err(err) => return Err(err.into()),
@@ -558,7 +564,7 @@ pub fn settle_local_epoch(
     }
 
     let (commit_applied, commit_already_present) =
-        apply_epoch_commit(&mut state, &preparation.epoch_commit)?;
+        apply_epoch_commit(&identity, &mut state, &preparation.epoch_commit)?;
 
     for entry in &preparation.reward_artifact.records {
         state.upsert_reward_record(entry.reward.clone());
@@ -576,7 +582,7 @@ pub fn settle_local_epoch(
     };
 
     let local_node_id = config.node_id()?;
-    let reward_address = config.reward_address()?;
+    let reward_address = identity.address;
     let local_reward_available = preparation
         .reward_artifact
         .records
@@ -586,7 +592,7 @@ pub fn settle_local_epoch(
         .unwrap_or(0);
 
     let (local_reward_claimed, local_reward_already_claimed) = if local_reward_available > 0 {
-        match state.apply_claim_reward(ClaimRewardTx {
+        let mut claim_tx = ClaimRewardTx {
             claimer: reward_address,
             epoch_id,
             node_id: local_node_id,
@@ -597,8 +603,11 @@ pub fn settle_local_epoch(
                 .account(&reward_address)
                 .map(|account| account.nonce)
                 .unwrap_or(0),
-            signature: vec![2],
-        }) {
+            pubkey: identity.public,
+            signature: Vec::new(),
+        };
+        claim_tx.signature = identity.sign(&claim_tx.signing_payload());
+        match state.apply_claim_reward(claim_tx) {
             Ok(_) => (true, false),
             Err(TransitionError::RewardAlreadyClaimed(_)) => (false, true),
             Err(err) => return Err(err.into()),
@@ -672,13 +681,17 @@ pub fn settle_local_epoch(
 }
 
 fn apply_epoch_commit<S: ProtocolStore>(
+    identity: &KeyPair,
     state: &mut ProtocolState<S>,
     epoch_commit: &EpochCommit,
 ) -> Result<(bool, bool), NodeSettlementError> {
-    match state.apply_commit_epoch(CommitEpochTx {
+    let mut commit_tx = CommitEpochTx {
         epoch_commit: epoch_commit.clone(),
-        signature: vec![1],
-    }) {
+        pubkey: identity.public,
+        signature: Vec::new(),
+    };
+    commit_tx.signature = identity.sign(&commit_tx.signing_payload());
+    match state.apply_commit_epoch(commit_tx) {
         Ok(_) => Ok((true, false)),
         Err(TransitionError::DuplicateEpochCommit(_)) => Ok((false, true)),
         Err(err) => Err(err.into()),
@@ -687,15 +700,16 @@ fn apply_epoch_commit<S: ProtocolStore>(
 
 fn bootstrap_local_chain_state<S: ProtocolStore>(
     config: &NodeConfig,
+    identity: &KeyPair,
     state: &mut ProtocolState<S>,
 ) -> Result<(), NodeSettlementError> {
     let node_id = config.node_id()?;
-    let reward_address = config.reward_address()?;
+    let reward_address = identity.address;
 
     if state.store.node(&node_id).is_none() {
         state.upsert_node(NodeRegistry {
             node_id,
-            pubkey: vec![1, 2, 3],
+            pubkey: identity.public.to_vec(),
             reward_address,
             bond: state
                 .params

@@ -118,7 +118,8 @@ pub enum TransitionEffect {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransitionError {
-    EmptySignature,
+    InvalidSignature,
+    InvalidSigner,
     EmptyPayloadCid,
     EmptyBatch,
     InvalidSlotRange,
@@ -257,7 +258,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: SubmitBatchTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.batch_commit.collector_id, &tx.signing_payload(), &tx.signature)?;
 
         let mut batch = tx.batch_commit;
         ensure_epoch_not_stale(batch.epoch_id, self.current_epoch)?;
@@ -286,7 +287,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: CommitEpochTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.epoch_commit.proposer_id, &tx.signing_payload(), &tx.signature)?;
 
         let mut commit = tx.epoch_commit;
         ensure_epoch_not_stale(commit.epoch_id, self.current_epoch)?;
@@ -331,7 +332,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: OpenChallengeTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.challenge.challenger, &tx.signing_payload(), &tx.signature)?;
 
         let mut challenge = tx.challenge;
         if challenge.bond == 0 {
@@ -538,7 +539,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ClaimRewardTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.claimer, &tx.signing_payload(), &tx.signature)?;
 
         if !self.store.is_epoch_finalized(tx.epoch_id) {
             return Err(TransitionError::EpochNotFinalized(tx.epoch_id));
@@ -588,7 +589,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_transfer(&mut self, tx: TransferTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.from, &tx.signing_payload(), &tx.signature)?;
 
         let sender = self
             .store
@@ -623,7 +624,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_stake(&mut self, tx: StakeTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.delegator, &tx.signing_payload(), &tx.signature)?;
         ensure_positive_amount(tx.amount)?;
         self.require_active_node(tx.operator)?;
 
@@ -673,7 +674,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_unbond(&mut self, tx: UnbondTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.delegator, &tx.signing_payload(), &tx.signature)?;
         ensure_positive_amount(tx.amount)?;
 
         let key = (tx.delegator, tx.operator);
@@ -744,7 +745,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_vote(&mut self, tx: VoteTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.voter, &tx.signing_payload(), &tx.signature)?;
         ensure_positive_amount(tx.voting_power)?;
 
         let key = (tx.proposal_id, tx.voter);
@@ -791,7 +792,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ProposeProtocolParamsUpdateTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.proposer, &tx.signing_payload(), &tx.signature)?;
         if self.store.params_update_proposal(&tx.proposal_id).is_some() {
             return Err(TransitionError::DuplicateParamsUpdateProposal(
                 tx.proposal_id,
@@ -964,7 +965,7 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ChallengeResponseTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.signature)?;
+        ensure_signature(&tx.pubkey, &tx.responder, &tx.signing_payload(), &tx.signature)?;
         if tx.response_payload_cid.is_none() && tx.response_hash.is_none() {
             return Err(TransitionError::EmptyChallengeResponse);
         }
@@ -1080,9 +1081,20 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 }
 
-fn ensure_signature(signature: &[u8]) -> Result<(), TransitionError> {
-    if signature.is_empty() {
-        return Err(TransitionError::EmptySignature);
+fn ensure_signature(
+    pubkey: &[u8; 32],
+    expected_signer: &[u8; 32],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), TransitionError> {
+    // The declared signer identity (address / node id) must equal the stable
+    // hash of the presented Ed25519 public key. This binds the signature to the
+    // declared signer before the signature itself is checked.
+    if crate::stable_hash32(pubkey) != *expected_signer {
+        return Err(TransitionError::InvalidSigner);
+    }
+    if !crate::wallet::verify_signature(pubkey, message, signature) {
+        return Err(TransitionError::InvalidSignature);
     }
     Ok(())
 }

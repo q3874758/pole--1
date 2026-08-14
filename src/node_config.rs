@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::primitives::{ActivitySourceKind, Address, Amount, AppId, NodeId};
+use crate::wallet::KeyPair;
 use crate::tokenomics::{
     base_player_reward_per_block_with_tail, LONG_TERM_TAIL_EMISSION_RATE_BPS,
     LONG_TERM_TAIL_START_YEAR,
@@ -630,6 +631,15 @@ impl NodeConfig {
 
     pub fn reward_address(&self) -> Result<Address, NodeConfigError> {
         decode_hex_32(&self.reward_address_hex, "reward_address_hex")
+    }
+
+    /// Loads the node's Ed25519 identity key pair from `identity.json` in the
+    /// runtime data directory. The node id is `stable_hash32(identity.public)`.
+    pub fn identity_keypair(&self) -> Result<KeyPair, NodeConfigError> {
+        let path = Path::new(&self.runtime.data_dir).join("identity.json");
+        let text = fs::read_to_string(&path)?;
+        let keypair: KeyPair = serde_json::from_str(&text)?;
+        Ok(keypair)
     }
 
     pub fn inline_verify_enabled(&self) -> bool {

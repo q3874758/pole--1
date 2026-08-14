@@ -9,6 +9,6 @@ pub use commands::{
     show_address_with_password, sign_transaction,
 };
 pub use error::{Result, WalletError};
-pub use keys::{derive_child_key, hex_decode, hex_encode, KeyPair};
+pub use keys::{derive_child_key, hex_decode, hex_encode, verify_signature, KeyPair};
 pub use keystore::EncryptedKeystore;
 pub use mnemonic::{generate_mnemonic, word_at_index, word_to_index, Mnemonic};

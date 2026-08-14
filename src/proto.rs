@@ -543,6 +543,8 @@ pub struct ProtoTransferTx {
     pub nonce: u64,
     #[prost(bytes = "vec", tag = "8")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "9")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<TransferTx> for ProtoTransferTx {
@@ -558,6 +560,7 @@ impl From<TransferTx> for ProtoTransferTx {
             fee_hi,
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -573,6 +576,7 @@ impl TryFrom<ProtoTransferTx> for TransferTx {
             fee: join_amount(value.fee_lo, value.fee_hi),
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -591,6 +595,8 @@ pub struct ProtoStakeTx {
     pub nonce: u64,
     #[prost(bytes = "vec", tag = "6")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "7")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<StakeTx> for ProtoStakeTx {
@@ -603,6 +609,7 @@ impl From<StakeTx> for ProtoStakeTx {
             amount_hi,
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -617,6 +624,7 @@ impl TryFrom<ProtoStakeTx> for StakeTx {
             amount: join_amount(value.amount_lo, value.amount_hi),
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -635,6 +643,8 @@ pub struct ProtoUnbondTx {
     pub nonce: u64,
     #[prost(bytes = "vec", tag = "6")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "7")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<UnbondTx> for ProtoUnbondTx {
@@ -647,6 +657,7 @@ impl From<UnbondTx> for ProtoUnbondTx {
             amount_hi,
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -661,6 +672,7 @@ impl TryFrom<ProtoUnbondTx> for UnbondTx {
             amount: join_amount(value.amount_lo, value.amount_hi),
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -681,6 +693,8 @@ pub struct ProtoVoteTx {
     pub nonce: u64,
     #[prost(bytes = "vec", tag = "7")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "8")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<VoteTx> for ProtoVoteTx {
@@ -694,6 +708,7 @@ impl From<VoteTx> for ProtoVoteTx {
             voting_power_hi,
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -709,6 +724,7 @@ impl TryFrom<ProtoVoteTx> for VoteTx {
             voting_power: join_amount(value.voting_power_lo, value.voting_power_hi),
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -727,6 +743,8 @@ pub struct ProtoProposeProtocolParamsUpdateTx {
     pub nonce: u64,
     #[prost(bytes = "vec", tag = "6")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "7")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<ProposeProtocolParamsUpdateTx> for ProtoProposeProtocolParamsUpdateTx {
@@ -738,6 +756,7 @@ impl From<ProposeProtocolParamsUpdateTx> for ProtoProposeProtocolParamsUpdateTx 
             params: borsh::to_vec(&value.params).expect("protocol params should serialize"),
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -760,6 +779,7 @@ impl TryFrom<ProtoProposeProtocolParamsUpdateTx> for ProposeProtocolParamsUpdate
             params,
             nonce: value.nonce,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -815,6 +835,8 @@ pub struct ProtoSubmitBatchTx {
     pub batch_commit: Option<ProtoBatchCommit>,
     #[prost(bytes = "vec", tag = "2")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "3")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<SubmitBatchTx> for ProtoSubmitBatchTx {
@@ -822,6 +844,7 @@ impl From<SubmitBatchTx> for ProtoSubmitBatchTx {
         Self {
             batch_commit: Some(value.batch_commit.into()),
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -840,6 +863,7 @@ impl TryFrom<ProtoSubmitBatchTx> for SubmitBatchTx {
                 })?
                 .try_into()?,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -850,6 +874,8 @@ pub struct ProtoCommitEpochTx {
     pub epoch_commit: Option<ProtoEpochCommit>,
     #[prost(bytes = "vec", tag = "2")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "3")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<CommitEpochTx> for ProtoCommitEpochTx {
@@ -857,6 +883,7 @@ impl From<CommitEpochTx> for ProtoCommitEpochTx {
         Self {
             epoch_commit: Some(value.epoch_commit.into()),
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -875,6 +902,7 @@ impl TryFrom<ProtoCommitEpochTx> for CommitEpochTx {
                 })?
                 .try_into()?,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -885,6 +913,8 @@ pub struct ProtoOpenChallengeTx {
     pub challenge: Option<ProtoChallenge>,
     #[prost(bytes = "vec", tag = "2")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "3")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<OpenChallengeTx> for ProtoOpenChallengeTx {
@@ -892,6 +922,7 @@ impl From<OpenChallengeTx> for ProtoOpenChallengeTx {
         Self {
             challenge: Some(value.challenge.into()),
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -910,6 +941,7 @@ impl TryFrom<ProtoOpenChallengeTx> for OpenChallengeTx {
                 })?
                 .try_into()?,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }
@@ -926,6 +958,8 @@ pub struct ProtoChallengeResponseTx {
     pub response_hash: Option<Vec<u8>>,
     #[prost(bytes = "vec", tag = "5")]
     pub signature: Vec<u8>,
+    #[prost(bytes = "vec", tag = "6")]
+    pub pubkey: Vec<u8>,
 }
 
 impl From<ChallengeResponseTx> for ProtoChallengeResponseTx {
@@ -936,6 +970,7 @@ impl From<ChallengeResponseTx> for ProtoChallengeResponseTx {
             response_payload_cid: value.response_payload_cid,
             response_hash: value.response_hash.map(|hash| hash.to_vec()),
             signature: value.signature,
+            pubkey: value.pubkey.to_vec(),
         }
     }
 }
@@ -950,6 +985,7 @@ impl TryFrom<ProtoChallengeResponseTx> for ChallengeResponseTx {
             response_payload_cid: value.response_payload_cid,
             response_hash: opt_vec_to_fixed_32(value.response_hash, "response_hash")?,
             signature: value.signature,
+            pubkey: vec_to_fixed_32(value.pubkey, "pubkey")?,
         })
     }
 }

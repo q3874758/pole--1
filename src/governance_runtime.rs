@@ -13,27 +13,31 @@ pub fn execute_governance_vote(
     choice: VoteChoice,
     voting_power: u128,
 ) -> Result<(Vec<TransitionEffect>, bool), Box<dyn std::error::Error>> {
+    let identity = config.identity_keypair()?;
     let (mut runtime, mut state) =
         open_local_protocol_state(config, config.runtime.challenge_window_blocks)?;
-    let voter = config.reward_address()?;
+    let voter = identity.address;
     let block_height = state.height.saturating_add(1).max(1);
     let nonce = state
         .store
         .account(&voter)
         .map(|account| account.nonce)
         .unwrap_or(0);
+    let mut vote_tx = VoteTx {
+        proposal_id,
+        voter,
+        choice,
+        voting_power,
+        nonce,
+        pubkey: identity.public,
+        signature: Vec::new(),
+    };
+    vote_tx.signature = identity.sign(&vote_tx.signing_payload());
     let effects = execute_block(
         &mut state,
         Block {
             height: block_height,
-            transactions: vec![crate::Transaction::Vote(VoteTx {
-                proposal_id,
-                voter,
-                choice,
-                voting_power,
-                nonce,
-                signature: vec![1],
-            })],
+            transactions: vec![crate::Transaction::Vote(vote_tx)],
         },
     )
     .map_err(|err| io::Error::other(format!("governance vote execution failed: {err:?}")))?;
@@ -60,28 +64,32 @@ pub fn submit_protocol_params_update_proposal(
         .validate()
         .map_err(|err| io::Error::other(format!("invalid proposed params: {err}")))?;
 
+    let identity = config.identity_keypair()?;
     let (mut runtime, mut state) =
         open_local_protocol_state(config, config.runtime.challenge_window_blocks)?;
-    let proposer = config.reward_address()?;
+    let proposer = identity.address;
     let block_height = state.height.saturating_add(1).max(1);
     let nonce = state
         .store
         .account(&proposer)
         .map(|account| account.nonce)
         .unwrap_or(0);
+    let mut propose_tx = ProposeProtocolParamsUpdateTx {
+        proposal_id,
+        proposer,
+        effective_epoch,
+        params,
+        nonce,
+        pubkey: identity.public,
+        signature: Vec::new(),
+    };
+    propose_tx.signature = identity.sign(&propose_tx.signing_payload());
     let effects = execute_block(
         &mut state,
         Block {
             height: block_height,
             transactions: vec![crate::Transaction::ProposeProtocolParamsUpdate(
-                ProposeProtocolParamsUpdateTx {
-                    proposal_id,
-                    proposer,
-                    effective_epoch,
-                    params,
-                    nonce,
-                    signature: vec![1],
-                },
+                propose_tx,
             )],
         },
     )

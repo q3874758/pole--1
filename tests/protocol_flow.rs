@@ -11,6 +11,25 @@ fn fixed32(byte: u8) -> [u8; 32] {
     [byte; 32]
 }
 
+fn keypair(byte: u8) -> pole_protocol_draft::wallet::KeyPair {
+    let mut seed = [0u8; 32];
+    seed[0] = byte;
+    seed[1] = byte.wrapping_add(1);
+    seed[31] = byte;
+    pole_protocol_draft::wallet::KeyPair::from_seed(&seed)
+}
+
+macro_rules! sign {
+    ($byte:expr, $tx:expr) => {{
+        let mut __t = $tx;
+        __t.pubkey = keypair($byte).public;
+        let __p = __t.signing_payload();
+        __t.signature = keypair($byte).sign(&__p);
+        __t
+    }};
+}
+
+
 fn test_params() -> ProtocolParams {
     ProtocolParams {
         slot_seconds: 300,
@@ -113,18 +132,18 @@ fn rewards_root_matches_reward_records_fixture() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let collector = fixed32(1);
-    let proposer = fixed32(2);
+    let collector = keypair(1).address;
+    let proposer = keypair(2).address;
 
     state.upsert_node(active_node(
         collector,
-        fixed32(11),
+        keypair(11).address,
         0,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         proposer,
-        fixed32(12),
+        keypair(12).address,
         20_000,
         vec![Capability::Propose],
     ));
@@ -157,7 +176,7 @@ fn rewards_root_matches_reward_records_fixture() {
     rewards.sort_by_key(|record| record.node_id);
     let rewards_root = pole_protocol_draft::reward_record_root(&rewards).unwrap();
 
-    let submit = SubmitBatchTx {
+    let submit = sign!(1, SubmitBatchTx {
         batch_commit: BatchCommit {
             epoch_id: 1,
             collector_id: collector,
@@ -168,9 +187,11 @@ fn rewards_root_matches_reward_records_fixture() {
             obs_count: 1,
             submitted_at_height: 0,
         },
-        signature: vec![7],
-    };
-    let commit = CommitEpochTx {
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
+    let commit = sign!(2, CommitEpochTx {
         epoch_commit: EpochCommit {
             epoch_id: 1,
             accepted_batches: merkle(31),
@@ -186,8 +207,10 @@ fn rewards_root_matches_reward_records_fixture() {
             challenge_open_height: 0,
             challenge_deadline_height: 15,
         },
-        signature: vec![8],
-    };
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
 
     execute_block(
         &mut state,
@@ -217,27 +240,27 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let collector = fixed32(1);
-    let proposer = fixed32(2);
-    let target = fixed32(3);
-    let challenger = fixed32(4);
-    let claimer = fixed32(12);
+    let collector = keypair(1).address;
+    let proposer = keypair(2).address;
+    let target = keypair(3).address;
+    let challenger = keypair(4).address;
+    let claimer = keypair(12).address;
 
     state.upsert_node(active_node(
         collector,
-        fixed32(11),
+        keypair(11).address,
         0,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         proposer,
-        fixed32(12),
+        keypair(12).address,
         20_000,
         vec![Capability::Propose, Capability::Verify],
     ));
     state.upsert_node(active_node(
         target,
-        fixed32(13),
+        keypair(13).address,
         5_000,
         vec![Capability::Verify],
     ));
@@ -257,7 +280,7 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
         nonce: 0,
     });
 
-    let submit = SubmitBatchTx {
+    let submit = sign!(1, SubmitBatchTx {
         batch_commit: BatchCommit {
             epoch_id: 1,
             collector_id: collector,
@@ -268,9 +291,11 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
             obs_count: 1,
             submitted_at_height: 0,
         },
-        signature: vec![7],
-    };
-    let commit = CommitEpochTx {
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
+    let commit = sign!(2, CommitEpochTx {
         epoch_commit: EpochCommit {
             epoch_id: 1,
             accepted_batches: merkle(31),
@@ -283,8 +308,10 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
             challenge_open_height: 0,
             challenge_deadline_height: 15,
         },
-        signature: vec![8],
-    };
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
 
     execute_block(
         &mut state,
@@ -298,7 +325,7 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     )
     .unwrap();
 
-    let open = OpenChallengeTx {
+    let open = sign!(4, OpenChallengeTx {
         challenge: Challenge {
             challenge_id: fixed32(41),
             kind: pole_protocol_draft::ChallengeKind::BadAggregate,
@@ -317,8 +344,10 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
                 merkle_proof: vec![fixed32(51)],
             },
         },
-        signature: vec![9],
-    };
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
 
     execute_block(
         &mut state,
@@ -367,15 +396,17 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     state.height = 16;
     state.finalize_epoch(1).unwrap();
 
-    let claim = ClaimRewardTx {
+    let claim = sign!(12, ClaimRewardTx {
         claimer,
         epoch_id: 1,
         node_id: proposer,
         amount: 300,
         merkle_proof: vec![fixed32(61)],
         nonce: 0,
-        signature: vec![10],
-    };
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
+    });
     state.apply_claim_reward(claim).unwrap();
 
     assert_eq!(state.current_epoch, 2);
@@ -396,23 +427,27 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
 #[test]
 fn transfer_and_proto_roundtrip_work() {
     let tx = TransferTx {
-        from: fixed32(71),
+        from: keypair(71).address,
         to: fixed32(72),
         amount: 123,
         fee: 7,
         nonce: 2,
-        signature: vec![1, 2, 3],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
     let proto = pole_protocol_draft::ProtoTransferTx::from(tx.clone());
     let roundtrip = TransferTx::try_from(proto).unwrap();
     assert_eq!(tx, roundtrip);
 
     let stake = pole_protocol_draft::StakeTx {
-        delegator: fixed32(73),
+        delegator: keypair(73).address,
         operator: fixed32(74),
         amount: 999,
         nonce: 4,
-        signature: vec![4],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
     let stake_roundtrip = pole_protocol_draft::StakeTx::try_from(
         pole_protocol_draft::ProtoStakeTx::from(stake.clone()),
@@ -421,11 +456,13 @@ fn transfer_and_proto_roundtrip_work() {
     assert_eq!(stake, stake_roundtrip);
 
     let unbond = UnbondTx {
-        delegator: fixed32(77),
+        delegator: keypair(77).address,
         operator: fixed32(78),
         amount: 222,
         nonce: 5,
-        signature: vec![6],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
     let unbond_roundtrip =
         UnbondTx::try_from(pole_protocol_draft::ProtoUnbondTx::from(unbond.clone())).unwrap();
@@ -433,11 +470,13 @@ fn transfer_and_proto_roundtrip_work() {
 
     let vote = VoteTx {
         proposal_id: fixed32(75),
-        voter: fixed32(76),
+        voter: keypair(76).address,
         choice: VoteChoice::Yes,
         voting_power: 456,
         nonce: 9,
-        signature: vec![5],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
     let vote_roundtrip =
         VoteTx::try_from(pole_protocol_draft::ProtoVoteTx::from(vote.clone())).unwrap();
@@ -445,10 +484,12 @@ fn transfer_and_proto_roundtrip_work() {
 
     let response = ChallengeResponseTx {
         challenge_id: fixed32(79),
-        responder: fixed32(80),
+        responder: keypair(80).address,
         response_payload_cid: Some("cid://response-roundtrip".into()),
         response_hash: Some(fixed32(81)),
-        signature: vec![7],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
     let response_roundtrip = ChallengeResponseTx::try_from(
         pole_protocol_draft::ProtoChallengeResponseTx::from(response.clone()),
@@ -479,11 +520,13 @@ fn executor_rejects_height_regression() {
 fn protocol_params_update_tx_proto_roundtrip_works() {
     let tx = ProposeProtocolParamsUpdateTx {
         proposal_id: fixed32(77),
-        proposer: fixed32(78),
+        proposer: keypair(78).address,
         effective_epoch: 3,
         params: test_params(),
         nonce: 9,
-        signature: vec![1, 2, 3],
+        pubkey: [0u8; 32],
+
+        signature: Vec::new(),
     };
 
     let roundtrip = ProposeProtocolParamsUpdateTx::try_from(
@@ -498,9 +541,9 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let delegator = fixed32(81);
-    let operator = fixed32(82);
-    let challenger = fixed32(83);
+    let delegator = keypair(81).address;
+    let operator = keypair(82).address;
+    let challenger = keypair(83).address;
 
     state.upsert_account(pole_protocol_draft::AccountState {
         address: delegator,
@@ -518,7 +561,7 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
     });
     state.upsert_node(active_node(
         operator,
-        fixed32(84),
+        keypair(84).address,
         10_000,
         vec![Capability::Verify, Capability::Propose],
     ));
@@ -527,13 +570,15 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
         &mut state,
         Block {
             height: 2,
-            transactions: vec![Transaction::Stake(StakeTx {
+            transactions: vec![Transaction::Stake(sign!(81, StakeTx {
                 delegator,
                 operator,
                 amount: 500,
                 nonce: 0,
-                signature: vec![1],
-            })],
+                pubkey: [0u8; 32],
+
+                signature: Vec::new(),
+            }))],
         },
     )
     .unwrap();
@@ -544,24 +589,26 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
 
     let proposal_id = fixed32(85);
     state
-        .apply_vote(VoteTx {
+        .apply_vote(sign!(81, VoteTx {
             proposal_id,
             voter: delegator,
             choice: VoteChoice::No,
             voting_power: 250,
             nonce: 1,
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state.upsert_node(active_node(
-        fixed32(86),
-        fixed32(87),
+        keypair(86).address,
+        keypair(87).address,
         0,
         vec![Capability::Collect],
     ));
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(82, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(91),
@@ -574,15 +621,17 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .err();
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(86, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
-                collector_id: fixed32(86),
+                collector_id: keypair(86).address,
                 slot_start: 1,
                 slot_end: 1,
                 batch: merkle(97),
@@ -590,12 +639,14 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![4],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(82, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(91),
@@ -608,13 +659,15 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![5],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let challenge_id = fixed32(88);
     state
-        .apply_open_challenge(OpenChallengeTx {
+        .apply_open_challenge(sign!(83, OpenChallengeTx {
             challenge: Challenge {
                 challenge_id,
                 kind: pole_protocol_draft::ChallengeKind::BadStorage,
@@ -633,31 +686,37 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
                     merkle_proof: vec![fixed32(98)],
                 },
             },
-            signature: vec![6],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_challenge_response(ChallengeResponseTx {
+        .apply_challenge_response(sign!(82, ChallengeResponseTx {
             challenge_id,
             responder: operator,
             response_payload_cid: Some("cid://response".into()),
             response_hash: Some(fixed32(99)),
-            signature: vec![7],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     execute_block(
         &mut state,
         Block {
             height: 3,
-            transactions: vec![Transaction::Unbond(UnbondTx {
+            transactions: vec![Transaction::Unbond(sign!(81, UnbondTx {
                 delegator,
                 operator,
                 amount: 200,
                 nonce: 2,
-                signature: vec![8],
-            })],
+                pubkey: [0u8; 32],
+
+                signature: Vec::new(),
+            }))],
         },
     )
     .unwrap();
@@ -707,23 +766,23 @@ fn protocol_params_update_activates_only_after_epoch_rolls_forward() {
     let params = test_params();
     let mut state = ProtocolState::new(params.clone(), 1, 1);
 
-    let collector = fixed32(140);
-    let proposer = fixed32(141);
+    let collector = keypair(140).address;
+    let proposer = keypair(141).address;
     state.upsert_node(active_node(
         collector,
-        fixed32(142),
+        keypair(142).address,
         1_000,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         proposer,
-        fixed32(143),
+        keypair(143).address,
         20_000,
         vec![Capability::Propose],
     ));
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(140, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -734,12 +793,14 @@ fn protocol_params_update_activates_only_after_epoch_rolls_forward() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(141, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(151),
@@ -752,8 +813,10 @@ fn protocol_params_update_activates_only_after_epoch_rolls_forward() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let mut future_params = params.clone();
@@ -775,10 +838,10 @@ fn protocol_params_update_activates_only_after_epoch_rolls_forward() {
 fn protocol_params_update_transaction_schedules_future_epoch_activation() {
     let params = test_params();
     let mut state = ProtocolState::new(params.clone(), 1, 1);
-    let proposer = fixed32(160);
-    let proposer_account = fixed32(161);
-    let collector = fixed32(162);
-    let voter = fixed32(173);
+    let proposer = keypair(160).address;
+    let proposer_account = keypair(161).address;
+    let collector = keypair(162).address;
+    let voter = keypair(173).address;
 
     state.upsert_account(pole_protocol_draft::AccountState {
         address: proposer_account,
@@ -796,19 +859,19 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
     });
     state.upsert_node(active_node(
         proposer,
-        fixed32(163),
+        keypair(163).address,
         20_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
         collector,
-        fixed32(164),
+        keypair(164).address,
         1_000,
         vec![Capability::Collect],
     ));
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(162, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -819,12 +882,14 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(160, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(166),
@@ -837,8 +902,10 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let mut updated_params = params.clone();
@@ -850,14 +917,16 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
         Block {
             height: 2,
             transactions: vec![Transaction::ProposeProtocolParamsUpdate(
-                ProposeProtocolParamsUpdateTx {
+                sign!(161, ProposeProtocolParamsUpdateTx {
                     proposal_id: fixed32(172),
                     proposer: proposer_account,
                     effective_epoch: 2,
                     params: updated_params,
                     nonce: 0,
-                    signature: vec![3],
-                },
+                    pubkey: [0u8; 32],
+
+                    signature: Vec::new(),
+                }),
             )],
         },
     )
@@ -881,14 +950,16 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
     assert!(state.store.scheduled_protocol_params(&2).is_none());
 
     state
-        .apply_vote(VoteTx {
+        .apply_vote(sign!(173, VoteTx {
             proposal_id: fixed32(172),
             voter,
             choice: VoteChoice::Yes,
             voting_power: 4_000,
             nonce: 0,
-            signature: vec![4],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     assert!(state.store.scheduled_protocol_params(&2).is_some());
@@ -924,9 +995,9 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
 fn protocol_params_update_requires_quorum_and_approval_threshold() {
     let params = test_params();
     let mut state = ProtocolState::new(params.clone(), 1, 1);
-    let proposer = fixed32(180);
-    let proposer_account = fixed32(181);
-    let small_voter = fixed32(182);
+    let proposer = keypair(180).address;
+    let proposer_account = keypair(181).address;
+    let small_voter = keypair(182).address;
 
     state.upsert_account(pole_protocol_draft::AccountState {
         address: proposer_account,
@@ -944,22 +1015,22 @@ fn protocol_params_update_requires_quorum_and_approval_threshold() {
     });
     state.upsert_node(active_node(
         proposer,
-        fixed32(183),
+        keypair(183).address,
         20_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
-        fixed32(184),
-        fixed32(185),
+        keypair(184).address,
+        keypair(185).address,
         1_000,
         vec![Capability::Collect],
     ));
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(184, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
-                collector_id: fixed32(184),
+                collector_id: keypair(184).address,
                 slot_start: 1,
                 slot_end: 1,
                 batch: merkle(186),
@@ -967,12 +1038,14 @@ fn protocol_params_update_requires_quorum_and_approval_threshold() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(180, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(187),
@@ -985,32 +1058,38 @@ fn protocol_params_update_requires_quorum_and_approval_threshold() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let mut updated_params = params.clone();
     updated_params.rewards.emission_year = 5;
     state
-        .apply_propose_protocol_params_update(ProposeProtocolParamsUpdateTx {
+        .apply_propose_protocol_params_update(sign!(181, ProposeProtocolParamsUpdateTx {
             proposal_id: fixed32(193),
             proposer: proposer_account,
             effective_epoch: 2,
             params: updated_params,
             nonce: 0,
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_vote(VoteTx {
+        .apply_vote(sign!(182, VoteTx {
             proposal_id: fixed32(193),
             voter: small_voter,
             choice: VoteChoice::Yes,
             voting_power: 1_000,
             nonce: 0,
-            signature: vec![4],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     assert!(state.store.scheduled_protocol_params(&2).is_none());
@@ -1020,9 +1099,9 @@ fn protocol_params_update_requires_quorum_and_approval_threshold() {
 fn protocol_params_update_expires_and_burns_bond_when_epoch_passes_without_approval() {
     let params = test_params();
     let mut state = ProtocolState::new(params.clone(), 1, 1);
-    let proposer = fixed32(190);
-    let proposer_account = fixed32(191);
-    let collector = fixed32(192);
+    let proposer = keypair(190).address;
+    let proposer_account = keypair(191).address;
+    let collector = keypair(192).address;
 
     state.upsert_account(pole_protocol_draft::AccountState {
         address: proposer_account,
@@ -1033,19 +1112,19 @@ fn protocol_params_update_expires_and_burns_bond_when_epoch_passes_without_appro
     });
     state.upsert_node(active_node(
         proposer,
-        fixed32(193),
+        keypair(193).address,
         20_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
         collector,
-        fixed32(194),
+        keypair(194).address,
         1_000,
         vec![Capability::Collect],
     ));
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(192, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -1056,12 +1135,14 @@ fn protocol_params_update_expires_and_burns_bond_when_epoch_passes_without_appro
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(190, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(196),
@@ -1074,19 +1155,23 @@ fn protocol_params_update_expires_and_burns_bond_when_epoch_passes_without_appro
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     state
-        .apply_propose_protocol_params_update(ProposeProtocolParamsUpdateTx {
+        .apply_propose_protocol_params_update(sign!(191, ProposeProtocolParamsUpdateTx {
             proposal_id: fixed32(202),
             proposer: proposer_account,
             effective_epoch: 2,
             params: params.clone(),
             nonce: 0,
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     assert_eq!(state.store.account(&proposer_account).unwrap().balance, 0);
@@ -1112,9 +1197,9 @@ fn claim_reward_must_use_registered_reward_address() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 20, 2);
 
-    let node_id = fixed32(91);
-    let reward_address = fixed32(92);
-    let wrong_claimer = fixed32(93);
+    let node_id = keypair(91).address;
+    let reward_address = keypair(92).address;
+    let wrong_claimer = keypair(93).address;
 
     state.upsert_node(active_node(
         node_id,
@@ -1150,15 +1235,17 @@ fn claim_reward_must_use_registered_reward_address() {
     state.store.mark_epoch_finalized(1);
 
     let err = state
-        .apply_claim_reward(ClaimRewardTx {
+        .apply_claim_reward(sign!(93, ClaimRewardTx {
             claimer: wrong_claimer,
             epoch_id: 1,
             node_id,
             amount: 500,
             merkle_proof: vec![fixed32(94)],
             nonce: 0,
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap_err();
 
     assert!(matches!(
@@ -1174,7 +1261,7 @@ fn claim_reward_must_use_registered_reward_address() {
 fn vote_cannot_exceed_available_voting_power() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
-    let voter = fixed32(95);
+    let voter = keypair(95).address;
     state.upsert_account(pole_protocol_draft::AccountState {
         address: voter,
         balance: 100,
@@ -1184,14 +1271,16 @@ fn vote_cannot_exceed_available_voting_power() {
     });
 
     let err = state
-        .apply_vote(VoteTx {
+        .apply_vote(sign!(95, VoteTx {
             proposal_id: fixed32(96),
             voter,
             choice: VoteChoice::Yes,
             voting_power: 500,
             nonce: 0,
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap_err();
 
     assert!(matches!(
@@ -1209,33 +1298,33 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let proposer = fixed32(97);
-    let collector = fixed32(98);
-    let target = fixed32(99);
-    let wrong_responder = fixed32(100);
-    let challenger = fixed32(101);
+    let proposer = keypair(97).address;
+    let collector = keypair(98).address;
+    let target = keypair(99).address;
+    let wrong_responder = keypair(100).address;
+    let challenger = keypair(101).address;
 
     state.upsert_node(active_node(
         proposer,
-        fixed32(102),
+        keypair(102).address,
         10_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
         collector,
-        fixed32(103),
+        keypair(103).address,
         0,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         target,
-        fixed32(104),
+        keypair(104).address,
         1_000,
         vec![Capability::Verify],
     ));
     state.upsert_node(active_node(
         wrong_responder,
-        fixed32(105),
+        keypair(105).address,
         1_000,
         vec![Capability::Verify],
     ));
@@ -1248,7 +1337,7 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
     });
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(98, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -1259,11 +1348,13 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(97, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(107),
@@ -1276,13 +1367,15 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let challenge_id = fixed32(113);
     state
-        .apply_open_challenge(OpenChallengeTx {
+        .apply_open_challenge(sign!(101, OpenChallengeTx {
             challenge: Challenge {
                 challenge_id,
                 kind: pole_protocol_draft::ChallengeKind::BadStorage,
@@ -1301,18 +1394,22 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
                     merkle_proof: vec![fixed32(114)],
                 },
             },
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let err = state
-        .apply_challenge_response(ChallengeResponseTx {
+        .apply_challenge_response(sign!(100, ChallengeResponseTx {
             challenge_id,
             responder: wrong_responder,
             response_payload_cid: Some("cid://wrong".into()),
             response_hash: Some(fixed32(115)),
-            signature: vec![4],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap_err();
 
     assert!(matches!(
@@ -1331,26 +1428,26 @@ fn challenge_response_cannot_arrive_after_deadline() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let proposer = fixed32(116);
-    let collector = fixed32(117);
-    let target = fixed32(118);
-    let challenger = fixed32(119);
+    let proposer = keypair(116).address;
+    let collector = keypair(117).address;
+    let target = keypair(118).address;
+    let challenger = keypair(119).address;
 
     state.upsert_node(active_node(
         proposer,
-        fixed32(120),
+        keypair(120).address,
         10_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
         collector,
-        fixed32(121),
+        keypair(121).address,
         0,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         target,
-        fixed32(122),
+        keypair(122).address,
         1_000,
         vec![Capability::Verify],
     ));
@@ -1363,7 +1460,7 @@ fn challenge_response_cannot_arrive_after_deadline() {
     });
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(117, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -1374,11 +1471,13 @@ fn challenge_response_cannot_arrive_after_deadline() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(116, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(124),
@@ -1391,13 +1490,15 @@ fn challenge_response_cannot_arrive_after_deadline() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let challenge_id = fixed32(130);
     state
-        .apply_open_challenge(OpenChallengeTx {
+        .apply_open_challenge(sign!(119, OpenChallengeTx {
             challenge: Challenge {
                 challenge_id,
                 kind: pole_protocol_draft::ChallengeKind::BadStorage,
@@ -1416,8 +1517,10 @@ fn challenge_response_cannot_arrive_after_deadline() {
                     merkle_proof: vec![fixed32(131)],
                 },
             },
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     execute_block(
@@ -1430,13 +1533,15 @@ fn challenge_response_cannot_arrive_after_deadline() {
     .unwrap();
 
     let err = state
-        .apply_challenge_response(ChallengeResponseTx {
+        .apply_challenge_response(sign!(118, ChallengeResponseTx {
             challenge_id,
             responder: target,
             response_payload_cid: Some("cid://response".into()),
             response_hash: Some(fixed32(132)),
-            signature: vec![4],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap_err();
 
     assert!(matches!(
@@ -1461,7 +1566,7 @@ fn persistent_store_stub_flushes() {
 
     let mut store = pole_protocol_draft::PersistentStoreStub::open(&path).unwrap();
     store.insert_account(pole_protocol_draft::AccountState {
-        address: fixed32(120),
+        address: keypair(120).address,
         balance: 777,
         staked: 11,
         locked: 22,
@@ -1470,7 +1575,7 @@ fn persistent_store_stub_flushes() {
     store.flush().unwrap();
 
     let reopened = pole_protocol_draft::PersistentStoreStub::open(&path).unwrap();
-    let account = reopened.account(&fixed32(120)).unwrap();
+    let account = reopened.account(&keypair(120).address).unwrap();
     assert_eq!(account.balance, 777);
     assert_eq!(account.staked, 11);
     assert_eq!(account.locked, 22);
@@ -1484,26 +1589,26 @@ fn challenge_resolution_must_match_challenge_kind() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 1, 1);
 
-    let proposer = fixed32(121);
-    let collector = fixed32(122);
-    let target = fixed32(123);
-    let challenger = fixed32(124);
+    let proposer = keypair(121).address;
+    let collector = keypair(122).address;
+    let target = keypair(123).address;
+    let challenger = keypair(124).address;
 
     state.upsert_node(active_node(
         proposer,
-        fixed32(125),
+        keypair(125).address,
         10_000,
         vec![Capability::Propose],
     ));
     state.upsert_node(active_node(
         collector,
-        fixed32(126),
+        keypair(126).address,
         0,
         vec![Capability::Collect],
     ));
     state.upsert_node(active_node(
         target,
-        fixed32(127),
+        keypair(127).address,
         2_000,
         vec![Capability::Verify],
     ));
@@ -1516,7 +1621,7 @@ fn challenge_resolution_must_match_challenge_kind() {
     });
 
     state
-        .apply_submit_batch(SubmitBatchTx {
+        .apply_submit_batch(sign!(122, SubmitBatchTx {
             batch_commit: BatchCommit {
                 epoch_id: 1,
                 collector_id: collector,
@@ -1527,11 +1632,13 @@ fn challenge_resolution_must_match_challenge_kind() {
                 obs_count: 1,
                 submitted_at_height: 0,
             },
-            signature: vec![1],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
     state
-        .apply_commit_epoch(CommitEpochTx {
+        .apply_commit_epoch(sign!(121, CommitEpochTx {
             epoch_commit: EpochCommit {
                 epoch_id: 1,
                 accepted_batches: merkle(129),
@@ -1544,13 +1651,15 @@ fn challenge_resolution_must_match_challenge_kind() {
                 challenge_open_height: 0,
                 challenge_deadline_height: 20,
             },
-            signature: vec![2],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let challenge_id = fixed32(135);
     state
-        .apply_open_challenge(OpenChallengeTx {
+        .apply_open_challenge(sign!(124, OpenChallengeTx {
             challenge: Challenge {
                 challenge_id,
                 kind: pole_protocol_draft::ChallengeKind::BadAggregate,
@@ -1569,8 +1678,10 @@ fn challenge_resolution_must_match_challenge_kind() {
                     merkle_proof: vec![fixed32(136)],
                 },
             },
-            signature: vec![3],
-        })
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }))
         .unwrap();
 
     let err = state

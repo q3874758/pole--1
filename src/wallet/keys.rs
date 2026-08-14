@@ -54,6 +54,21 @@ impl KeyPair {
     }
 }
 
+/// Verifies an Ed25519 signature over `message` using a standalone 32-byte
+/// public key (rather than a `KeyPair`). Returns false on any malformed input.
+pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8]) -> bool {
+    let verifying_key = match VerifyingKey::from_bytes(public_key) {
+        Ok(k) => k,
+        Err(_) => return false,
+    };
+    let sig_bytes: [u8; 64] = match signature.try_into() {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let sig = Signature::from_bytes(&sig_bytes);
+    verifying_key.verify(message, &sig).is_ok()
+}
+
 pub fn hex_encode(bytes: &[u8]) -> String {
     bytes
         .iter()

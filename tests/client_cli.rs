@@ -17,6 +17,15 @@ fn temp_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pole-client-{name}-{}", std::process::id()))
 }
 
+fn write_test_identity(config: &mut NodeConfig) {
+    let keypair = pole_protocol_draft::wallet::KeyPair::from_seed(&[0x5Au8; 32]);
+    config.node_id_hex = pole_protocol_draft::hex_32(keypair.address);
+    config.reward_address_hex = pole_protocol_draft::hex_32(keypair.address);
+    let data_dir = Path::new(&config.runtime.data_dir);
+    std::fs::create_dir_all(data_dir).unwrap();
+    std::fs::write(data_dir.join("identity.json"), serde_json::to_string(&keypair).unwrap()).unwrap();
+}
+
 fn wait_for_file(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -1754,7 +1763,7 @@ fn status_and_doctor_report_last_auto_settlement_summary() {
 
     let config_path = root.join("client.json");
     let data_dir = root.join("pole-node-data");
-    let config = NodeConfig {
+    let mut config = NodeConfig {
         chain_id: "pole-local".into(),
         node_id_hex: pole_protocol_draft::hex_32([0x31; 32]),
         reward_address_hex: pole_protocol_draft::hex_32([0x41; 32]),
@@ -1791,6 +1800,7 @@ fn status_and_doctor_report_last_auto_settlement_summary() {
         },
         reward: RewardConfig::default(),
     };
+    write_test_identity(&mut config);
     config.save_json(&config_path).unwrap();
 
     let client = FixedHttpClient;
@@ -2388,7 +2398,7 @@ fn settle_epoch_executes_local_submission_finalization_and_claim() {
 
     let config_path = root.join("client.json");
     let data_dir = root.join("pole-node-data");
-    let config = NodeConfig {
+    let mut config = NodeConfig {
         chain_id: "pole-local".into(),
         node_id_hex: pole_protocol_draft::hex_32([0x31; 32]),
         reward_address_hex: pole_protocol_draft::hex_32([0x41; 32]),
@@ -2425,6 +2435,7 @@ fn settle_epoch_executes_local_submission_finalization_and_claim() {
         },
         reward: RewardConfig::default(),
     };
+    write_test_identity(&mut config);
     config.save_json(&config_path).unwrap();
 
     let client = FixedHttpClient;

@@ -13,6 +13,7 @@ pub struct TransferTx {
     pub amount: Amount,
     pub fee: Amount,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -22,6 +23,7 @@ pub struct StakeTx {
     pub operator: NodeId,
     pub amount: Amount,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -31,6 +33,7 @@ pub struct UnbondTx {
     pub operator: NodeId,
     pub amount: Amount,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -42,24 +45,28 @@ pub struct ClaimRewardTx {
     pub amount: Amount,
     pub merkle_proof: Vec<Hash32>,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct SubmitBatchTx {
     pub batch_commit: BatchCommit,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct CommitEpochTx {
     pub epoch_commit: EpochCommit,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct OpenChallengeTx {
     pub challenge: Challenge,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -69,6 +76,7 @@ pub struct ChallengeResponseTx {
     pub responder: NodeId,
     pub response_payload_cid: Option<ContentId>,
     pub response_hash: Option<Hash32>,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -79,6 +87,7 @@ pub struct VoteTx {
     pub choice: VoteChoice,
     pub voting_power: Amount,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -89,6 +98,7 @@ pub struct ProposeProtocolParamsUpdateTx {
     pub effective_epoch: EpochId,
     pub params: ProtocolParams,
     pub nonce: u64,
+    pub pubkey: [u8; 32],
     pub signature: SignatureBytes,
 }
 
@@ -105,3 +115,33 @@ pub enum Transaction {
     Vote(VoteTx),
     ProposeProtocolParamsUpdate(ProposeProtocolParamsUpdateTx),
 }
+
+/// Deterministic signing payload for a transaction: Borsh serialization of the
+/// transaction with its `signature` field cleared. Signers sign this payload,
+/// so every field (including `pubkey` and `nonce`) is committed.
+macro_rules! impl_signing_payload {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $t {
+                pub fn signing_payload(&self) -> Vec<u8> {
+                    let mut clone = self.clone();
+                    clone.signature.clear();
+                    borsh::to_vec(&clone).expect("borsh serialize transaction")
+                }
+            }
+        )+
+    };
+}
+
+impl_signing_payload!(
+    TransferTx,
+    StakeTx,
+    UnbondTx,
+    ClaimRewardTx,
+    SubmitBatchTx,
+    CommitEpochTx,
+    OpenChallengeTx,
+    ChallengeResponseTx,
+    VoteTx,
+    ProposeProtocolParamsUpdateTx,
+);

@@ -288,6 +288,7 @@ fn init_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let identity_keypair = generate_identity_keypair();
     config.node_id_hex = node_id_hex_from_identity(&identity_keypair);
+    config.reward_address_hex = config.node_id_hex.clone();
 
     apply_profile(&mut config, profile);
     sync_activity_sources(&mut config);
@@ -340,6 +341,7 @@ fn repair_identity_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>
 
     let identity_keypair = generate_identity_keypair();
     config.node_id_hex = node_id_hex_from_identity(&identity_keypair);
+    config.reward_address_hex = config.node_id_hex.clone();
     config.save_json(&config_path)?;
     write_identity_file(Path::new(&config.runtime.data_dir), &identity_keypair)?;
 
