@@ -22,9 +22,10 @@ use pole_protocol_draft::{
     print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
     prune_retention, reward_local_epoch, run_collect_tick_with_client,
     run_collect_tick_with_client_and_network, run_libp2p_skeleton_loop, socket_peers_from_config,
-    build_verification_credentials, is_player_verifier, save_verification_credentials,
-    source_kind_label, submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
+    build_verification_credentials, is_player_verifier, load_verification_credentials,
+    save_verification_credentials, source_kind_label, submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
+    cosmos::{address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint},
     BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
     GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient, InMemoryP2pNetwork,
     LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
@@ -174,6 +175,7 @@ const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
     ("aggregate-epoch", aggregate_epoch_cmd),
     ("reward-epoch", reward_epoch_cmd),
     ("verify-epoch", verify_epoch_cmd),
+    ("verify-batch-submit", verify_batch_submit_cmd),
 ];
 
 fn main() {
@@ -2236,6 +2238,56 @@ fn verify_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Submit locally stored verification credentials for an epoch to the
+
+/// chain as `MsgVerifyBatch` attestations. Requires a running chain
+
+/// (RPC on localhost:26657) and the node identity.
+
+fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 4 && args.len() != 5 {
+        return Err("usage: pole-node verify-batch-submit <config-path> <epoch-id> [chain-id]".into());
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let epoch_id: u64 = args[3].parse()?;
+    let chain_id = args.get(4).cloned().unwrap_or_else(|| "pole".to_string());
+    let identity = config.identity_keypair()?;
+    let credentials = load_verification_credentials(&config, epoch_id);
+    if credentials.is_empty() {
+        println!("verification_credentials=0 epoch={epoch_id}");
+        return Ok(());
+    }
+    println!("verification_credentials={} epoch={epoch_id}", credentials.len());
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+        let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+        let signer = CosmosAddress {
+            account: account.to_vec(),
+            bech32,
+        };
+        let client = CosmosClient::new(CosmosEndpoint::local_pole(chain_id))?;
+        for cred in &credentials {
+            let msg = BridgeMessage::VerifyBatch {
+                verifier: signer.clone(),
+                epoch_id: cred.epoch_id,
+                target_batch_root_hex: cred.target_batch_root_hex.clone(),
+                target_collector: CosmosAddress::try_from(cred.target_collector_address.clone())?,
+                is_player: cred.is_player,
+                verified: cred.verified,
+                signature_hex: cred.signature_hex.clone(),
+            };
+            match client.submit(&msg, &signer, &identity, &Default::default()).await {
+                Ok(resp) => println!(
+                    "verify_batch_root={} code={} log={}",
+                    cred.target_batch_root_hex, resp.code, resp.log
+                ),
+                Err(err) => println!("verify_batch_root={} submit_error={err}", cred.target_batch_root_hex),
+            }
+        }
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })
+}
 fn issue_replica_receipt(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 6 {
         return Err(

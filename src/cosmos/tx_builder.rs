@@ -110,6 +110,17 @@ pub enum BridgeMessage {
         authority: CosmosAddress,
         params: ParamsWire,
     },
+    /// Verifier attestation for a batch inside the challenge window
+    /// (chain: MsgVerifyBatch).
+    VerifyBatch {
+        verifier: CosmosAddress,
+        epoch_id: EpochId,
+        target_batch_root_hex: String,
+        target_collector: CosmosAddress,
+        is_player: bool,
+        verified: bool,
+        signature_hex: String,
+    },
     /// Catch-all for messages we haven't hand-rolled yet. The chain
     /// will reject the broadcast, but the type keeps the API stable
     /// for callers that want to compile against the full surface.
@@ -188,6 +199,23 @@ impl BridgeMessage {
             BridgeMessage::UpdateParams { authority, params } => {
                 crate::cosmos::pole_msgs::encode_msg_update_params(&authority.bech32, params)
             }
+            BridgeMessage::VerifyBatch {
+                verifier,
+                epoch_id,
+                target_batch_root_hex,
+                target_collector,
+                is_player,
+                verified,
+                signature_hex,
+            } => crate::cosmos::pole_msgs::encode_msg_verify_batch(
+                &verifier.bech32,
+                *epoch_id,
+                target_batch_root_hex,
+                &target_collector.bech32,
+                *is_player,
+                *verified,
+                signature_hex,
+            ),
             BridgeMessage::Unsupported { type_url, note } => Any {
                 type_url: type_url.clone(),
                 value: note.as_bytes().to_vec(),

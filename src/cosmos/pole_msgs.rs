@@ -63,6 +63,40 @@ pub fn encode_msg_finalize_epoch(finalizer_bech32: &str, epoch_id: u64) -> Any {
     }
 }
 
+/// `MsgVerifyBatch` — verifier attestation for a batch.
+///
+/// pole.chain.pole.v1.MsgVerifyBatch {
+///   string verifier = 1;
+///   uint64 epoch_id = 2;
+///   string target_batch_root_hex = 3;
+///   string target_collector = 4;
+///   bool is_player = 5;
+///   bool verified = 6;
+///   string signature_hex = 7;
+/// }
+pub fn encode_msg_verify_batch(
+    verifier_bech32: &str,
+    epoch_id: u64,
+    target_batch_root_hex: &str,
+    target_collector_bech32: &str,
+    is_player: bool,
+    verified: bool,
+    signature_hex: &str,
+) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, verifier_bech32, &mut buf);
+    encode_uint64(2, epoch_id, &mut buf);
+    encode_string(3, target_batch_root_hex, &mut buf);
+    encode_string(4, target_collector_bech32, &mut buf);
+    encode_bool(5, is_player, &mut buf);
+    encode_bool(6, verified, &mut buf);
+    encode_string(7, signature_hex, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgVerifyBatch".to_string(),
+        value: buf,
+    }
+}
+
 /// `MsgClaimReward` — the second-simplest.
 pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_bech32: &str) -> Any {
     let mut buf = Vec::with_capacity(claimer_bech32.len() + recipient_bech32.len() + 24);
@@ -678,6 +712,29 @@ mod tests {
                 0x0A, 0x0A, b'c', b'o', b's', b'm', b'o', b's', b'1', b'a', b'b', b'c', 0x10, 0x2A,
             ]
         );
+    }
+
+    #[test]
+    fn verify_batch_encodes_expected_wire_bytes() {
+        let any = encode_msg_verify_batch(
+            "cosmos1verify",
+            7,
+            "ab".repeat(32).as_str(),
+            "cosmos1collect",
+            true,
+            true,
+            "deadbeef",
+        );
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgVerifyBatch");
+        assert!(!any.value.is_empty());
+        // Outer field1 verifier (string): tag 0x0A.
+        assert_eq!(any.value[0], 0x0A);
+        // Field2 epoch_id = 7: tag (2<<3)|0 = 0x10, varint 0x07.
+        assert!(any.value.windows(2).any(|w| w == [0x10, 0x07]));
+        // Field5 is_player = true: tag (5<<3)|0 = 0x28, varint 0x01.
+        assert!(any.value.windows(2).any(|w| w == [0x28, 0x01]));
+        // Field6 verified = true: tag 0x30, varint 0x01.
+        assert!(any.value.windows(2).any(|w| w == [0x30, 0x01]));
     }
 
     #[test]

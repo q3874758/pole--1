@@ -107,6 +107,13 @@ pub struct VerificationCredential {
     pub target_batch_root_hex: String,
     pub target_collector_hex: String,
     pub verifier_id_hex: String,
+    /// On-chain bech32 address of the verifier (derived from its
+    /// identity public key: sha256(pubkey)[..20]).
+    #[serde(default)]
+    pub verifier_address: String,
+    /// On-chain bech32 address of the attested collector.
+    #[serde(default)]
+    pub target_collector_address: String,
     pub is_player: bool,
     pub verified: bool,
     pub verified_at_millis: u64,
@@ -168,6 +175,10 @@ pub fn build_verification_credentials(
         .map_err(NodeDaemonError::Verification)?;
     let is_player = is_player_verifier(config, epoch_id);
     let verifier_hex = config.node_id_hex.clone();
+    // On-chain address of the verifier identity (sha256(pubkey)[..20]).
+    let verifier_account = crate::cosmos::address::cosmos_account_from_pubkey(&identity.public);
+    let verifier_address = crate::cosmos::address::encode_bech32("cosmos", &verifier_account)
+        .map_err(|err| NodeDaemonError::Io(io::Error::other(err.to_string())))?;
     let verified_at = current_unix_millis()?;
 
     let batches_dir = Path::new(&config.runtime.data_dir).join("batches");
@@ -205,6 +216,8 @@ pub fn build_verification_credentials(
                 target_batch_root_hex: artifact.batch_root_hex.clone(),
                 target_collector_hex,
                 verifier_id_hex: verifier_hex.clone(),
+                verifier_address: verifier_address.clone(),
+                target_collector_address: verifier_address.clone(),
                 is_player,
                 verified,
                 verified_at_millis: verified_at,
@@ -3528,6 +3541,8 @@ mod tests {
             target_batch_root_hex: "ab".repeat(32),
             target_collector_hex: "cd".repeat(32),
             verifier_id_hex: "ef".repeat(32),
+            verifier_address: "cosmos1verify".into(),
+            target_collector_address: "cosmos1collect".into(),
             is_player: true,
             verified: true,
             verified_at_millis: 1_700_000_000_000,
