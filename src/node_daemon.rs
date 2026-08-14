@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -11,7 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity_collector::{collect_configured_activity_source, ActivityCollectorError};
+use crate::activity_collector::{
+    collect_configured_activity_source, cross_validate_samples, ActivityCollectorError,
+};
 use crate::json_file::{load_json, load_json_or_default, save_pretty_json};
 use crate::node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
@@ -269,6 +271,9 @@ pub struct NodeStatusSummary {
     pub last_auto_settled_epoch: Option<u64>,
     pub last_auto_settlement_reward_claimed: Option<bool>,
     pub last_auto_settlement_error: Option<String>,
+    /// Per-source activity health summary lines (e.g. "730:Steam: degraded").
+    #[serde(default)]
+    pub activity_source_health: Vec<String>,
 }
 
 impl NodeStatusSummary {
@@ -933,6 +938,7 @@ impl NodeHeartbeat {
 struct TickCollectionContext {
     samples: Vec<crate::node_pipeline::SteamCurrentPlayersSample>,
     activity_failed_sources: Vec<String>,
+    cross_validated_samples: usize,
     player_reward_tick_artifact: PlayerRewardTickArtifact,
 }
 
@@ -979,6 +985,7 @@ fn run_collect_tick_with_client_inner(
     let TickCollectionContext {
         samples,
         activity_failed_sources,
+        cross_validated_samples,
         player_reward_tick_artifact,
     } = collect_tick_context(config, progress, client)?;
     if !activity_failed_sources.is_empty() {
@@ -986,6 +993,12 @@ fn run_collect_tick_with_client_inner(
             "pole-node: {} activity source(s) failed this tick: {}",
             activity_failed_sources.len(),
             activity_failed_sources.join("; ")
+        );
+    }
+    if cross_validated_samples > 0 {
+        eprintln!(
+            "pole-node: cross-validation downscaled confidence of {} sample(s)",
+            cross_validated_samples
         );
     }
 
@@ -1316,9 +1329,12 @@ fn collect_tick_context(
     progress: &mut LocalNodeProgress,
     client: &dyn HttpTextClient,
 ) -> Result<TickCollectionContext, NodeDaemonError> {
-    let report = collect_activity_samples(config, client)?;
+    let mut activity_health = load_activity_source_health(config)?;
+    let report = collect_activity_samples(config, client, &mut activity_health)?;
+    save_activity_source_health(config, &activity_health)?;
     let samples = report.samples;
     let activity_failed_sources = report.failed_sources;
+    let cross_validated_samples = report.cross_validated_samples;
     let active_game_processes = detect_active_game_processes(config);
     let foreground_process = detect_foreground_process_name();
     let sampled_interval_secs =
@@ -1357,6 +1373,7 @@ fn collect_tick_context(
     Ok(TickCollectionContext {
         samples,
         activity_failed_sources,
+        cross_validated_samples,
         player_reward_tick_artifact: player_reward_tick.artifact,
     })
 }
@@ -1436,11 +1453,86 @@ fn persist_adjustment_cycle_artifact(
 struct ActivityCollectionReport {
     samples: Vec<crate::node_pipeline::SteamCurrentPlayersSample>,
     failed_sources: Vec<String>,
+    /// Samples whose confidence was lowered by multi-source
+    /// cross-validation this tick.
+    cross_validated_samples: usize,
+}
+
+/// Lightweight per-source health tracker persisted to the data dir.
+/// A source is marked `degraded` after `DEGRADE_THRESHOLD` consecutive
+/// failures and recovers on the next success.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivitySourceHealthState {
+    #[serde(default)]
+    pub consecutive_failures: BTreeMap<String, u32>,
+    #[serde(default)]
+    pub degraded: BTreeSet<String>,
+}
+
+impl ActivitySourceHealthState {
+    /// Consecutive failures before a source is marked degraded.
+    pub const DEGRADE_THRESHOLD: u32 = 3;
+
+    pub fn record_success(&mut self, key: &str) {
+        self.consecutive_failures.remove(key);
+        self.degraded.remove(key);
+    }
+
+    pub fn record_failure(&mut self, key: &str) {
+        let count = self.consecutive_failures.entry(key.to_string()).or_insert(0);
+        *count += 1;
+        if *count >= Self::DEGRADE_THRESHOLD {
+            self.degraded.insert(key.to_string());
+        }
+    }
+
+    pub fn is_degraded(&self, key: &str) -> bool {
+        self.degraded.contains(key)
+    }
+
+    /// Human-readable one-line-per-source summary for `status`.
+    pub fn summarize(&self) -> Vec<String> {
+        let mut keys: BTreeSet<&String> = self.consecutive_failures.keys().collect();
+        keys.extend(self.degraded.iter());
+        keys.into_iter()
+            .map(|key| {
+                let failures = self.consecutive_failures.get(key).copied().unwrap_or(0);
+                if self.degraded.contains(key) {
+                    format!("{key}: degraded ({failures} consecutive failures)")
+                } else {
+                    format!("{key}: {failures} consecutive failures")
+                }
+            })
+            .collect()
+    }
+}
+
+pub fn activity_source_health_path(config: &NodeConfig) -> PathBuf {
+    Path::new(&config.runtime.data_dir).join("activity-source-health.json")
+}
+
+pub fn load_activity_source_health(
+    config: &NodeConfig,
+) -> Result<ActivitySourceHealthState, NodeDaemonError> {
+    load_json_or_default::<ActivitySourceHealthState, NodeDaemonError>(
+        activity_source_health_path(config),
+    )
+}
+
+pub fn save_activity_source_health(
+    config: &NodeConfig,
+    health: &ActivitySourceHealthState,
+) -> Result<(), NodeDaemonError> {
+    save_pretty_json::<ActivitySourceHealthState, NodeDaemonError>(
+        health,
+        activity_source_health_path(config),
+    )
 }
 
 fn collect_activity_samples(
     config: &NodeConfig,
     client: &dyn HttpTextClient,
+    health: &mut ActivitySourceHealthState,
 ) -> Result<ActivityCollectionReport, NodeDaemonError> {
     let observed_at_millis = current_unix_millis()?;
     let mut samples = Vec::new();
@@ -1449,6 +1541,7 @@ fn collect_activity_samples(
     if config.runtime.activity_sources.is_empty() {
         // Fallback: poll every target app id through the Steam API.
         for app_id in &config.runtime.target_app_ids {
+            let key = format!("{app_id}:Steam");
             let endpoint = current_players_url(*app_id);
             match collect_source_with_retry(
                 client,
@@ -1459,8 +1552,15 @@ fn collect_activity_samples(
                 None,
                 0,
             ) {
-                Ok(sample) => samples.push(sample),
-                Err(err) => failed_sources.push(format!("app_id={app_id} steam: {err}")),
+                Ok(sample) => {
+                    health.record_success(&key);
+                    samples.push(sample);
+                }
+                Err(err) => {
+                    health.record_failure(&key);
+                    let degraded = if health.is_degraded(&key) { " (degraded)" } else { "" };
+                    failed_sources.push(format!("app_id={app_id} steam: {err}{degraded}"));
+                }
             }
         }
     } else {
@@ -1474,6 +1574,7 @@ fn collect_activity_samples(
                 (None, ActivitySourceKind::Steam) => Some(current_players_url(source.app_id)),
                 (None, _) => None,
             };
+            let key = format!("{}:{:?}", source.app_id, source.source_kind);
             match collect_source_with_retry(
                 client,
                 source.source_kind,
@@ -1483,11 +1584,18 @@ fn collect_activity_samples(
                 source.inline_json.as_deref(),
                 source.retries,
             ) {
-                Ok(sample) => samples.push(sample),
-                Err(err) => failed_sources.push(format!(
-                    "app_id={} kind={:?}: {err}",
-                    source.app_id, source.source_kind
-                )),
+                Ok(sample) => {
+                    health.record_success(&key);
+                    samples.push(sample);
+                }
+                Err(err) => {
+                    health.record_failure(&key);
+                    let degraded = if health.is_degraded(&key) { " (degraded)" } else { "" };
+                    failed_sources.push(format!(
+                        "app_id={} kind={:?}: {err}{degraded}",
+                        source.app_id, source.source_kind
+                    ));
+                }
             }
         }
     }
@@ -1498,9 +1606,14 @@ fn collect_activity_samples(
             failed_sources.join("; ")
         ))));
     }
+
+    // Multi-source cross-validation: outliers for the same app id get
+    // their confidence lowered before the samples are recorded.
+    let cross_validated_samples = cross_validate_samples(&mut samples);
     Ok(ActivityCollectionReport {
         samples,
         failed_sources,
+        cross_validated_samples,
     })
 }
 
@@ -2115,6 +2228,9 @@ pub fn load_status(config: &NodeConfig) -> Result<NodeStatusSummary, NodeDaemonE
         last_auto_settlement_error: heartbeat
             .as_ref()
             .and_then(|item| item.last_auto_settlement_error.clone()),
+        activity_source_health: load_activity_source_health(config)
+            .unwrap_or_default()
+            .summarize(),
     };
     summary.normalize_adjustment_cycle_fields();
     Ok(summary)
@@ -3133,7 +3249,8 @@ mod tests {
             .ok(steam_url(730), r#"{"response":{"player_count":500000,"result":1}}"#)
             .fail("https://example.invalid/epic/730", 5);
 
-        let report = collect_activity_samples(&config, &client).unwrap();
+        let mut health = ActivitySourceHealthState::default();
+        let report = collect_activity_samples(&config, &client, &mut health).unwrap();
         assert_eq!(report.samples.len(), 1);
         assert_eq!(report.samples[0].observed_players, 500_000);
         assert_eq!(report.failed_sources.len(), 1);
@@ -3156,7 +3273,8 @@ mod tests {
             .ok(steam_url(730), r#"{"response":{"player_count":123,"result":1}}"#)
             .fail(steam_url(730), 2);
 
-        let report = collect_activity_samples(&config, &client).unwrap();
+        let mut health = ActivitySourceHealthState::default();
+        let report = collect_activity_samples(&config, &client, &mut health).unwrap();
         assert_eq!(report.samples.len(), 1);
         assert_eq!(report.samples[0].observed_players, 123);
         assert!(report.failed_sources.is_empty());
@@ -3174,7 +3292,8 @@ mod tests {
         let config = config_with_sources(vec![epic]);
         let client = ScriptedHttpClient::new().fail("https://example.invalid/epic", 5);
 
-        let err = collect_activity_samples(&config, &client).unwrap_err();
+        let mut health = ActivitySourceHealthState::default();
+        let err = collect_activity_samples(&config, &client, &mut health).unwrap_err();
         assert!(err.to_string().contains("all activity sources failed"));
     }
 
@@ -3185,6 +3304,35 @@ mod tests {
         assert_eq!(source.retries, 0);
         assert_eq!(source.app_id, 730);
         assert_eq!(source.source_kind, ActivitySourceKind::Steam);
+    }
+
+    #[test]
+    fn activity_health_degrades_after_consecutive_failures_and_recovers() {
+        let mut health = ActivitySourceHealthState::default();
+        let key = "730:Steam";
+
+        health.record_failure(key);
+        assert!(!health.is_degraded(key));
+        health.record_failure(key);
+        assert!(!health.is_degraded(key));
+        health.record_failure(key);
+        assert!(health.is_degraded(key));
+        assert!(health.summarize().iter().any(|line| line.contains("degraded")));
+
+        // A success clears the failure streak and recovers the source.
+        health.record_success(key);
+        assert!(!health.is_degraded(key));
+        assert!(health.summarize().is_empty());
+    }
+
+    #[test]
+    fn activity_health_reports_consecutive_failures_before_threshold() {
+        let mut health = ActivitySourceHealthState::default();
+        health.record_failure("730:Epic");
+        let summary = health.summarize();
+        assert_eq!(summary.len(), 1);
+        assert!(summary[0].contains("1 consecutive failures"));
+        assert!(!summary[0].contains("degraded"));
     }
 }
 

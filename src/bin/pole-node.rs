@@ -1067,6 +1067,13 @@ fn print_node_status_summary(summary: &pole_protocol_draft::NodeStatusSummary) {
     println!("os_background_priority={}", summary.os_background_priority);
     println!("inline_verify_enabled={}", summary.inline_verify_enabled);
     println!("inline_propose_enabled={}", summary.inline_propose_enabled);
+    if summary.activity_source_health.is_empty() {
+        println!("activity_source_health=ok");
+    } else {
+        for line in &summary.activity_source_health {
+            println!("activity_source_health={line}");
+        }
+    }
 }
 
 fn libp2p_diagnose_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

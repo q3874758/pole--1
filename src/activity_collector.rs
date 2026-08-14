@@ -1,3 +1,17 @@
+//! Activity collection: third-party / community player-count ingestion.
+//!
+//! # Trust model (dependency-free)
+//!
+//! The client deliberately stays small: no heavyweight proving/MPC
+//! dependencies are introduced. Trust relies on two cheap, local
+//! mechanisms:
+//!
+//! - **multi-source cross-validation**: when two or more sources report the
+//!   same app id, outliers get their confidence lowered automatically;
+//! - **per-source health tracking** (in the node daemon) that marks a source
+//!   degraded after consecutive failures.
+
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::Deserialize;
@@ -277,6 +291,53 @@ pub fn collect_configured_activity_source(
     }
 }
 
+/// Relative disagreement threshold (ppm): a source whose player count
+/// differs from the strongest source for the same app id by more than this
+/// is treated as an outlier.
+pub const CROSS_VALIDATION_DISAGREEMENT_THRESHOLD_PPM: u64 = 250_000; // 25%
+
+/// Confidence downscale applied to an outlier source (ppm).
+pub const CROSS_VALIDATION_CONFIDENCE_DOWNSCALE_PPM: u32 = 500_000; // 50%
+
+/// Cheap, dependency-free cross-validation: for every app id with two or
+/// more samples, lower the confidence of sources that disagree strongly
+/// with the strongest sample. Returns how many samples were adjusted.
+pub fn cross_validate_samples(samples: &mut [ActivitySample]) -> usize {
+    let mut by_app: BTreeMap<AppId, Vec<usize>> = BTreeMap::new();
+    for (index, sample) in samples.iter().enumerate() {
+        by_app.entry(sample.app_id).or_default().push(index);
+    }
+
+    let mut adjusted = 0;
+    for indexes in by_app.values() {
+        if indexes.len() < 2 {
+            continue;
+        }
+        let strongest = indexes
+            .iter()
+            .map(|&index| samples[index].observed_players)
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        for &index in indexes {
+            let sample = &mut samples[index];
+            let difference_ppm = (sample.observed_players.abs_diff(strongest) as u128
+                * 1_000_000
+                / strongest as u128) as u64;
+            if difference_ppm > CROSS_VALIDATION_DISAGREEMENT_THRESHOLD_PPM {
+                // Compute in u64: ppm * ppm can exceed u32 before the
+                // 1_000_000 division (e.g. 1_000_000 * 500_000).
+                let downscaled = (u64::from(sample.source_confidence_ppm)
+                    * u64::from(CROSS_VALIDATION_CONFIDENCE_DOWNSCALE_PPM)
+                    / 1_000_000) as u32;
+                sample.source_confidence_ppm = downscaled.max(100_000);
+                adjusted += 1;
+            }
+        }
+    }
+    adjusted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +351,46 @@ mod tests {
         assert_eq!(sample.source_kind, ActivitySourceKind::Epic);
         assert_eq!(sample.source_confidence_ppm, 450_000);
         assert_eq!(sample.observed_players, 1_234);
+    }
+
+    #[test]
+    fn cross_validate_lowers_outlier_confidence_for_same_app() {
+        let mut samples = vec![
+            ActivitySample::new(730, 500_000, 1, "{\"player_count\":500000}", ActivitySourceKind::Steam, 1_000_000),
+            ActivitySample::new(730, 100_000, 1, "{\"player_count\":100000}", ActivitySourceKind::Epic, 1_000_000),
+        ];
+        let adjusted = cross_validate_samples(&mut samples);
+        assert_eq!(adjusted, 1);
+        // The strong source keeps its confidence, the outlier is halved.
+        assert_eq!(samples[0].source_confidence_ppm, 1_000_000);
+        assert_eq!(samples[1].source_confidence_ppm, 500_000);
+    }
+
+    #[test]
+    fn cross_validate_keeps_confidence_when_sources_agree() {
+        let mut samples = vec![
+            ActivitySample::new(730, 500_000, 1, "a", ActivitySourceKind::Steam, 900_000),
+            ActivitySample::new(730, 485_000, 1, "b", ActivitySourceKind::Epic, 800_000),
+        ];
+        let adjusted = cross_validate_samples(&mut samples);
+        assert_eq!(adjusted, 0);
+        assert_eq!(samples[0].source_confidence_ppm, 900_000);
+        assert_eq!(samples[1].source_confidence_ppm, 800_000);
+    }
+
+    #[test]
+    fn cross_validate_ignores_single_source_apps() {
+        let mut samples = vec![ActivitySample::new(
+            570,
+            300_000,
+            1,
+            "c",
+            ActivitySourceKind::Steam,
+            123_456,
+        )];
+        let adjusted = cross_validate_samples(&mut samples);
+        assert_eq!(adjusted, 0);
+        assert_eq!(samples[0].source_confidence_ppm, 123_456);
     }
 
     #[test]
