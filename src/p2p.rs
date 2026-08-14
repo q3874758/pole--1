@@ -1,3 +1,21 @@
+//! P2P networking backends (in-memory simulation, filesystem, UDP socket).
+//!
+//! # Security posture (socket backend)
+//!
+//! The UDP socket backend is an unauthenticated gossip fabric: wire messages
+//! are plaintext JSON and there is no key exchange, so it must only be used on
+//! trusted networks. The following mitigations are enforced here:
+//!
+//! - **Sender binding**: a `Publish` / `PayloadSync` claiming a *known* remote
+//!   peer is only accepted when it arrives from that peer's recorded address;
+//!   a mismatch is dropped (counted in [`P2pCoordinationStats`]).
+//! - **Peer table cap**: the number of *unconfigured* learned peers is bounded
+//!   by [`SocketP2pNetwork::MAX_REMOTE_PEERS`] so a spoofed flood cannot grow
+//!   the peer table without bound (Sybil / resource-exhaustion defense).
+//!
+//! Configured bootstrap peers (from `node.json`) are always trusted and are
+//! exempt from both the sender-binding and the cap checks.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -114,6 +132,11 @@ pub struct P2pCoordinationStats {
     pub hello_received_count: u64,
     pub hint_received_count: u64,
     pub goodbye_received_count: u64,
+    /// Messages dropped because a known peer's recorded address did not
+    /// match the sender address (spoofed identity).
+    pub dropped_spoofed_count: u64,
+    /// Messages dropped because the unconfigured learned-peer table was full.
+    pub dropped_peer_cap_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -592,6 +615,11 @@ impl SocketPeerProfile {
 impl SocketP2pNetwork {
     const STALE_PEER_MILLIS: u64 = 250;
 
+    /// Upper bound on *unconfigured* learned peers. Configured bootstrap
+    /// peers are exempt. Guards against Sybil floods growing the table
+    /// without bound.
+    const MAX_REMOTE_PEERS: usize = 128;
+
     pub fn bind(
         local_peer_id: NodeId,
         bind_addr: SocketAddr,
@@ -623,6 +651,22 @@ impl SocketP2pNetwork {
         Ok(self.socket.local_addr()?)
     }
 
+    /// Returns true when a wire message claiming `peer_id` may be accepted
+    /// from `sender_addr`. Known peers must originate from their recorded
+    /// address (spoofed-identity defense); unknown peers are allowed so
+    /// first-contact learning still works, but remain subject to the
+    /// peer-table cap in `learn_remote_*`.
+    fn accept_remote_message(&self, peer_id: &NodeId, sender_addr: SocketAddr) -> bool {
+        if peer_id == &self.local_peer_id {
+            return false;
+        }
+        let peers = self.remote_peers.lock().expect("socket remote peers");
+        match peers.get(peer_id) {
+            Some(profile) => profile.addr == sender_addr,
+            None => true,
+        }
+    }
+
     fn pump_incoming(&self) -> Result<(), P2pError> {
         let deadline = Instant::now() + Duration::from_millis(20);
         loop {
@@ -642,10 +686,19 @@ impl SocketP2pNetwork {
                                 .hello_received_count += 1;
                             profile.addr = sender_addr;
                             profile.last_seen_millis = current_unix_millis();
-                            self.remote_peers
-                                .lock()
-                                .expect("socket remote peers")
-                                .insert(profile.peer_id, profile);
+                            let peer_id = profile.peer_id;
+                            let mut peers = self.remote_peers.lock().expect("socket remote peers");
+                            if !peers.contains_key(&peer_id)
+                                && !self.configured_remote_peer_ids.contains(&peer_id)
+                                && peers.len() >= Self::MAX_REMOTE_PEERS
+                            {
+                                self.coordination_stats
+                                    .lock()
+                                    .expect("socket coordination stats")
+                                    .dropped_peer_cap_count += 1;
+                                continue;
+                            }
+                            peers.insert(peer_id, profile);
                         }
                         SocketWireMessage::PeerHint { profile } => {
                             self.coordination_stats
@@ -681,6 +734,15 @@ impl SocketP2pNetwork {
                             topic,
                             message,
                         } => {
+                            // A known peer must publish from its recorded
+                            // address; anything else is a spoofed identity.
+                            if !self.accept_remote_message(&from, sender_addr) {
+                                self.coordination_stats
+                                    .lock()
+                                    .expect("socket coordination stats")
+                                    .dropped_spoofed_count += 1;
+                                continue;
+                            }
                             self.learn_remote_topic(from, sender_addr, topic);
                             if self.local_topics.contains(&topic) && from != self.local_peer_id {
                                 self.inbox.lock().expect("socket inbox").push(P2pEnvelope {
@@ -691,6 +753,13 @@ impl SocketP2pNetwork {
                             }
                         }
                         SocketWireMessage::PayloadSync { record } => {
+                            if !self.accept_remote_message(&record.provider, sender_addr) {
+                                self.coordination_stats
+                                    .lock()
+                                    .expect("socket coordination stats")
+                                    .dropped_spoofed_count += 1;
+                                continue;
+                            }
                             self.learn_remote_peer(record.provider, sender_addr);
                             self.payloads
                                 .lock()
@@ -825,6 +894,16 @@ impl SocketP2pNetwork {
         profile.last_seen_millis = current_unix_millis();
         let profile_peer_id = profile.peer_id;
         let mut peers = self.remote_peers.lock().expect("socket remote peers");
+        if !peers.contains_key(&profile_peer_id)
+            && !self.configured_remote_peer_ids.contains(&profile_peer_id)
+            && peers.len() >= Self::MAX_REMOTE_PEERS
+        {
+            self.coordination_stats
+                .lock()
+                .expect("socket coordination stats")
+                .dropped_peer_cap_count += 1;
+            return;
+        }
         let mut inserted = false;
         let mut topic_changed = false;
         peers
@@ -871,6 +950,16 @@ impl SocketP2pNetwork {
         }
         let seen = current_unix_millis();
         let mut peers = self.remote_peers.lock().expect("socket remote peers");
+        if !peers.contains_key(&peer_id)
+            && !self.configured_remote_peer_ids.contains(&peer_id)
+            && peers.len() >= Self::MAX_REMOTE_PEERS
+        {
+            self.coordination_stats
+                .lock()
+                .expect("socket coordination stats")
+                .dropped_peer_cap_count += 1;
+            return;
+        }
         let mut inserted = false;
         peers
             .entry(peer_id)
@@ -900,6 +989,16 @@ impl SocketP2pNetwork {
         }
         let seen = current_unix_millis();
         let mut peers = self.remote_peers.lock().expect("socket remote peers");
+        if !peers.contains_key(&peer_id)
+            && !self.configured_remote_peer_ids.contains(&peer_id)
+            && peers.len() >= Self::MAX_REMOTE_PEERS
+        {
+            self.coordination_stats
+                .lock()
+                .expect("socket coordination stats")
+                .dropped_peer_cap_count += 1;
+            return;
+        }
         let mut inserted = false;
         let mut topic_changed = false;
         peers
@@ -1502,3 +1601,105 @@ fn current_unix_millis() -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::ChallengeKind;
+
+    fn fixed32(byte: u8) -> NodeId {
+        [byte; 32]
+    }
+
+    fn sample_challenge_message(from: NodeId) -> P2pMessage {
+        P2pMessage::Challenge(ChallengeAnnouncement {
+            challenge_id: from,
+            epoch_id: 1,
+            kind: ChallengeKind::BadBatch,
+            target_node: None,
+        })
+    }
+
+    #[test]
+    fn socket_drops_spoofed_publish_from_known_peer() {
+        let sink_id = fixed32(1);
+        let peer_id = fixed32(2);
+        let mut sink =
+            SocketP2pNetwork::bind(sink_id, "127.0.0.1:0".parse().unwrap(), vec![]).unwrap();
+        sink.local_topics.insert(P2pTopic::Challenges);
+        // Peer is known at a recorded address (first-contact learning).
+        let recorded_addr: SocketAddr = "127.0.0.1:49991".parse().unwrap();
+        sink.learn_remote_peer(peer_id, recorded_addr);
+
+        // A different socket (attacker address) publishes as `peer_id`.
+        let attacker = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let wire = SocketWireMessage::Publish {
+            from: peer_id,
+            topic: P2pTopic::Challenges,
+            message: sample_challenge_message(peer_id),
+        };
+        attacker
+            .send_to(
+                &serde_json::to_vec(&wire).unwrap(),
+                sink.local_addr().unwrap(),
+            )
+            .unwrap();
+
+        sink.pump_incoming().unwrap();
+        assert!(sink.drain_inbox(sink_id).unwrap().is_empty());
+        let stats = sink.coordination_stats.lock().unwrap().clone();
+        assert_eq!(stats.dropped_spoofed_count, 1);
+    }
+
+    #[test]
+    fn socket_accepts_publish_from_known_peer_at_recorded_addr() {
+        let sink_id = fixed32(1);
+        let peer_id = fixed32(2);
+        let mut sink =
+            SocketP2pNetwork::bind(sink_id, "127.0.0.1:0".parse().unwrap(), vec![]).unwrap();
+        sink.local_topics.insert(P2pTopic::Challenges);
+        let peer_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let peer_addr = peer_socket.local_addr().unwrap();
+        sink.learn_remote_peer(peer_id, peer_addr);
+
+        let wire = SocketWireMessage::Publish {
+            from: peer_id,
+            topic: P2pTopic::Challenges,
+            message: sample_challenge_message(peer_id),
+        };
+        peer_socket
+            .send_to(
+                &serde_json::to_vec(&wire).unwrap(),
+                sink.local_addr().unwrap(),
+            )
+            .unwrap();
+
+        sink.pump_incoming().unwrap();
+        let inbox = sink.drain_inbox(sink_id).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].from, peer_id);
+        let stats = sink.coordination_stats.lock().unwrap().clone();
+        assert_eq!(stats.dropped_spoofed_count, 0);
+    }
+
+    #[test]
+    fn socket_caps_unconfigured_learned_peers() {
+        let sink_id = fixed32(1);
+        let sink =
+            SocketP2pNetwork::bind(sink_id, "127.0.0.1:0".parse().unwrap(), vec![]).unwrap();
+        let extra = 16usize;
+        for i in 0..(SocketP2pNetwork::MAX_REMOTE_PEERS + extra) {
+            let mut id = [0u8; 32];
+            id[0] = (i % 251) as u8;
+            id[1] = ((i / 251) % 251) as u8;
+            let addr: SocketAddr = format!("127.0.0.1:{}", 40000 + (i % 1000)).parse().unwrap();
+            sink.learn_remote_peer(id, addr);
+        }
+        assert_eq!(
+            sink.remote_peers.lock().unwrap().len(),
+            SocketP2pNetwork::MAX_REMOTE_PEERS
+        );
+        let stats = sink.coordination_stats.lock().unwrap().clone();
+        assert_eq!(stats.dropped_peer_cap_count, extra as u64);
+    }
+}
+

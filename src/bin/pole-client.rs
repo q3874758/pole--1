@@ -2433,8 +2433,10 @@ fn libp2p_skeleton_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         .map(String::as_str)
         .unwrap_or(DEFAULT_CONFIG_PATH);
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
-    let skeleton = build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p)?;
-    let real_swarm = build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p)?;
+    let skeleton =
+        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
+    let real_swarm =
+        build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p, config.node_id().ok())?;
     println!("PoLE client libp2p skeleton");
     println!("config_path={}", config_path.to_string_lossy());
     println!("local_peer_id={}", skeleton.local_peer_id);

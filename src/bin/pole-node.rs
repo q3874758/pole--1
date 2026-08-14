@@ -1092,8 +1092,10 @@ fn libp2p_skeleton_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         return Err("usage: pole-node libp2p-skeleton <config-path>".into());
     }
     let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let skeleton = build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p)?;
-    let real_swarm = build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p)?;
+    let skeleton =
+        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
+    let real_swarm =
+        build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p, config.node_id().ok())?;
     println!("local_peer_id={}", skeleton.local_peer_id);
     println!("listen_addrs={:?}", skeleton.listen_addrs);
     println!("bootstrap_peer_count={}", skeleton.bootstrap_peers.len());
@@ -1115,7 +1117,8 @@ fn libp2p_loop_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(5);
     let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let skeleton = build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p)?;
+    let skeleton =
+        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
     let report = run_libp2p_skeleton_loop(skeleton, ticks, Duration::ZERO);
     println!("ticks_completed={}", report.ticks_completed);
     println!("phase={:?}", report.phase);

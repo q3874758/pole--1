@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::node_config::P2pLibp2pConfig;
+use crate::primitives::NodeId;
 
 // This module intentionally stays dependency-light for now. It models the
 // runtime shape, discovery state, and peer lifecycle that a real libp2p swarm
@@ -139,6 +140,7 @@ impl std::error::Error for Libp2pBackendError {}
 
 pub fn build_libp2p_backend_skeleton(
     config: &P2pLibp2pConfig,
+    node_identity: Option<NodeId>,
 ) -> Result<Libp2pBackendSkeleton, Libp2pBackendError> {
     if !config.enabled {
         return Err(Libp2pBackendError::Disabled);
@@ -161,7 +163,14 @@ pub fn build_libp2p_backend_skeleton(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let local_peer_id = format!("libp2p-{}", hex32(&crate::stable_hash32(b"pole-libp2p")));
+    // Derive the local peer id from the node identity so different nodes
+    // are distinguishable. A fixed constant would give every node the same
+    // peer id, defeating peer-level authentication (impersonation / Sybil).
+    // A stable placeholder is kept for offline tooling without an identity.
+    let local_peer_id = match node_identity {
+        Some(identity) => format!("libp2p-{}", hex32(&identity)),
+        None => format!("libp2p-{}", hex32(&crate::stable_hash32(b"pole-libp2p"))),
+    };
 
     Ok(Libp2pBackendSkeleton {
         local_peer_id,
@@ -376,6 +385,7 @@ pub fn run_libp2p_skeleton_loop(
 #[cfg(feature = "real-libp2p")]
 pub fn build_real_libp2p_swarm_report(
     config: &P2pLibp2pConfig,
+    _node_identity: Option<NodeId>,
 ) -> Result<RealLibp2pSwarmBuildReport, Libp2pBackendError> {
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|err| Libp2pBackendError::Parse(format!("tokio runtime init failed: {err}")))?;
@@ -474,8 +484,9 @@ async fn build_real_libp2p_swarm_report_inner(
 #[cfg(not(feature = "real-libp2p"))]
 pub fn build_real_libp2p_swarm_report(
     config: &P2pLibp2pConfig,
+    node_identity: Option<NodeId>,
 ) -> Result<RealLibp2pSwarmBuildReport, Libp2pBackendError> {
-    let skeleton = build_libp2p_backend_skeleton(config)?;
+    let skeleton = build_libp2p_backend_skeleton(config, node_identity)?;
     Ok(RealLibp2pSwarmBuildReport {
         local_peer_id: skeleton.local_peer_id,
         listener_count: skeleton.listen_addrs.len(),
@@ -487,18 +498,54 @@ pub fn build_real_libp2p_swarm_report(
 }
 
 fn validate_multiaddr_like(addr: &str) -> Result<(), Libp2pBackendError> {
-    if !addr.starts_with('/')
-        || addr
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .count()
-            < 2
-    {
+    if !addr.starts_with('/') {
         return Err(Libp2pBackendError::Parse(format!(
-            "multiaddr-like address {addr} must start with '/' and contain protocol/value segments"
+            "multiaddr-like address {addr} must start with '/'"
         )));
     }
+    let segments = addr
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.len() < 2 {
+        return Err(Libp2pBackendError::Parse(format!(
+            "multiaddr-like address {addr} must contain protocol/value segments"
+        )));
+    }
+    // Protocol segments sit at even indices (0, 2, 4, ...); reject
+    // unknown or unsafe protocols rather than silently passing them
+    // through to the swarm builder.
+    for (index, segment) in segments.iter().enumerate() {
+        if index % 2 == 0 && !is_supported_multiaddr_protocol(segment) {
+            return Err(Libp2pBackendError::Parse(format!(
+                "multiaddr-like address {addr} uses unsupported protocol '{segment}'"
+            )));
+        }
+    }
     Ok(())
+}
+
+fn is_supported_multiaddr_protocol(protocol: &str) -> bool {
+    matches!(
+        protocol,
+        "ip4"
+            | "ip6"
+            | "dns"
+            | "dns4"
+            | "dns6"
+            | "dnsaddr"
+            | "tcp"
+            | "udp"
+            | "quic"
+            | "quic-v1"
+            | "ws"
+            | "wss"
+            | "tls"
+            | "noise"
+            | "yamux"
+            | "p2p"
+            | "unix"
+    )
 }
 
 #[cfg(feature = "real-libp2p")]
@@ -508,13 +555,28 @@ fn parse_multiaddr(addr: &str) -> Result<libp2p::Multiaddr, Libp2pBackendError> 
 }
 
 fn validate_peer_id_like(peer_id: &str) -> Result<(), Libp2pBackendError> {
-    if peer_id.len() < 16 || !peer_id.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+    // libp2p PeerIds are base58btc-encoded and typically 46-52 characters
+    // (e.g. "12D3KooW..."). Enforce the base58 alphabet and a sane length
+    // so malformed or lookalike identifiers are rejected up front.
+    if !(40..=60).contains(&peer_id.len()) {
         return Err(Libp2pBackendError::Parse(format!(
-            "peer id {peer_id} must be an ascii-alphanumeric libp2p-style identifier"
+            "peer id {peer_id} must be a base58 libp2p-style identifier (40-60 chars)"
+        )));
+    }
+    if !peer_id
+        .chars()
+        .all(|ch| BASE58_ALPHABET.contains(ch))
+    {
+        return Err(Libp2pBackendError::Parse(format!(
+            "peer id {peer_id} contains characters outside the base58 alphabet"
         )));
     }
     Ok(())
 }
+
+/// base58btc alphabet (no `0`, `O`, `I`, `l`).
+const BASE58_ALPHABET: &str =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 #[cfg(feature = "real-libp2p")]
 fn parse_peer_id(peer_id: &str) -> Result<libp2p_identity::PeerId, Libp2pBackendError> {
@@ -543,7 +605,7 @@ mod tests {
             }],
             discovery: Default::default(),
         };
-        let skeleton = build_libp2p_backend_skeleton(&config).unwrap();
+        let skeleton = build_libp2p_backend_skeleton(&config, None).unwrap();
         assert!(!skeleton.local_peer_id.is_empty());
         assert_eq!(skeleton.listen_addrs.len(), 1);
         assert_eq!(skeleton.bootstrap_peers.len(), 1);
@@ -560,7 +622,7 @@ mod tests {
             }],
             discovery: Default::default(),
         };
-        let skeleton = build_libp2p_backend_skeleton(&config).unwrap();
+        let skeleton = build_libp2p_backend_skeleton(&config, None).unwrap();
         let mut runtime = Libp2pRuntimeStateMachine::new(skeleton);
 
         runtime.start_bootstrap();
@@ -590,7 +652,7 @@ mod tests {
             }],
             discovery: Default::default(),
         };
-        let skeleton = build_libp2p_backend_skeleton(&config).unwrap();
+        let skeleton = build_libp2p_backend_skeleton(&config, None).unwrap();
         let report = run_libp2p_skeleton_loop(skeleton, 3, Duration::ZERO);
         assert_eq!(report.phase, SkeletonRuntimePhase::Running);
         assert!(report.known_peer_count >= 1);
@@ -608,10 +670,61 @@ mod tests {
             }],
             discovery: Default::default(),
         };
-        let report = build_real_libp2p_swarm_report(&config).unwrap();
+        let report = build_real_libp2p_swarm_report(&config, None).unwrap();
         assert!(!report.local_peer_id.is_empty());
         assert_eq!(report.listener_count, 1);
         assert_eq!(report.bootstrap_peer_count, 1);
         assert!(report.kademlia_enabled);
     }
+
+    #[test]
+    fn local_peer_id_is_derived_from_node_identity() {
+        let config = P2pLibp2pConfig {
+            enabled: true,
+            listen_addrs: vec!["/ip4/127.0.0.1/tcp/0".to_string()],
+            bootstrap_peers: vec![],
+            discovery: Default::default(),
+        };
+        let a = build_libp2p_backend_skeleton(&config, Some([1u8; 32])).unwrap();
+        let a_again = build_libp2p_backend_skeleton(&config, Some([1u8; 32])).unwrap();
+        let b = build_libp2p_backend_skeleton(&config, Some([2u8; 32])).unwrap();
+        let fallback = build_libp2p_backend_skeleton(&config, None).unwrap();
+
+        assert!(a.local_peer_id.starts_with("libp2p-"));
+        // Same identity -> same peer id; different identity -> different peer id.
+        assert_eq!(a.local_peer_id, a_again.local_peer_id);
+        assert_ne!(a.local_peer_id, b.local_peer_id);
+        // A node with an identity must never collide with the fixed fallback.
+        assert_ne!(a.local_peer_id, fallback.local_peer_id);
+    }
+
+    #[test]
+    fn peer_id_validation_rejects_malformed_identifiers() {
+        let valid = "12D3KooWJ5Z5L6hG1Zq1x3wQ5P5ZkJ7V3xZ6QYp6iYvJpR6J8W8J";
+        assert!(validate_peer_id_like(valid).is_ok());
+
+        // Too short / empty.
+        assert!(validate_peer_id_like("short").is_err());
+        assert!(validate_peer_id_like("").is_err());
+        // Characters outside the base58 alphabet (0, O, I, l are excluded).
+        assert!(validate_peer_id_like(&format!("1{}0", &valid[1..])).is_err());
+        assert!(validate_peer_id_like(&format!("1{}O", &valid[1..])).is_err());
+    }
+
+    #[test]
+    fn multiaddr_validation_rejects_unknown_or_unsafe_protocols() {
+        assert!(validate_multiaddr_like("/ip4/127.0.0.1/tcp/0").is_ok());
+        assert!(validate_multiaddr_like("/ip6/::1/udp/0/quic-v1").is_ok());
+        assert!(validate_multiaddr_like(
+            "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWJ5Z5L6hG1Zq1x3wQ5P5ZkJ7V3xZ6QYp6iYvJpR6J8W8J"
+        )
+        .is_ok());
+
+        // Unknown protocol segments are rejected.
+        assert!(validate_multiaddr_like("/bogus/1.2.3.4/tcp/0").is_err());
+        // Missing leading slash or protocol/value structure.
+        assert!(validate_multiaddr_like("127.0.0.1:8080").is_err());
+        assert!(validate_multiaddr_like("/ip4").is_err());
+    }
 }
+
