@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use pole_protocol_draft::{
@@ -62,10 +62,13 @@ fn development_manifest_signature_verifies_against_payload() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
 
     manifest.signature = development_manifest_signature(&manifest).unwrap();
-    let verification = verify_release_manifest_signature(&manifest).unwrap();
+    // `signing` is None here, so the manifest path is unused by the
+    // verifier (the cosign branch is skipped); a placeholder path suffices.
+    let verification = verify_release_manifest_signature(&manifest, Path::new("")).unwrap();
     assert_eq!(verification, ManifestSignatureVerification::Verified);
 }
 
@@ -90,6 +93,7 @@ fn update_overview_reads_manifest_and_signature_status() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -130,6 +134,7 @@ fn stage_update_writes_pending_and_rollback_metadata() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -201,6 +206,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -311,6 +317,7 @@ fn apply_update_requires_service_window_when_daemon_pid_is_running() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -364,6 +371,7 @@ fn update_overview_uses_managed_service_status_for_window_check() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -408,6 +416,7 @@ fn execute_install_action_copies_into_override_root() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -495,6 +504,7 @@ fn execute_install_action_supports_installed_layout_strategy() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -541,6 +551,7 @@ fn execute_install_action_supports_installed_layout_root_override() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -605,6 +616,7 @@ fn execute_install_action_supports_system_install_write_with_env_override() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -674,6 +686,7 @@ fn rollback_update_restores_committed_install_target_from_backup() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(
@@ -726,6 +739,7 @@ fn rollback_update_clears_applied_and_rollback_state() {
             size_bytes: 42,
         }],
         signature: String::new(),
+        signing: None,
     };
     manifest.signature = development_manifest_signature(&manifest).unwrap();
     std::fs::write(

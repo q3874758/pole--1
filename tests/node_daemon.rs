@@ -161,6 +161,25 @@ fn test_config(name: &str) -> NodeConfig {
     }
 }
 
+/// Write a deterministic identity keypair into `config.runtime.data_dir`
+/// and sync `node_id_hex` / `reward_address_hex` to the identity's
+/// address (`stable_hash32(pubkey)`), which the signed transitions verify
+/// against. `settle_local_epoch` / `open_local_protocol_state` require
+/// `identity.json` to sign and read state.
+fn write_test_identity(config: &mut NodeConfig) {
+    let identity = pole_protocol_draft::wallet::KeyPair::from_seed(&[0x5Au8; 32]);
+    let identity_hex = pole_protocol_draft::hex_32(identity.address);
+    config.node_id_hex = identity_hex.clone();
+    config.reward_address_hex = identity_hex;
+    let data_dir = std::path::Path::new(&config.runtime.data_dir);
+    std::fs::create_dir_all(data_dir).unwrap();
+    std::fs::write(
+        data_dir.join("identity.json"),
+        serde_json::to_string(&identity).unwrap(),
+    )
+    .unwrap();
+}
+
 fn persist_manual_batch(
     config: &NodeConfig,
     epoch_id: u64,
@@ -293,11 +312,12 @@ fn run_collect_tick_persists_payload_artifact_and_progress() {
 
 #[test]
 fn run_collect_loop_advances_epoch_after_slot_wrap() {
-    let config = test_config("daemon-loop");
+    let mut config = test_config("daemon-loop");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let results = run_collect_loop_with_client(&config, &client, Some(3)).unwrap();
@@ -353,11 +373,12 @@ fn run_collect_loop_advances_epoch_after_slot_wrap() {
 
 #[test]
 fn load_status_reports_last_auto_settlement_summary() {
-    let config = test_config("daemon-status-auto-settlement");
+    let mut config = test_config("daemon-status-auto-settlement");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let results = run_collect_loop_with_client(&config, &client, Some(2)).unwrap();
@@ -934,11 +955,12 @@ fn collect_loop_prunes_expired_retention_audit_artifacts_automatically() {
 
 #[test]
 fn prune_retention_removes_expired_settled_prepared_epoch_artifact() {
-    let config = test_config("daemon-prune-prepared-epoch");
+    let mut config = test_config("daemon-prune-prepared-epoch");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let mut progress = LocalNodeProgress::default_from_config(&config);
@@ -982,6 +1004,7 @@ fn collect_loop_prunes_expired_settled_prepared_epoch_artifacts_automatically() 
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let results = run_collect_loop_with_client(&config, &client, Some(2)).unwrap();

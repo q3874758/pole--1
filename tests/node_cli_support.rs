@@ -6,6 +6,7 @@ use pole_protocol_draft::{
     PersistentStoreStub, ProtocolStore, ReqwestHttpTextClient, SocketP2pNetwork,
     SteamCollectorError,
 };
+use std::path::Path;
 use std::process::Command;
 
 #[cfg(feature = "real-libp2p")]
@@ -152,6 +153,21 @@ fn tokenomics_reward_source_derives_hourly_block_reward() {
     assert_eq!(config.reward.base_player_block_reward(), 18_264);
 }
 
+/// Write a deterministic identity keypair into `config.runtime.data_dir`
+/// so `open_local_protocol_state` (which requires `identity.json`) works.
+fn write_test_identity(config: &mut NodeConfig) {
+    let keypair = pole_protocol_draft::wallet::KeyPair::from_seed(&[0x5Au8; 32]);
+    config.node_id_hex = pole_protocol_draft::hex_32(keypair.address);
+    config.reward_address_hex = pole_protocol_draft::hex_32(keypair.address);
+    let data_dir = Path::new(&config.runtime.data_dir);
+    std::fs::create_dir_all(data_dir).unwrap();
+    std::fs::write(
+        data_dir.join("identity.json"),
+        serde_json::to_string(&keypair).unwrap(),
+    )
+    .unwrap();
+}
+
 #[test]
 fn open_local_protocol_state_prefers_latest_activated_protocol_params() {
     let temp_dir =
@@ -161,6 +177,7 @@ fn open_local_protocol_state_prefers_latest_activated_protocol_params() {
     }
     let mut config = NodeConfig::default();
     config.runtime.data_dir = temp_dir.to_string_lossy().into_owned();
+    write_test_identity(&mut config);
     let store_path = pole_protocol_draft::node_daemon::local_chain_store_path(&config);
     let mut store = PersistentStoreStub::open(&store_path).unwrap();
     let params = pole_protocol_draft::ProtocolParams {
@@ -441,6 +458,8 @@ fn pole_node_governance_commands_manage_future_params_update() {
     let mut config = NodeConfig::default();
     config.capabilities.propose = true;
     config.capabilities.verify = true;
+    config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
+    write_test_identity(&mut config);
     config.save_json(&config_path).unwrap();
 
     let (_, loaded) = NodeConfig::load_json_with_runtime_paths(&config_path).unwrap();
