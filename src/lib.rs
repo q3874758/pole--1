@@ -206,7 +206,7 @@ pub use transactions::*;
 pub use transitions::*;
 pub use update_manifest::{
     load_release_manifest, load_release_manifest_for_channel, release_manifest_path,
-    version_is_newer, ReleaseArtifact, ReleaseManifest,
+    version_is_newer, ManifestSigning, ReleaseArtifact, ReleaseManifest,
 };
 pub use updater::{
     applied_update_record_path, apply_update, apply_update_with_status, collect_update_overview,

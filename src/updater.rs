@@ -94,7 +94,7 @@ pub fn collect_update_overview_with_status(
 
     match load_release_manifest_for_channel(&release_manifest_dir, channel) {
         Ok(manifest) => {
-            let verification = verify_release_manifest_signature(&manifest)
+            let verification = verify_release_manifest_signature(&manifest, &latest_manifest_path)
                 .unwrap_or(crate::ManifestSignatureVerification::Invalid);
             UpdateOverview {
                 current_version: effective_current_version.clone(),
@@ -405,7 +405,7 @@ pub fn stage_update(
     let manifest_dir = release_manifest_dir.as_ref().to_path_buf();
     let manifest_path = release_manifest_path(&manifest_dir, channel);
     let manifest = load_release_manifest_for_channel(&manifest_dir, channel)?;
-    let verification = verify_release_manifest_signature(&manifest)?;
+    let verification = verify_release_manifest_signature(&manifest, &manifest_path)?;
     let pending_update_path = pending_update_plan_path(&update_dir);
     let rollback_path = rollback_metadata_path(&update_dir);
     let switch_plan_path = switch_plan_path(&update_dir);

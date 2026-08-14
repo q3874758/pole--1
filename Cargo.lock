@@ -3980,6 +3980,7 @@ dependencies = [
  "winres",
  "winrt-notification",
  "wry",
+ "x509-parser",
  "zeroize",
 ]
 

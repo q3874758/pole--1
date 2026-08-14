@@ -13,11 +13,31 @@ pub struct ReleaseArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSigning {
+    pub scheme: String,
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub identity_regexp: Option<String>,
+    #[serde(default)]
+    pub signature_file: Option<String>,
+    #[serde(default)]
+    pub certificate_file: Option<String>,
+    #[serde(default)]
+    pub transparency_log: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseManifest {
     pub channel: String,
     pub version: String,
     pub artifacts: Vec<ReleaseArtifact>,
+    #[serde(default)]
     pub signature: String,
+    #[serde(default)]
+    pub signing: Option<ManifestSigning>,
 }
 
 pub fn release_manifest_path(manifest_dir: impl AsRef<Path>, channel: &str) -> PathBuf {
