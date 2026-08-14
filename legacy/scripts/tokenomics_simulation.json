@@ -1,0 +1,102 @@
+[
+  {
+    "year": 1,
+    "inflation_rate": 20.0,
+    "tokens_minted": 0.0,
+    "tokens_burned": 479062.5,
+    "net_inflation": -479062.5,
+    "circulating_supply": -479062.5,
+    "node_reward": 262800000.0,
+    "validator_apr": 175.2
+  },
+  {
+    "year": 2,
+    "inflation_rate": 20.0,
+    "tokens_minted": -95812.5,
+    "tokens_burned": 574875.0,
+    "net_inflation": -670687.5,
+    "circulating_supply": -1149750.0,
+    "node_reward": 262800000.0,
+    "validator_apr": 146.0
+  },
+  {
+    "year": 3,
+    "inflation_rate": 10.0,
+    "tokens_minted": -114975.0,
+    "tokens_burned": 689850.0,
+    "net_inflation": -804825.0,
+    "circulating_supply": -1954575.0,
+    "node_reward": 262800000.0,
+    "validator_apr": 121.67
+  },
+  {
+    "year": 4,
+    "inflation_rate": 10.0,
+    "tokens_minted": -195457.5,
+    "tokens_burned": 827820.0,
+    "net_inflation": -1023277.5,
+    "circulating_supply": -2977852.5,
+    "node_reward": 262800000.0,
+    "validator_apr": 101.39
+  },
+  {
+    "year": 5,
+    "inflation_rate": 5.0,
+    "tokens_minted": -148892.62,
+    "tokens_burned": 993384.0,
+    "net_inflation": -1142276.62,
+    "circulating_supply": -4120129.12,
+    "node_reward": 262800000.0,
+    "validator_apr": 84.49
+  },
+  {
+    "year": 6,
+    "inflation_rate": 5.0,
+    "tokens_minted": -206006.46,
+    "tokens_burned": 1192060.8,
+    "net_inflation": -1398067.26,
+    "circulating_supply": -5518196.38,
+    "node_reward": 262800000.0,
+    "validator_apr": 70.41
+  },
+  {
+    "year": 7,
+    "inflation_rate": 2.5,
+    "tokens_minted": -137954.91,
+    "tokens_burned": 1430471.04,
+    "net_inflation": -1568425.95,
+    "circulating_supply": -7086622.33,
+    "node_reward": 262800000.0,
+    "validator_apr": 58.68
+  },
+  {
+    "year": 8,
+    "inflation_rate": 2.5,
+    "tokens_minted": -177165.56,
+    "tokens_burned": 1716557.59,
+    "net_inflation": -1893723.15,
+    "circulating_supply": -8980345.48,
+    "node_reward": 262800000.0,
+    "validator_apr": 48.9
+  },
+  {
+    "year": 9,
+    "inflation_rate": 1.25,
+    "tokens_minted": -112254.32,
+    "tokens_burned": 2059863.36,
+    "net_inflation": -2172117.67,
+    "circulating_supply": -11152463.16,
+    "node_reward": 262800000.0,
+    "validator_apr": 40.75
+  },
+  {
+    "year": 10,
+    "inflation_rate": 1.25,
+    "tokens_minted": -139405.79,
+    "tokens_burned": 2471828.36,
+    "net_inflation": -2611234.15,
+    "circulating_supply": -13763697.31,
+    "node_reward": 262800000.0,
+    "validator_apr": 33.96
+  }
+]

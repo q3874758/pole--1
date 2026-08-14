@@ -96,3 +96,32 @@ secrets/
 *.pfx
 id_rsa
 id_ed25519
+
+# ----------------------------------------------------------------------------
+# AI-agent working artifacts (not source; keep out of the repo)
+# ----------------------------------------------------------------------------
+/.opencode/
+/.mavis/
+/plans/
+/vendor/
+
+# ----------------------------------------------------------------------------
+# Runtime state / generated artifacts (node config, SBOM output, push logs, test data)
+# ----------------------------------------------------------------------------
+/.tmp-pole-node.json
+/client-config.json
+/node.json
+/node-a.json
+/node-b.json
+/pole-gui-state.json
+/pole-node-config.toml
+/push_log.txt
+/push_result*.txt
+/sbom.cdx.json
+/sbom.spdx.json
+/test-wallet-data/
+/pole-node-data-a/
+/pole-node-data-b/
+
+# poled runtime home (created when run without --home)
+**/.pole/

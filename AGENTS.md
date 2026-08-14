@@ -20,7 +20,8 @@ PoLE（Proof of Live Engagement）— Rust 链下协议引擎 + Cosmos SDK 链 +
 - `src/control_api.rs` — 本机 loopback HTTP/1.1（GUI webview ↔ pole-client 唯一通道）
 - `chain/` — Cosmos SDK 链（Go 1.26, SDK v0.54, CometBFT v0.39）；`x/pole/` 自定义模块
 - `chain/proto/pole/chain/pole/v1/` — 4 个 proto 文件（state / tx / query / genesis）
-- `chain/cmd/` — poled daemon 入口（**当前缺失**，见 V1 必修项）
+- `chain/cmd/poled/` — poled daemon 入口（`main.go` + `cmd/root.go`，已补齐）
+- `chain/app/params/` — 编码配置（`encoding.go`，ProtoCodec + TxConfig + Amino）
 - `desktop/web/` — pole-gui 内嵌的本地控制台静态资源（HTML / JS / CSS 三件套，`include_str!` 嵌入 pole-client）
 - `docs_PoLE_Whitepaper.md` — PoLE 正式白皮书 v2.1（1055 行）
 - `docs/operations/` — 运维文档（install / service-management / troubleshooting / testnet / update）
@@ -28,7 +29,7 @@ PoLE（Proof of Live Engagement）— Rust 链下协议引擎 + Cosmos SDK 链 +
 - `packaging/linux/deb/` — Debian 包 + systemd unit
 - `tools/wix/` — WiX 3.14 RTM 工具链（**已 untrack，依赖 `release.yml:78-83` 在 runner 上自动下载**；本地 `tools/wix/` 仍存在但被 `.gitignore:32-35` 排除；如要改 wix 版本改 workflow step 即可）
 - `scripts/` — Windows PowerShell 启动 / 停止 / 状态 / 打包 / 安装脚本
-- `dist/release-manifests/` — 升级清单（**`stable.json` 仍是 dev-signature 占位**）
+- `dist/release-manifests/` — 升级清单（`stable.json` 已改为 cosign keyless 签名结构，见下「V1 发布前必修 #2」）
 - `pole-sbom` 自研二进制 — 输出 CycloneDX 1.5 + SPDX 2.3 双格式 SBOM
 
 ## Code style
@@ -57,28 +58,28 @@ PoLE（Proof of Live Engagement）— Rust 链下协议引擎 + Cosmos SDK 链 +
 - 改动尽量小、可审查、可回滚；非请求不引入新依赖
 - 完成提交前跑相关 `cargo` 检查（`cargo test` / `cargo clippy` / 受影响 crate 的 fmt）
 
-## V1 发布前必修（合规 / 打包风险）
+## V1 发布前必修（合规 / 打包风险）— 状态 2026-06-10
 
-1. **MSI `UpgradeCode` 仍是占位符** — `packaging/windows/Product.wxs:9` 写死 `A1B2C3D4-E5F6-7890-ABCD-EF1234567890`。`MajorUpgrade` 升级路径依赖 UpgradeCode 稳定性，正式版必须替换并锁定。
-2. **`dist/release-manifests/stable.json` 签名占位** — `signature = "dev-signature"`。`docs/operations/update.md:72-73` 明确说明"正式版需替换为真实 PGP/GPG 签名"。
-3. **MSI 路径与文档路径不一致** — `Product.wxs`（`InstallScope=perUser`）+ `packaging/windows/layout.json` 实际安装到 `%LOCALAPPDATA%\PoLE`，但 `docs/operations/install.md` / `service-management.md` 大量引用 `C:\Program Files\PoLE\...` / `C:\ProgramData\PoLE\services`。以 `Product.wxs` + `src/app_paths.rs::installed_install_layout` 为准，文档需回改。
-4. ~~WiX 工具链 (`tools/wix/`, ~17 MB) 已入库，与 `.gitignore` 规则冲突~~ — ✅ 已在 commit `7015164` 中 `git rm -r tools/wix/`（220 files, 47,416 行删除），`release.yml:78-83` 自拉 step 为唯一来源。
-5. **License 黑名单需要双向同步** — `pole-sbom --deny-licenses`（CI 走 `src/bin/pole-sbom.rs`）只覆盖 `GPL/AGPL/SSPL`，而 `deny.toml` 还多 `Commons-Clause` 与 `Elastic-2.0`。新增 license 黑白名单时必须两处同步。
-6. **`core2` 是路径依赖 + 无 license 表达式** — `Cargo.toml:72-73` 的 `[patch.crates-io] core2 = { path = "vendor/core2" }`。`deny.toml` 的 `[[licenses.clarify]]` 仅声明 `MIT`，无 hash 校验；`Cargo.toml` 的 `package.exclude` 未显式列 `vendor/**`，下游 `cargo install` 不会带 vendor。
+> 6 项硬卡点 **5/6 已关闭 + 1 项 PARTIAL**。逐项 commit 如下。
 
-完整 16 项风险与对应证据见 `.mavis/plans/plan_06890004/outputs/ops-release/deliverable-ops.md` §8。
+1. ~~MSI `UpgradeCode` 占位符~~ — ✅ `1fec72a`：替换为 PoLE 命名空间派生的 UUID v5（`AAF27219-EA7E-51B7-B059-D6F82CEE9DF8`），升级路径永久锁定。
+2. ~~`stable.json` 签名占位~~ — ✅ `b8f1e56`：改为 cosign keyless（Sigstore OIDC + Rekor），`release.yml` 含 `sign-blob` + `id-token: write`。
+3. ~~MSI 路径与文档路径不一致~~ — ✅ `c09cb04`：`docs/operations/*.md` 已对齐 `%LOCALAPPDATA%\PoLE`（`perUser` 安装路径）。
+4. ~~WiX 工具链入库~~ — ✅ `7015164`：`git rm -r tools/wix/`，改由 `release.yml:78-83` 自动下载。
+5. ~~License 黑名单双向同步~~ — ✅ `f1e627a`：`pole-sbom` 与 `deny.toml` 均含 GPL/AGPL/SSPL/Commons-Clause/Elastic-2.0。
+6. **`core2` 路径依赖 + 无 hash 校验** — ⚠️ PARTIAL（`9f94c37`）：已加 `[patch.crates-io]` path dep + `deny.toml` clarify；**缺 `.cargo-checksum.json` 校验**。V1.1 必修：迁移 `[source.crates-io] replace-with` 或重跑 `cargo vendor --versioned-dirs --locked`。
 
 ## 项目关键契约（白皮书 → 代码 → 链 三方对账）
 
 - 1 小时奖励区块：`reward_block_secs = 3600`（`src/params.rs:33` + `chain/x/pole/types/helpers.go:26-50`）
 - 跨周期调节：平方根负反馈 + cap 20%（`src/node_rewards.rs:860-882`）
 - 玩家权重 × 游戏权重 GVS：`src/node_gvs.rs:121-136`（Rust 端 PPM 三阶乘积）↔ `chain/x/pole/types/reward_math.go`（Go 端 big.Int 实现）
-- Merkle 树：**两端都自实现**（链端 `chain/x/pole/types/merkle.go` 0x00/0x01，Rust 端 `src/node_pipeline.rs::merkle_root` stable_hash32）— **未做跨语言对账，是 V1 最高风险**
+- Merkle 树：**两端都自实现**（链端 `chain/x/pole/types/merkle.go` 0x00/0x01，Rust 端 `src/node_pipeline.rs::merkle_root` stable_hash32）— ✅ 已做跨语言对账（Rust↔Go 同一组 fixtures 输出 hash 一致，见 `deliverable-merkle-cross-language.md`）
 
 ## Security
 
 - 永不提交 secrets — `.env` 已在 `.gitignore`
 - 私钥/助记词只在 `pole-node-data/identity.json`，永不 commit（已在 `.gitignore`）
-- 链下 `transitions::apply_*` 验签**当前只校验 `signature` 非空**（`src/transitions.rs::ensure_signature`），无真正 Ed25519 — V1 必修
+- 🔴 链下 `transitions::apply_*` 验签**当前只校验 `signature` 非空**（`src/transitions.rs::ensure_signature`），无真正 Ed25519 — **当前最高优先级安全缺口**（第二步必修 #1）
 - 链下 `transitions.rs` 中 grep `adjusted_player_block_reward` 0 引用、`reward_burn_*` 0 引用 — 算法实现完整但**没有任何 apply_* 调用**
-- `dist/release-manifests/stable.json` 真实签名 + MSI `UpgradeCode` 锁定 + 4 条 sign-off 何时闭环 — V1 发布硬卡
+- ✅ `stable.json` cosign 签名 + MSI `UpgradeCode` 锁定已闭环（见上「V1 发布前必修」）

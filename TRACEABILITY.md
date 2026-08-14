@@ -2,7 +2,7 @@
 
 **项目:** PoLE (Proof of Live Engagement)  
 **版本:** V1.0  
-**最后更新:** 2026-04-26
+**最后更新:** 2026-06-10
 
 本文档将白皮书概念映射到代码库中的实现位置。
 
@@ -46,6 +46,22 @@
 | 挑战窗口 | `params.rs` - `challenge_window_blocks` | `types/state.pb.go` - `Params.challenge_window_blocks` |
 | 最终确认 | `node_settlement.rs` - `epoch_finalized` | `types/state.pb.go` - `EpochCommit.finalized` |
 | 惩罚执行 | `node_storage_audit.rs` - `run_local_storage_challenge` | `keeper.ApplyValidatorSlash` |
+
+### 2.4 Rust→Cosmos 桥接层
+
+Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK 交易并广播到链（已接通全部 11 种 Msg）：
+
+| 组件 | 位置 | 说明 |
+|------|------|------|
+| 消息编码 | `src/cosmos/pole_msgs.rs` | 11 种 Msg 的 proto3 wire encoder |
+| wire 类型 | `src/cosmos/wire_types.rs` | 桥接专用 wire-only 类型 |
+| 交易构造 | `src/cosmos/tx_builder.rs` | CosmosTxBuilder（protobuf 序列化） |
+| 交易签名 | `src/cosmos/tx_signer.rs` | SIGN_MODE_DIRECT 签名 |
+| RPC 广播 | `src/cosmos/rpc_client.rs` | Tendermint `broadcast_tx_sync` |
+| 查询客户端 | `src/cosmos/query_client.rs` | account / sequence / height 查询 |
+| 地址转换 | `src/cosmos/address.rs` | hex ↔ bech32 |
+| EIP-712 | `src/cosmos/eip712.rs` | typed-data 签名 helper |
+| 链桥接口 | `src/chain_bridge.rs` | 桥接层入口 |
 
 ---
 
@@ -164,6 +180,8 @@
 | `src/wallet/` | 密钥管理和签名 |
 | `src/tokenomics.rs` | 代币经济参数 |
 | `src/params.rs` | 协议参数 |
+| `src/chain_bridge.rs` | Rust→Cosmos 桥接层入口 |
+| `src/cosmos/` | 桥接层：编码 / 签名 / 广播 / 查询 / 地址 |
 
 ### Cosmos 链文件
 
@@ -177,7 +195,9 @@
 | `chain/x/pole/keeper/query_server.go` | 查询处理器 |
 | `chain/x/pole/module.go` | 模块集成 |
 | `chain/app/app.go` | 应用连接 |
+| `chain/app/params/encoding.go` | 编码配置 |
 | `chain/cmd/poled/main.go` | CLI 入口 |
+| `chain/cmd/poled/cmd/root.go` | 命令脚手架 |
 
 ---
 
