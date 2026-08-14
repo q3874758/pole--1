@@ -24,11 +24,13 @@ impl Default for BroadcastOptions {
     }
 }
 
-/// Result of a `broadcast_tx_sync` call. Mirrors the Tendermint RPC schema
-/// but only retains the fields we actually use.
+/// Result of a `broadcast_tx_sync` call. Mirrors the CometBFT RPC schema
+/// but only retains the fields we actually use. CometBFT >= 0.38 names the
+/// field `hash`; older Tendermint used `txhash` — both are accepted on
+/// deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BroadcastTxResponse {
-    #[serde(rename = "txhash")]
+    #[serde(rename = "hash", alias = "txhash")]
     pub tx_hash: String,
     #[serde(default)]
     pub code: u32,

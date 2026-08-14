@@ -80,6 +80,7 @@ func initAppConfig() (string, interface{}) {
 	}
 	srvCfg := serverconfig.DefaultConfig()
 	srvCfg.MinGasPrices = "0upole"
+	srvCfg.API.Enable = true
 	customAppConfig := CustomAppConfig{Config: *srvCfg}
 	return serverconfig.DefaultConfigTemplate, customAppConfig
 }
@@ -105,8 +106,8 @@ func initRootCmd(rootCmd *cobra.Command, encodingConfig params.EncodingConfig) {
 
 func addModuleInitFlags(_ *cobra.Command) {}
 
-func newApp(logger log.Logger, db dbm.DB, _ servertypes.AppOptions) servertypes.Application {
-	a, err := app.New(logger, db)
+func newApp(logger log.Logger, db dbm.DB, appOpts servertypes.AppOptions) servertypes.Application {
+	a, err := app.New(logger, db, server.DefaultBaseappOptions(appOpts)...)
 	if err != nil {
 		panic(err)
 	}

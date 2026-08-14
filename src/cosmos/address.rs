@@ -1,5 +1,6 @@
 use bech32::{encode, FromBase32, ToBase32, Variant};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::cosmos::error::{CosmosError, Result};
 use crate::primitives::{Address, NodeId};
@@ -20,6 +21,18 @@ pub const POLE_BECH32_PREFIX: &str = "pole";
 
 /// Wire format for the 20-byte account address derived from a 32-byte hash.
 pub const ACCOUNT_ADDRESS_LEN: usize = 20;
+
+/// Derive the 20-byte Cosmos SDK account identifier for an Ed25519
+/// public key: `sha256(pubkey)[..20]`. This matches the chain's
+/// `tmhash.SumTruncated(pubKey.Key)` used by
+/// `cosmos.crypto.ed25519.PubKey.Address()`, which is what the chain
+/// compares against the bech32 signer fields on every tx.
+pub fn cosmos_account_from_pubkey(pubkey: &[u8]) -> [u8; 20] {
+    let digest = Sha256::digest(pubkey);
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&digest[..20]);
+    out
+}
 
 /// Address type wrapping either the raw 32-byte hash (Rust internal) or
 /// the 20-byte account identifier used by the Cosmos SDK.

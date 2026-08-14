@@ -18,7 +18,7 @@ fn harness_types_are_constructible() {
 
 #[cfg(feature = "integration")]
 mod integration_scenarios {
-    use super::harness::IntegrationHarnessBuilder;
+    use super::harness::{IntegrationHarnessBuilder, RegisteredNodeCapabilities};
 
     /// Scenario 1: register a node, submit a batch, claim a reward.
     /// Skipped unless `--features integration` is enabled and a
@@ -31,20 +31,28 @@ mod integration_scenarios {
             .await
             .expect("harness should boot");
 
-        let _node = h
-            .register_node(Default::default())
+        // `collect` capability is required for `MsgSubmitBatch` to pass
+        // `requireNodeCapability(..., "collect")`.
+        let node = h
+            .register_node(RegisteredNodeCapabilities {
+                collect: true,
+                ..Default::default()
+            })
             .await
-            .expect("register_node should succeed");
+            .unwrap_or_else(|e| panic!("register_node should succeed: {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(node.capabilities.collect);
 
-        let _tx = h
-            .submit_batch(serde_json::json!({"placeholder": true}))
+        let tx = h
+            .submit_batch(serde_json::json!({"epoch_id": 1}))
             .await
             .expect("submit_batch should succeed");
+        assert!(!tx.is_empty());
 
-        let _tx = h
+        let tx = h
             .claim_reward(1)
             .await
             .expect("claim_reward should succeed");
+        assert!(!tx.is_empty());
 
         // Drop kills the chain process.
     }

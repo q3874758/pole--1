@@ -19,7 +19,7 @@ pub struct AuthAccountResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "@type")]
 pub enum AuthAccountInner {
     #[serde(rename = "/cosmos.auth.v1beta1.BaseAccount")]
     BaseAccount(BaseAccount),

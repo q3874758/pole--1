@@ -7,6 +7,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/std"
 	authtx "github.com/cosmos/cosmos-sdk/x/auth/tx"
 
+	"pole/chain/app"
 	poletypes "pole/chain/x/pole/types"
 )
 
@@ -21,9 +22,12 @@ type EncodingConfig struct {
 
 // MakeEncodingConfig creates an EncodingConfig for the PoLE chain.
 func MakeEncodingConfig() EncodingConfig {
-	interfaceRegistry := codectypes.NewInterfaceRegistry()
+	interfaceRegistry, err := app.NewInterfaceRegistry()
+	if err != nil {
+		panic(err)
+	}
 	std.RegisterInterfaces(interfaceRegistry)
-	poletypes.RegisterInterfaces(interfaceRegistry)
+	app.ModuleBasics.RegisterInterfaces(interfaceRegistry)
 
 	cdc := codec.NewProtoCodec(interfaceRegistry)
 	amino := codec.NewLegacyAmino()

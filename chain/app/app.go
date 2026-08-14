@@ -25,6 +25,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/server/api"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
+	"github.com/cosmos/gogoproto/proto"
 	std "github.com/cosmos/cosmos-sdk/std"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -54,6 +55,7 @@ import (
 	stakingmodule "github.com/cosmos/cosmos-sdk/x/staking"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 
 	polemodule "pole/chain/x/pole"
 	polekeeper "pole/chain/x/pole/keeper"
@@ -115,8 +117,25 @@ type App struct {
 	configurator       module.Configurator
 }
 
+// NewInterfaceRegistry returns an interface registry configured with the
+// chain's bech32 address codecs for transaction signing. It is shared by
+// both the app and the CLI encoding config so that signing operations (e.g.
+// gentx) can resolve and validate addresses.
+func NewInterfaceRegistry() (codectypes.InterfaceRegistry, error) {
+	return codectypes.NewInterfaceRegistryWithOptions(codectypes.InterfaceRegistryOptions{
+		ProtoFiles: proto.HybridResolver,
+		SigningOptions: signing.Options{
+			AddressCodec:          addresscodec.NewBech32Codec("cosmos"),
+			ValidatorAddressCodec: addresscodec.NewBech32Codec("cosmosvaloper"),
+		},
+	})
+}
+
 func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp)) (*App, error) {
-	interfaceRegistry := codectypes.NewInterfaceRegistry()
+	interfaceRegistry, err := NewInterfaceRegistry()
+	if err != nil {
+		return nil, err
+	}
 	std.RegisterInterfaces(interfaceRegistry)
 
 	appCodec := codec.NewProtoCodec(interfaceRegistry)
@@ -141,7 +160,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 		return nil, fmt.Errorf("encode gov authority address: %w", err)
 	}
 
-	bApp := baseapp.NewBaseApp(AppName, logger, db, txConfig.TxDecoder(), append(baseAppOptions, baseapp.SetChainID(AppName))...)
+	bApp := baseapp.NewBaseApp(AppName, logger, db, txConfig.TxDecoder(), baseAppOptions...)
 	bApp.SetInterfaceRegistry(interfaceRegistry)
 	bApp.SetTxEncoder(txConfig.TxEncoder())
 	bApp.MsgServiceRouter().SetInterfaceRegistry(interfaceRegistry)
@@ -220,6 +239,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 	epochsAppModule := epochsmodule.NewAppModule(&epochsKeeper)
 	consensusAppModule := consensusmodule.NewAppModule(appCodec, consensusKeeper)
 	poleAppModule := polemodule.NewAppModule(poleKeeper)
+	genutilAppModule := genutilmodule.NewAppModule(accountKeeper, stakingKeeper, bApp, txConfig)
 
 	moduleManager := module.NewManager(
 		authAppModule,
@@ -230,6 +250,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 		epochsAppModule,
 		consensusAppModule,
 		poleAppModule,
+		genutilAppModule,
 	)
 	moduleManager.SetOrderInitGenesis(
 		authtypes.ModuleName,
@@ -240,6 +261,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 		epochstypes.ModuleName,
 		consensustypes.ModuleName,
 		poletypes.ModuleName,
+		genutiltypes.ModuleName,
 	)
 	moduleManager.SetOrderExportGenesis(
 		authtypes.ModuleName,
@@ -250,6 +272,7 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 		epochstypes.ModuleName,
 		consensustypes.ModuleName,
 		poletypes.ModuleName,
+		genutiltypes.ModuleName,
 	)
 	moduleManager.SetOrderBeginBlockers(
 		slashingtypes.ModuleName,
@@ -386,9 +409,27 @@ func (a *App) InitChainer(ctx sdk.Context, req *cmtabci.RequestInitChain) (*cmta
 		}
 	}
 
+	var validatorUpdates []cmtabci.ValidatorUpdate
 	for _, moduleName := range a.ModuleManager.OrderInitGenesis {
 		mod := a.ModuleManager.Modules[moduleName]
 		state := genesisState[moduleName]
+
+		// Modules implementing HasABCIGenesis (e.g. genutil) derive the
+		// initial validator-set updates from genesis transactions.
+		if abciMod, ok := mod.(module.HasABCIGenesis); ok {
+			if len(state) == 0 {
+				state = abciMod.DefaultGenesis(a.appCodec)
+			}
+			updates := abciMod.InitGenesis(ctx, a.appCodec, state)
+			if len(updates) > 0 {
+				if len(validatorUpdates) > 0 {
+					return nil, fmt.Errorf("validator InitGenesis updates already set by a previous module")
+				}
+				validatorUpdates = updates
+			}
+			continue
+		}
+
 		legacyModule, ok := mod.(module.HasGenesis)
 		if !ok {
 			continue
@@ -403,7 +444,7 @@ func (a *App) InitChainer(ctx sdk.Context, req *cmtabci.RequestInitChain) (*cmta
 		}
 	}
 
-	return &cmtabci.ResponseInitChain{}, nil
+	return &cmtabci.ResponseInitChain{Validators: validatorUpdates}, nil
 }
 
 func (a *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {

@@ -15,7 +15,7 @@
 //! - All async ops time out after 30s. Recovery from a crashed `poled`
 //!   is not supported yet.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -25,6 +25,9 @@ use tokio::time::sleep;
 
 use pole_protocol_draft::cosmos::{
     address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
+};
+use pole_protocol_draft::cosmos::wire_types::{
+    BatchCommitWire, MerkleCommitmentWire, NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
 };
 use pole_protocol_draft::wallet::KeyPair;
 
@@ -153,6 +156,16 @@ impl IntegrationHarnessBuilder {
             .clone()
             .unwrap_or_else(|| PathBuf::from("poled"));
 
+        // 0. Deterministic validator keypair + derived bech32. The
+        // bridge client signs with this keypair, so the account must
+        // exist and hold `upole` before the genesis is finalized. The
+        // account id is sha256(pubkey)[..20] — the chain derives the
+        // signer address from the pubkey via tmhash.SumTruncated.
+        let validator_key = KeyPair::from_seed(&[42u8; 32]);
+        let account = address::cosmos_account_from_pubkey(&validator_key.public).to_vec();
+        let validator_bech32 = address::encode_bech32(&prefix, &account)?;
+        let validator_address = CosmosAddress { account, bech32: validator_bech32.clone() };
+
         // 1. `poled init` to lay down config/
         let status = Command::new(&poled_bin)
             .args(["init", "test-validator", "--chain-id", &chain_id, "--home"])
@@ -166,17 +179,41 @@ impl IntegrationHarnessBuilder {
             ));
         }
 
+        // 1.5. Fund the bridge validator account (`upole` covers tx fees).
+        poled_run(
+            &poled_bin,
+            &chain_home,
+            &[
+                "genesis",
+                "add-genesis-account",
+                &validator_bech32,
+                "1000000000000upole",
+                "--keyring-backend",
+                "test",
+            ],
+        )?;
+
         // 2. Patch genesis.json if any pre-mints were requested
         if !self.pre_mint.is_empty() {
             patch_genesis_balances(&chain_home, &self.pre_mint)?;
         }
 
-        // 3. Start the chain in the background
+        // 2.2. Seed the pole module with a finalized epoch-1 commit and
+        // a reward record so `claim_reward` can resolve end-to-end.
+        patch_pole_genesis(&chain_home, &validator_bech32)?;
+
+        // 2.5. Bootstrap a single validator (a bare init leaves the
+        // validator set empty, preventing block production).
+        bootstrap_validator(&poled_bin, &chain_home, &chain_id)?;
+
+        // 3. Start the chain in the background (stderr captured so
+        // chain-side rejections are debuggable after a failed test).
+        let poled_log = tmp.path().join("poled.log");
         let poled = Command::new(&poled_bin)
             .args(["start", "--home"])
             .arg(&chain_home)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(std::fs::File::create(&poled_log)?))
             .spawn()?;
 
         // 4. Wire up the bridge client
@@ -188,16 +225,10 @@ impl IntegrationHarnessBuilder {
         };
         let client = CosmosClient::new(endpoint)?;
 
-        // 5. Validator keypair + derived bech32
-        let validator_key = KeyPair::from_seed(&[42u8; 32]);
-        let mut account = validator_key.address.to_vec();
-        account.truncate(20);
-        let bech32 = address::encode_bech32(&prefix, &account)?;
-        let validator_address = CosmosAddress { account, bech32 };
-
         let node_config = tmp.path().join("node.json");
         let harness = IntegrationHarness {
             tmp,
+            poled_log,
             chain_home,
             node_config,
             chain_id,
@@ -217,6 +248,7 @@ impl IntegrationHarnessBuilder {
 /// High-level handle. Drop kills the child process.
 pub struct IntegrationHarness {
     pub tmp: TempDir,
+    pub poled_log: PathBuf,
     pub chain_home: PathBuf,
     pub node_config: PathBuf,
     pub chain_id: String,
@@ -264,20 +296,25 @@ impl IntegrationHarness {
         &self,
         capabilities: RegisteredNodeCapabilities,
     ) -> Result<RegisteredNode, HarnessError> {
-        let node_json = serde_json::json!({
-            "operator_address": self.validator_address.bech32,
-            "node_id_hex": hex::encode(self.validator_key.public),
-            "capabilities": {
-                "collect": capabilities.collect,
-                "store": capabilities.store,
-                "verify": capabilities.verify,
-                "propose": capabilities.propose,
-            },
-            "active": true,
-        });
-        let msg = BridgeMessage::Unsupported {
-            type_url: "/pole.node.v1.MsgUpsertNode".into(),
-            note: node_json.to_string(),
+        let caps = NodeCapabilitySetWire {
+            collect: capabilities.collect,
+            store: capabilities.store,
+            verify: capabilities.verify,
+            propose: capabilities.propose,
+        };
+        let node = NodeRecordWire {
+            operator_address: self.validator_address.bech32.clone(),
+            reward_address: self.validator_address.bech32.clone(),
+            consensus_address: String::new(),
+            role: NodeRoleWire::Player,
+            capabilities: caps,
+            active: true,
+            bonded_tokens: 0,
+            last_updated_epoch: 0,
+        };
+        let msg = BridgeMessage::UpsertNode {
+            operator: self.validator_address.clone(),
+            node,
         };
         let resp = self
             .client
@@ -301,15 +338,33 @@ impl IntegrationHarness {
         })
     }
 
-    /// `MsgSubmitBatch`. Skeleton: forwards a JSON projection until the
-    /// typed `BatchCommit → cosmos_json` converter lands.
+    /// `MsgSubmitBatch` for the validator's collector account. The
+    /// batch is built from `batch_json` when it carries the wire
+    /// fields, otherwise a minimal valid batch is used.
     pub async fn submit_batch(
         &self,
         batch_json: serde_json::Value,
     ) -> Result<String, HarnessError> {
-        let msg = BridgeMessage::Unsupported {
-            type_url: "/pole.replica.v1.MsgSubmitReplicaReceipt".into(),
-            note: batch_json.to_string(),
+        let epoch_id = batch_json
+            .get("epoch_id")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+        let batch_commit = BatchCommitWire {
+            epoch_id,
+            collector_address: self.validator_address.bech32.clone(),
+            slot_start: 1,
+            slot_end: 100,
+            batch: MerkleCommitmentWire {
+                root: "00".repeat(32),
+                leaf_count: 1,
+            },
+            payload_cid: "bafy-test-cid".into(),
+            observation_count: 1,
+            submitted_at_height: 0,
+        };
+        let msg = BridgeMessage::SubmitBatch {
+            collector: self.validator_address.clone(),
+            batch_commit,
         };
         let resp = self
             .client
@@ -389,6 +444,12 @@ impl IntegrationHarness {
         Err(HarnessError::Unimplemented("open_challenge"))
     }
 
+    /// Read the captured `poled` stderr log. Useful for diagnosing
+    /// chain-side rejections after a failed broadcast.
+    pub fn poled_log_text(&self) -> String {
+        std::fs::read_to_string(&self.poled_log).unwrap_or_default()
+    }
+
     /// Read the current account sequence for `address`. Useful for
     /// tests that want to assert "the chain processed N txs".
     pub async fn current_sequence(&self, address: &str) -> Result<u64, HarnessError> {
@@ -409,6 +470,46 @@ impl Drop for IntegrationHarness {
             let _ = child.wait();
         }
     }
+}
+
+/// Runs a poled subcommand with --home appended, erroring on non-zero exit.
+fn poled_run(poled_bin: &Path, chain_home: &Path, args: &[&str]) -> Result<(), HarnessError> {
+    let status = Command::new(poled_bin)
+        .args(args)
+        .arg("--home")
+        .arg(chain_home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(HarnessError::Unimplemented(
+            "poled validator bootstrap command returned non-zero",
+        ));
+    }
+    Ok(())
+}
+
+/// Bootstraps a single validator so a freshly-initialized chain can produce
+/// blocks: adds a test keyring account, funds it with stake, creates a genesis
+/// transaction, and collects it into the validator set.
+fn bootstrap_validator(
+    poled_bin: &Path,
+    chain_home: &Path,
+    chain_id: &str,
+) -> Result<(), HarnessError> {
+    poled_run(poled_bin, chain_home, &["keys", "add", "test-validator", "--keyring-backend", "test"])?;
+    poled_run(
+        poled_bin,
+        chain_home,
+        &["genesis", "add-genesis-account", "test-validator", "1000000000stake", "--keyring-backend", "test"],
+    )?;
+    poled_run(
+        poled_bin,
+        chain_home,
+        &["genesis", "gentx", "test-validator", "1000000stake", "--chain-id", chain_id, "--keyring-backend", "test"],
+    )?;
+    poled_run(poled_bin, chain_home, &["genesis", "collect-gentxs"])?;
+    Ok(())
 }
 
 /// Patch `genesis.json` to add the requested balances. Operates on the
@@ -435,6 +536,42 @@ fn patch_genesis_balances(
             "coins": [{ "denom": "upole", "amount": amount.to_string() }],
         }));
     }
+    std::fs::write(&genesis_path, serde_json::to_string_pretty(&genesis)?)?;
+    Ok(())
+}
+
+/// Seed the pole module's genesis state so the bridge happy path can
+/// claim an epoch-1 reward: a finalized `EpochCommit` plus a non-zero
+/// `RewardRecord` for `recipient`. Without these the chain rejects
+/// `MsgClaimReward` (epoch not finalized / no reward record).
+fn patch_pole_genesis(chain_home: &std::path::Path, recipient: &str) -> Result<(), HarnessError> {
+    let genesis_path = chain_home.join("config/genesis.json");
+    let raw = std::fs::read_to_string(&genesis_path)?;
+    let mut genesis: serde_json::Value = serde_json::from_str(&raw)?;
+
+    let pole = genesis
+        .pointer_mut("/app_state/pole")
+        .ok_or(HarnessError::Missing("app_state.pole"))?;
+
+    pole["epoch_commits"] = serde_json::json!([{
+        "epoch_id": 1,
+        "finalized": true,
+        "challenge_open_height": 0,
+        "challenge_deadline_height": 1,
+    }]);
+
+    pole["reward_records"] = serde_json::json!([{
+        "epoch_id": 1,
+        "recipient": recipient,
+        "player_reward": 1000,
+        "collect_reward": 0,
+        "store_reward": 0,
+        "verify_reward": 0,
+        "propose_reward": 0,
+        "slash_debit": 0,
+        "net_reward": 1000,
+    }]);
+
     std::fs::write(&genesis_path, serde_json::to_string_pretty(&genesis)?)?;
     Ok(())
 }

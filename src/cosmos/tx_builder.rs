@@ -283,7 +283,7 @@ impl<'a> TxBuilder<'a> {
         // first 20 bytes — matches `address::address_to_bech32`).
         let expected = crate::cosmos::address::encode_bech32(
             signer.prefix(),
-            &keypair.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+            &crate::cosmos::address::cosmos_account_from_pubkey(&keypair.public),
         )?;
         if expected != signer.bech32 {
             return Err(CosmosError::Encode(format!(
@@ -394,11 +394,11 @@ mod tests {
         // by `_signer` being unused.
         let bech = crate::cosmos::address::encode_bech32(
             DEFAULT_BECH32_PREFIX,
-            &kp.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+            &crate::cosmos::address::cosmos_account_from_pubkey(&kp.public),
         )
         .unwrap();
         let addr = CosmosAddress {
-            account: kp.public[..20].to_vec(),
+            account: crate::cosmos::address::cosmos_account_from_pubkey(&kp.public).to_vec(),
             bech32: bech,
         };
         let builder = TxBuilder::new("pole-test").with_sequence(1, 0);
@@ -468,14 +468,14 @@ mod tests {
     #[test]
     fn build_accepts_signer_matching_pubkey() {
         let kp = KeyPair::from_seed(&[6u8; 32]);
-        // Derive the canonical bech32 from the public key (first 20 bytes).
+        // Derive the canonical bech32 from the public key (sha256(pubkey)[..20]).
         let bech = crate::cosmos::address::encode_bech32(
             DEFAULT_BECH32_PREFIX,
-            &kp.public[..crate::cosmos::address::ACCOUNT_ADDRESS_LEN],
+            &crate::cosmos::address::cosmos_account_from_pubkey(&kp.public),
         )
         .unwrap();
         let signer = CosmosAddress {
-            account: kp.public[..20].to_vec(),
+            account: crate::cosmos::address::cosmos_account_from_pubkey(&kp.public).to_vec(),
             bech32: bech,
         };
         let builder = TxBuilder::new("pole-test").with_sequence(1, 0);
