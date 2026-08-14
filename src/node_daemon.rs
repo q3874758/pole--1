@@ -96,6 +96,149 @@ pub struct CollectTickArtifact {
     pub retention_until_epoch: Option<u64>,
 }
 
+/// A signed verification credential: a verifier attests that it checked
+/// a collector's batch for an epoch (root / hash / count / signature
+/// audit) within the challenge window. `is_player` records whether the
+/// verifier had live activity in the previous epoch (player collectors
+/// verify without a separate stake).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationCredential {
+    pub epoch_id: u64,
+    pub target_batch_root_hex: String,
+    pub target_collector_hex: String,
+    pub verifier_id_hex: String,
+    pub is_player: bool,
+    pub verified: bool,
+    pub verified_at_millis: u64,
+    pub signature_hex: String,
+}
+
+impl VerificationCredential {
+    /// Canonical bytes signed by the verifier (signature excluded).
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut copy = self.clone();
+        copy.signature_hex = String::new();
+        serde_json::to_vec(&copy).expect("credential json encoding")
+    }
+}
+
+pub fn verification_credential_path(config: &NodeConfig, epoch_id: u64) -> PathBuf {
+    Path::new(&config.runtime.data_dir)
+        .join("verifications")
+        .join(format!("epoch-{epoch_id}.json"))
+}
+
+/// Total player-activity reward blocks recorded for `epoch_id` in the
+/// local batch artifacts (the signal used to classify a node as a
+/// "player" verifier).
+pub fn player_activity_blocks_for_epoch(config: &NodeConfig, epoch_id: u64) -> usize {
+    let batches_dir = Path::new(&config.runtime.data_dir).join("batches");
+    let Ok(entries) = fs::read_dir(&batches_dir) else { return 0 };
+    let mut total = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(artifact) = CollectTickArtifact::load_json(&path) else { continue };
+        if artifact.epoch_id == epoch_id {
+            total += artifact.player_reward_block_count;
+        }
+    }
+    total
+}
+
+/// A verifier counts as a "player" when the previous epoch carried live
+/// activity (player reward blocks), matching the agreed rule:
+/// "has data on the previous chain epoch -> is a player".
+pub fn is_player_verifier(config: &NodeConfig, epoch_id: u64) -> bool {
+    player_activity_blocks_for_epoch(config, epoch_id.saturating_sub(1)) > 0
+}
+
+/// Build a signed verification credential per locally-stored batch of
+/// `epoch_id`, using `identity` to sign. `verified` reflects whether the
+/// batch passed the local audit (payload hash, batch root, obs count,
+/// retention, signature status not invalid).
+pub fn build_verification_credentials(
+    config: &NodeConfig,
+    epoch_id: u64,
+    identity: &crate::wallet::KeyPair,
+) -> Result<Vec<VerificationCredential>, NodeDaemonError> {
+    let report = verify_local_epoch(config, epoch_id)
+        .map_err(NodeDaemonError::Verification)?;
+    let is_player = is_player_verifier(config, epoch_id);
+    let verifier_hex = config.node_id_hex.clone();
+    let verified_at = current_unix_millis()?;
+
+    let batches_dir = Path::new(&config.runtime.data_dir).join("batches");
+    let mut credentials = Vec::new();
+    if let Ok(entries) = fs::read_dir(&batches_dir) {
+        let mut paths = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        paths.sort();
+        for path in paths {
+            let Ok(artifact) = CollectTickArtifact::load_json(&path) else { continue };
+            if artifact.epoch_id != epoch_id {
+                continue;
+            }
+            let batch_report = report
+                .reports
+                .iter()
+                .find(|batch| batch.payload_cid == artifact.payload_cid);
+            let verified = batch_report
+                .map(|batch| {
+                    batch.payload_hash_matches
+                        && batch.batch_root_matches
+                        && batch.obs_count_matches
+                        && batch.retention_hash_matches
+                        && !batch.signature_status.contains("invalid")
+                })
+                .unwrap_or(false);
+            let target_collector_hex = batch_report
+                .map(|_| config.node_id_hex.clone())
+                .unwrap_or_else(|| config.node_id_hex.clone());
+            let mut credential = VerificationCredential {
+                epoch_id,
+                target_batch_root_hex: artifact.batch_root_hex.clone(),
+                target_collector_hex,
+                verifier_id_hex: verifier_hex.clone(),
+                is_player,
+                verified,
+                verified_at_millis: verified_at,
+                signature_hex: String::new(),
+            };
+            credential.signature_hex =
+                hex::encode(identity.sign(&credential.signing_payload()));
+            credentials.push(credential);
+        }
+    }
+    Ok(credentials)
+}
+
+/// Persist a list of verification credentials for an epoch.
+pub fn save_verification_credentials(
+    config: &NodeConfig,
+    epoch_id: u64,
+    credentials: &[VerificationCredential],
+) -> Result<(), NodeDaemonError> {
+    let path = verification_credential_path(config, epoch_id);
+    save_pretty_json::<Vec<VerificationCredential>, NodeDaemonError>(&credentials.to_vec(), path)
+}
+
+/// Load the stored verification credentials for an epoch (empty if none).
+pub fn load_verification_credentials(
+    config: &NodeConfig,
+    epoch_id: u64,
+) -> Vec<VerificationCredential> {
+    load_json_or_default::<Vec<VerificationCredential>, NodeDaemonError>(
+        verification_credential_path(config, epoch_id),
+    )
+    .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochCommitArtifact {
     pub epoch_id: u64,
@@ -3333,6 +3476,75 @@ mod tests {
         assert_eq!(summary.len(), 1);
         assert!(summary[0].contains("1 consecutive failures"));
         assert!(!summary[0].contains("degraded"));
+    }
+
+    #[test]
+    fn player_activity_signal_uses_previous_epoch() {
+        let root = std::env::temp_dir().join(format!("pole-player-sig-{}", std::process::id()));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = root.to_string_lossy().into_owned();
+        let batches_dir = root.join("batches");
+        std::fs::create_dir_all(&batches_dir).unwrap();
+        let artifact = CollectTickArtifact {
+            epoch_id: 0,
+            slot_id: 0,
+            payload_cid: "cid".into(),
+            payload_hash_hex: "00".repeat(32),
+            batch_root_hex: "11".repeat(32),
+            obs_count: 1,
+            player_reward_block_count: 3,
+            player_reward_total: 3000,
+            reward_process_name: Some("Game.exe".into()),
+            stored_payload_cid: Some("cid".into()),
+            retention_until_epoch: Some(2),
+        };
+        std::fs::write(
+            batches_dir.join("tick.json"),
+            serde_json::to_string(&artifact).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(player_activity_blocks_for_epoch(&config, 0), 3);
+        assert!(is_player_verifier(&config, 1));
+        assert!(!is_player_verifier(&config, 2));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn verification_credential_roundtrip_and_signing_payload() {
+        let root = std::env::temp_dir().join(format!("pole-verif-{}", std::process::id()));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = root.to_string_lossy().into_owned();
+
+        let credential = VerificationCredential {
+            epoch_id: 7,
+            target_batch_root_hex: "ab".repeat(32),
+            target_collector_hex: "cd".repeat(32),
+            verifier_id_hex: "ef".repeat(32),
+            is_player: true,
+            verified: true,
+            verified_at_millis: 1_700_000_000_000,
+            signature_hex: String::new(),
+        };
+        // Payload is stable before/after signature is attached.
+        let payload = credential.signing_payload();
+        let mut signed = credential.clone();
+        signed.signature_hex = "deadbeef".into();
+        assert_eq!(payload, signed.signing_payload());
+
+        save_verification_credentials(&config, 7, &[credential.clone()]).unwrap();
+        let loaded = load_verification_credentials(&config, 7);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0], credential);
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
 

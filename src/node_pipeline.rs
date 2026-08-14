@@ -147,6 +147,60 @@ fn source_namespace(source_kind: ActivitySourceKind) -> &'static str {
     }
 }
 
+/// Status of a single observation's collector signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureStatus {
+    /// No signature attached.
+    Empty,
+    /// The legacy 32-byte development placeholder hash (not a real
+    /// Ed25519 signature) — recognised so verifiers can report it.
+    DevPlaceholder,
+    /// A real Ed25519 signature that verified against the collector key.
+    Valid,
+    /// A real-looking signature that failed verification.
+    Invalid,
+    /// A real signature but no collector public key was available to
+    /// verify it against.
+    Unverifiable,
+}
+
+impl ObservationRecord {
+    /// Canonical bytes signed by the collector. The signature field itself
+    /// is excluded so the payload is stable before and after signing.
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut copy = self.clone();
+        copy.collector_signature = Vec::new();
+        borsh::to_vec(&copy).expect("observation borsh encoding")
+    }
+
+    /// Verify the attached collector signature.
+    ///
+    /// `pubkey` is the collector's Ed25519 public key when known (e.g. from
+    /// the local node table for our own batches); `None` yields
+    /// [`SignatureStatus::Unverifiable`] for real signatures. Legacy
+    /// 32-byte dev placeholders are reported as
+    /// [`SignatureStatus::DevPlaceholder`] and never count as failures.
+    pub fn verify_collector_signature(&self, pubkey: Option<&[u8; 32]>) -> SignatureStatus {
+        if self.collector_signature.is_empty() {
+            return SignatureStatus::Empty;
+        }
+        if self.collector_signature.len() == 32 {
+            return SignatureStatus::DevPlaceholder;
+        }
+        let Some(pubkey) = pubkey else {
+            return SignatureStatus::Unverifiable;
+        };
+        if crate::stable_hash32(pubkey) != self.collector_id {
+            return SignatureStatus::Invalid;
+        }
+        if crate::wallet::verify_signature(pubkey, &self.signing_payload(), &self.collector_signature) {
+            SignatureStatus::Valid
+        } else {
+            SignatureStatus::Invalid
+        }
+    }
+}
+
 impl BatchBuilder {
     pub fn new(epoch_id: EpochId, collector_id: NodeId) -> Self {
         Self {
@@ -570,5 +624,72 @@ mod tests {
                 "fixture hex must decode to 32 bytes"
             );
         }
+    }
+
+    fn sample_observation() -> ObservationRecord {
+        ObservationRecord {
+            epoch_id: 1,
+            slot_id: 1,
+            app_id: 730,
+            source_kind: ActivitySourceKind::Steam,
+            source_confidence_ppm: 1_000_000,
+            observed_players: 500_000,
+            observed_at_millis: 1_700_000_000_000,
+            collector_id: [0x42u8; 32],
+            raw_body_cid: "cid".to_string(),
+            raw_body_hash: [0x22u8; 32],
+            collector_signature: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn collector_signature_status_distinguishes_dev_and_real() {
+        // Empty signature.
+        assert_eq!(
+            sample_observation().verify_collector_signature(None),
+            SignatureStatus::Empty
+        );
+
+        // Legacy 32-byte dev placeholder is recognised, never a failure.
+        let mut dev = sample_observation();
+        dev.collector_signature = [0xABu8; 32].to_vec();
+        assert_eq!(
+            dev.verify_collector_signature(None),
+            SignatureStatus::DevPlaceholder
+        );
+
+        // Real-looking 64-byte signature without a known public key.
+        let mut real = sample_observation();
+        real.collector_signature = [0xCDu8; 64].to_vec();
+        assert_eq!(
+            real.verify_collector_signature(None),
+            SignatureStatus::Unverifiable
+        );
+
+        // With a public key that does not match the collector id.
+        assert_eq!(
+            real.verify_collector_signature(Some(&[0x11u8; 32])),
+            SignatureStatus::Invalid
+        );
+    }
+
+    #[test]
+    fn collector_signature_valid_roundtrip_with_identity() {
+        let keypair = crate::wallet::KeyPair::from_seed(&[0x5Au8; 32]);
+        let mut observation = sample_observation();
+        observation.collector_id = crate::stable_hash32(&keypair.public);
+        observation.collector_signature = keypair.sign(&observation.signing_payload());
+
+        assert_eq!(
+            observation.verify_collector_signature(Some(&keypair.public)),
+            SignatureStatus::Valid
+        );
+        // Tampered payload must fail.
+        let mut tampered = observation.clone();
+        tampered.observed_players += 1;
+        assert_eq!(
+            tampered.verify_collector_signature(Some(&keypair.public)),
+            SignatureStatus::Invalid
+        );
     }
 }

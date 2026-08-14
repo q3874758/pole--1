@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::node_config::NodeConfig;
 use crate::node_daemon::{CollectTickArtifact, NodeDaemonError};
-use crate::node_pipeline::{merkle_leaf_sha256, merkle_root, stable_hash32};
+use crate::node_pipeline::{merkle_leaf_sha256, merkle_root, stable_hash32, SignatureStatus};
 use crate::primitives::Hash32;
 use crate::records::ObservationRecord;
 use crate::storage_book::{LocalRetentionBook, StorageBookError};
@@ -21,6 +21,13 @@ pub struct BatchVerificationReport {
     pub obs_count_matches: bool,
     pub retention_record_present: bool,
     pub retention_hash_matches: bool,
+    /// Aggregated collector-signature status for this batch's
+    /// observations (e.g. "dev", "ed25519", "mixed").
+    pub signature_status: String,
+    /// Observations carrying a non-empty signature (real or placeholder).
+    pub signatures_present: usize,
+    /// Observations whose Ed25519 signature verified.
+    pub signatures_verified: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +156,45 @@ pub fn verify_local_epoch(
                 .map(|record| record.payload_hash == payload_hash)
                 .unwrap_or(false);
 
+            // Collector-signature audit: for our own batches the identity
+            // key is available for a real Ed25519 check; legacy dev
+            // placeholders are reported but never fail the batch.
+            let own_collector = observations
+                .first()
+                .map(|observation| observation.collector_id)
+                .filter(|collector| config.node_id().ok().as_ref() == Some(collector));
+            let local_pubkey = if own_collector.is_some() {
+                config.identity_keypair().ok().map(|keypair| keypair.public)
+            } else {
+                None
+            };
+            let mut signature_statuses = Vec::new();
+            let mut signatures_present = 0usize;
+            let mut signatures_verified = 0usize;
+            for observation in &observations {
+                let status = observation
+                    .verify_collector_signature(local_pubkey.as_ref());
+                match status {
+                    SignatureStatus::Empty => {}
+                    SignatureStatus::DevPlaceholder => {
+                        signature_statuses.push("dev");
+                        signatures_present += 1;
+                    }
+                    SignatureStatus::Valid => {
+                        signature_statuses.push("ed25519");
+                        signatures_present += 1;
+                        signatures_verified += 1;
+                    }
+                    SignatureStatus::Invalid => signature_statuses.push("invalid"),
+                    SignatureStatus::Unverifiable => {
+                        signature_statuses.push("unverifiable");
+                        signatures_present += 1;
+                    }
+                }
+            }
+            signature_statuses.sort();
+            signature_statuses.dedup();
+
             reports.push(BatchVerificationReport {
                 epoch_id: artifact.epoch_id,
                 slot_id: artifact.slot_id,
@@ -158,6 +204,13 @@ pub fn verify_local_epoch(
                 obs_count_matches: observations.len() as u32 == artifact.obs_count,
                 retention_record_present: retention_record.is_some(),
                 retention_hash_matches,
+                signature_status: if signature_statuses.is_empty() {
+                    "empty".to_string()
+                } else {
+                    signature_statuses.join("+")
+                },
+                signatures_present,
+                signatures_verified,
             });
         }
     }

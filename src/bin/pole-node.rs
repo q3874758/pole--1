@@ -22,6 +22,7 @@ use pole_protocol_draft::{
     print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
     prune_retention, reward_local_epoch, run_collect_tick_with_client,
     run_collect_tick_with_client_and_network, run_libp2p_skeleton_loop, socket_peers_from_config,
+    build_verification_credentials, is_player_verifier, save_verification_credentials,
     source_kind_label, submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
     BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
@@ -2204,16 +2205,33 @@ fn verify_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("batch_count={}", report.batch_count);
     println!("stored_payload_count={}", report.stored_payload_count);
     println!("all_valid={}", report.all_valid);
-    for batch in report.reports {
+    for batch in &report.reports {
         println!(
-            "slot={} payload_hash_ok={} batch_root_ok={} obs_count_ok={} retention_record={} retention_hash_ok={}",
+            "slot={} payload_hash_ok={} batch_root_ok={} obs_count_ok={} retention_record={} retention_hash_ok={} signature_status={} signatures_present={} signatures_verified={}",
             batch.slot_id,
             batch.payload_hash_matches,
             batch.batch_root_matches,
             batch.obs_count_matches,
             batch.retention_record_present,
-            batch.retention_hash_matches
+            batch.retention_hash_matches,
+            batch.signature_status,
+            batch.signatures_present,
+            batch.signatures_verified
         );
+    }
+
+    // Verification credential: signed by the local identity so a
+    // verifier can attest "I checked this epoch within the window".
+    let is_player = is_player_verifier(&config, epoch_id);
+    println!("verifier_is_player={}", is_player);
+    if let Ok(identity) = config.identity_keypair() {
+        match build_verification_credentials(&config, epoch_id, &identity) {
+            Ok(credentials) => {
+                save_verification_credentials(&config, epoch_id, &credentials)?;
+                println!("verification_credentials_written={}", credentials.len());
+            }
+            Err(err) => println!("verification_credentials_error={err}"),
+        }
     }
     Ok(())
 }

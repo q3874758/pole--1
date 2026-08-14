@@ -131,6 +131,9 @@ pub use node_daemon::{
     AutoSettlementSummary, CollectLoopSummary, CollectTickArtifact, CollectTickResult,
     LocalNodeProgress, NodeDaemonError, NodeHeartbeat, NodeStatusSummary, PruneOutcome,
     RewardAdjustmentArtifact, RewardAdjustmentArtifactIndex, RewardAdjustmentArtifactSummary,
+    VerificationCredential, build_verification_credentials, is_player_verifier,
+    load_verification_credentials, player_activity_blocks_for_epoch,
+    save_verification_credentials, verification_credential_path,
 };
 pub use node_gvs::{
     classify_tier, compute_coverage_bonus_ppm, compute_gvs_factors, compute_gvs_microunits,
@@ -138,7 +141,7 @@ pub use node_gvs::{
 };
 pub use node_pipeline::{
     cid_from_hash, merkle_root, stable_hash32, ActivitySample, AssembledBatch, BatchBuilder,
-    NodePipelineError, SteamCurrentPlayersSample,
+    NodePipelineError, SignatureStatus, SteamCurrentPlayersSample,
 };
 pub use node_prepare::prepare_local_epoch;
 pub use node_rewards::{
