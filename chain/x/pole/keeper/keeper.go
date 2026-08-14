@@ -752,6 +752,25 @@ func (k Keeper) batchCommitsForEpoch(ctx context.Context, epochId uint64) ([]typ
 	return records, nil
 }
 
+// isPlayerCollector reports whether `operatorAddress` submitted at
+// least one batch commit for `epochId`. The chain derives the
+// "player" status for verification from this on-chain record: a
+// node that was live (collecting) in the previous epoch verifies
+// without a stake; a node that was not live is treated as a plain
+// node and must post the verify bond.
+func (k Keeper) isPlayerCollector(ctx context.Context, operatorAddress string, epochId uint64) (bool, error) {
+	batches, err := k.batchCommitsForEpoch(ctx, epochId)
+	if err != nil {
+		return false, err
+	}
+	for _, batch := range batches {
+		if batch.CollectorAddress == operatorAddress {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (k Keeper) availabilityRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.AvailabilityRecord, error) {
 	iter, err := k.Availability.Iterate(ctx, nil)
 	if err != nil {

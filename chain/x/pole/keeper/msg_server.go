@@ -353,18 +353,48 @@ func (m *msgServer) VerifyBatch(ctx context.Context, msg *types.MsgVerifyBatch) 
 	if msg.Verifier == msg.TargetCollector {
 		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "verifier cannot attest its own batch")
 	}
-	if _, err := m.requireNodeCapability(ctx, msg.Verifier, "verify"); err != nil {
+	node, err := m.keeper.GetNode(ctx, msg.Verifier)
+	if err != nil {
 		return nil, err
 	}
+	if !node.Active {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "node is not active")
+	}
+	if node.Capabilities == nil || !node.Capabilities.Verify {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "node missing verify capability")
+	}
+
+	// Dynamic player classification: a verifier is a "player" when it was
+	// live in the previous epoch (submitted batches on-chain). A node
+	// that was not live is a plain node and must post the verify bond;
+	// without a bond it cannot participate in verification.
+	var prevEpoch uint64
+	if msg.EpochId > 0 {
+		prevEpoch = msg.EpochId - 1
+	}
+	isPlayer, err := m.keeper.isPlayerCollector(ctx, msg.Verifier, prevEpoch)
+	if err != nil {
+		return nil, err
+	}
+	if !isPlayer && node.BondedTokens < types.MinVerifyBondedTokens {
+		return nil, errorsmod.Wrapf(
+			sdkerrors.ErrUnauthorized,
+			"non-player verifier %s must post the verify bond (%d upole) to verify",
+			msg.Verifier, types.MinVerifyBondedTokens,
+		)
+	}
+
 	record := types.VerificationRecord{
 		EpochId:            msg.EpochId,
 		VerifierAddress:    msg.Verifier,
 		TargetBatchRootHex: msg.TargetBatchRootHex,
 		TargetCollector:    msg.TargetCollector,
-		IsPlayer:           msg.IsPlayer,
-		Verified:           msg.Verified,
-		VerifiedAtHeight:   sdk.UnwrapSDKContext(ctx).BlockHeight(),
-		SignatureHex:       msg.SignatureHex,
+		// The chain decides is_player from on-chain activity; the
+		// caller-supplied flag is informational only.
+		IsPlayer:         isPlayer,
+		Verified:         msg.Verified,
+		VerifiedAtHeight: sdk.UnwrapSDKContext(ctx).BlockHeight(),
+		SignatureHex:     msg.SignatureHex,
 	}
 	if err := m.keeper.SetVerificationRecord(ctx, record); err != nil {
 		return nil, err

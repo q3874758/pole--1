@@ -378,10 +378,12 @@ func TestVerifyBatchEnforcesRulesAndStoresRecord(t *testing.T) {
 		t.Fatalf("expected non-verify rejection")
 	}
 
-	// Valid attestation is stored.
+	// A bonded non-player may attest: prev epoch had no batch activity,
+	// so the chain classifies it as a plain node, but its bond satisfies
+	// the verify requirement.
 	_, err = handler(ctx, &types.MsgVerifyBatch{
 		Verifier: verifier, EpochId: 1, TargetBatchRootHex: "ab", TargetCollector: collector,
-		IsPlayer: true, Verified: true,
+		IsPlayer: true, Verified: true, // self-reported flag is informational
 	})
 	if err != nil {
 		t.Fatalf("verify batch: %v", err)
@@ -390,8 +392,78 @@ func TestVerifyBatchEnforcesRulesAndStoresRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get verification record: %v", err)
 	}
-	if !record.IsPlayer || !record.Verified {
-		t.Fatalf("unexpected stored record: %+v", record)
+	if record.IsPlayer || !record.Verified {
+		t.Fatalf("chain must classify bonded non-player as IsPlayer=false, got %+v", record)
+	}
+}
+
+// A verifier that was live (submitted batches) in the previous epoch is
+// classified as a player by the chain and may verify without a stake.
+func TestVerifyBatchClassifiesPlayerByPreviousEpochActivity(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(100)
+
+	player := "pole1player55555555555555555555555555555555"
+	collector := "pole1collector222222222222222222222222222222"
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: player,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Verify: true, Collect: true},
+		// No bond: player collectors verify without a stake.
+		BondedTokens: 0,
+	}); err != nil {
+		t.Fatalf("set player node: %v", err)
+	}
+	// The player was live in epoch 0 (submitted a batch there).
+	if err := app.PoleKeeper.SetBatchCommit(ctx, types.BatchCommit{
+		EpochId: 0, CollectorAddress: player, PayloadCid: "cid", ObservationCount: 1,
+	}); err != nil {
+		t.Fatalf("set batch commit: %v", err)
+	}
+
+	handler := app.MsgServiceRouter().Handler(&types.MsgVerifyBatch{})
+	_, err := handler(ctx, &types.MsgVerifyBatch{
+		Verifier: player, EpochId: 1, TargetBatchRootHex: "cd", TargetCollector: collector,
+		Verified: true,
+	})
+	if err != nil {
+		t.Fatalf("player verify batch: %v", err)
+	}
+	record, err := app.PoleKeeper.GetVerificationRecord(ctx, 1, player, "cd")
+	if err != nil {
+		t.Fatalf("get verification record: %v", err)
+	}
+	if !record.IsPlayer {
+		t.Fatalf("chain must classify live collector as IsPlayer=true, got %+v", record)
+	}
+}
+
+// A node that was not live in the previous epoch and holds no verify bond
+// is rejected: no stake, no verification.
+func TestVerifyBatchRejectsUnbondedNonPlayer(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(100)
+
+	idle := "pole1idle66666666666666666666666666666666"
+	collector := "pole1collector222222222222222222222222222222"
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: idle,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Verify: true},
+		BondedTokens:    0, // no bond
+	}); err != nil {
+		t.Fatalf("set idle node: %v", err)
+	}
+
+	handler := app.MsgServiceRouter().Handler(&types.MsgVerifyBatch{})
+	_, err := handler(ctx, &types.MsgVerifyBatch{
+		Verifier: idle, EpochId: 1, TargetBatchRootHex: "ef", TargetCollector: collector,
+	})
+	if err == nil {
+		t.Fatalf("expected unbonded non-player verification rejection")
+	}
+	if !strings.Contains(err.Error(), "must post the verify bond") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
