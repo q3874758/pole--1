@@ -273,7 +273,6 @@ pub(crate) fn encode_uint64(field_number: u32, value: u64, buf: &mut Vec<u8>) {
 }
 
 /// Encode a uint32 as a varint field (wire type0).
-#[allow(dead_code)]
 pub(crate) fn encode_uint32(field_number: u32, value: u32, buf: &mut Vec<u8>) {
     encode_tag(field_number, 0, buf);
     encode_varint(value as u64, buf);
@@ -282,7 +281,6 @@ pub(crate) fn encode_uint32(field_number: u32, value: u32, buf: &mut Vec<u8>) {
 /// Encode an int32 as a varint field (wire type0). For non-negative
 /// values this is identical to uint32 varint encoding; negative values
 /// are2's-complement sign-extended to32 bits.
-#[allow(dead_code)]
 pub(crate) fn encode_int32(field_number: u32, value: i32, buf: &mut Vec<u8>) {
     encode_tag(field_number, 0, buf);
     encode_varint(value as u64, buf);
@@ -291,23 +289,14 @@ pub(crate) fn encode_int32(field_number: u32, value: i32, buf: &mut Vec<u8>) {
 /// Encode an int64 as a varint field (wire type0). For non-negative
 /// values this is identical to uint64 varint encoding; negative values
 /// are2's-complement sign-extended to64 bits (always10 bytes).
-#[allow(dead_code)]
 pub(crate) fn encode_int64(field_number: u32, value: i64, buf: &mut Vec<u8>) {
     encode_tag(field_number, 0, buf);
     encode_varint(value as u64, buf);
 }
 
 /// Encode a bool as a varint (wire type0).
-#[allow(dead_code)]
 pub(crate) fn encode_bool(field_number: u32, value: bool, buf: &mut Vec<u8>) {
     encode_uint64(field_number, value as u64, buf);
-}
-
-/// Encode a nested message (any prost Message that implements
-/// `Message::encode_to_vec`) as a length-delimited field.
-#[allow(dead_code)]
-pub(crate) fn encode_message<M: prost::Message>(field_number: u32, msg: &M, buf: &mut Vec<u8>) {
-    encode_bytes(field_number, &msg.encode_to_vec(), buf);
 }
 
 /// Encode a lowercase hex string from a byte slice (32-byte hashes
@@ -636,8 +625,7 @@ mod tests {
     use super::*;
     use crate::primitives::ChallengeState;
     use crate::records::ChallengeEvidenceRef;
-    use crate::Address;
-
+    
     fn sample_challenge(
         kind: ChallengeKind,
         state: ChallengeState,
@@ -1051,12 +1039,6 @@ mod tests {
             len_marker_count
         );
     }
-
-    /// Squelch `unused` warnings when callers don't use every helper
-    /// (the `Address` import is here so the test above compiles
-    /// against the `Challenge::challenger` field).
-    #[allow(dead_code)]
-    fn _address_marker(_a: Address) {}
 
     // ===============================================================
     // Tests for the 8 newly-wired Msg encoders
