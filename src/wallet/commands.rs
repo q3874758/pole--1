@@ -1,4 +1,4 @@
-use crate::wallet::error::Result;
+﻿use crate::wallet::error::Result;
 use crate::wallet::keys::{hex_decode, KeyPair};
 use crate::wallet::keystore::EncryptedKeystore;
 use crate::wallet::mnemonic::{generate_mnemonic, Mnemonic};
@@ -67,15 +67,9 @@ pub fn sign_transaction(data_dir: &Path, password: &str, tx_hex: &str) -> Result
     let ks = EncryptedKeystore::decrypt(password, &path)?;
     let tx_bytes = hex_decode(tx_hex)?;
     let signature = ks.keypair.sign(&tx_bytes);
-    Ok(hex_encode(&signature))
+    Ok(hex::encode(&signature))
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
-}
 
 pub fn set_reward_address(
     data_dir: &Path,

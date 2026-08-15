@@ -1,4 +1,4 @@
-use crate::wallet::error::{Result, WalletError};
+﻿use crate::wallet::error::{Result, WalletError};
 use crate::wallet::keys::KeyPair;
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -64,11 +64,11 @@ impl EncryptedKeystore {
 
     pub fn encrypt(&self, password: &str, path: &Path) -> Result<()> {
         let mut salt = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         let key = Self::derive_key(password, &salt)?;
 
         let mut nonce_arr = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_arr);
+        rand::rng().fill_bytes(&mut nonce_arr);
         let nonce_bytes = aes_gcm::Nonce::from_slice(&nonce_arr);
         let cipher = Aes256Gcm::new_from_slice(&key)
             .map_err(|e| WalletError::EncryptionFailed(e.to_string()))?;
@@ -84,9 +84,9 @@ impl EncryptedKeystore {
             crypto: CryptoJson {
                 cipher: "aes-256-gcm".to_string(),
                 kdf: "scrypt".to_string(),
-                salt: hex_encode(salt.as_slice()),
-                nonce: hex_encode(&nonce_arr),
-                ciphertext: hex_encode(&ciphertext),
+                salt: hex::encode(salt.as_slice()),
+                nonce: hex::encode(&nonce_arr),
+                ciphertext: hex::encode(&ciphertext),
             },
             metadata: MetadataJson {
                 created_at: self.created_at,
@@ -104,9 +104,9 @@ impl EncryptedKeystore {
         let store: KeystoreJson = serde_json::from_str(&content)
             .map_err(|e| WalletError::InvalidKeystore(e.to_string()))?;
 
-        let salt = hex_decode(&store.crypto.salt)?;
-        let nonce_bytes = hex_decode(&store.crypto.nonce)?;
-        let ciphertext = hex_decode(&store.crypto.ciphertext)?;
+        let salt = hex::decode(&store.crypto.salt)?;
+        let nonce_bytes = hex::decode(&store.crypto.nonce)?;
+        let ciphertext = hex::decode(&store.crypto.ciphertext)?;
 
         let key = Self::derive_key(password, &salt)?;
 
@@ -120,7 +120,7 @@ impl EncryptedKeystore {
         let secret_hex = String::from_utf8(plaintext)
             .map_err(|_| WalletError::InvalidKeystore("invalid secret hex".to_string()))?;
 
-        let secret_bytes = hex_decode(&secret_hex)?
+        let secret_bytes = hex::decode(&secret_hex)?
             .try_into()
             .map_err(|_| WalletError::InvalidKeystore("secret must be 32 bytes".to_string()))?;
 
@@ -134,26 +134,6 @@ impl EncryptedKeystore {
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
-}
-
-fn hex_decode(hex: &str) -> Result<Vec<u8>> {
-    let hex = hex.trim();
-    if hex.len() % 2 != 0 {
-        return Err(WalletError::InvalidHex("odd length".to_string()));
-    }
-    let mut out = Vec::with_capacity(hex.len() / 2);
-    for i in (0..hex.len()).step_by(2) {
-        let byte = u8::from_str_radix(&hex[i..i + 2], 16)
-            .map_err(|_| WalletError::InvalidHex(hex.to_string()))?;
-        out.push(byte);
-    }
-    Ok(out)
-}
 
 #[cfg(test)]
 mod tests {

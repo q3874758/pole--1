@@ -71,7 +71,7 @@ impl Mnemonic {
 
 pub fn generate_mnemonic() -> Mnemonic {
     let mut entropy_bytes = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut entropy_bytes);
+    rand::RngCore::fill_bytes(&mut rand::rng(), &mut entropy_bytes);
     let hash = crate::stable_hash32(&entropy_bytes);
     let checksum = hash[0];
     let mut entropy_bits = Vec::with_capacity(264);

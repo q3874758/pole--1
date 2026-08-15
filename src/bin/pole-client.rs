@@ -3697,7 +3697,7 @@ fn should_capture_foreground_process(process_name: &str) -> bool {
 
 fn generate_identity_keypair() -> KeyPair {
     let mut seed = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut seed);
+    rand::rng().fill_bytes(&mut seed);
     KeyPair::from_seed(&seed)
 }
 

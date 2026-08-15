@@ -30,4 +30,10 @@ pub enum WalletError {
     Crypto(String),
 }
 
+impl From<hex::FromHexError> for WalletError {
+    fn from(err: hex::FromHexError) -> Self {
+        WalletError::InvalidHex(err.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, WalletError>;

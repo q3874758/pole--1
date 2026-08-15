@@ -1,4 +1,4 @@
-use std::fmt;
+﻿use std::fmt;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -53,8 +53,8 @@ impl fmt::Display for NodePipelineError {
                 write!(
                     f,
                     "mismatched collector: expected {}, got {}",
-                    hex_lower(expected),
-                    hex_lower(actual)
+                    hex::encode(expected),
+                    hex::encode(actual)
                 )
             }
         }
@@ -154,7 +154,7 @@ pub enum SignatureStatus {
     /// No signature attached.
     Empty,
     /// The legacy 32-byte development placeholder hash (not a real
-    /// Ed25519 signature) — recognised so verifiers can report it.
+    /// Ed25519 signature) 鈥?recognised so verifiers can report it.
     DevPlaceholder,
     /// A real Ed25519 signature that verified against the collector key.
     Valid,
@@ -344,7 +344,7 @@ pub fn merkle_root(leaves: &[Hash32]) -> Hash32 {
 ///
 /// `chain/x/pole/types/merkle.go::MerkleLeafFromRecord` does
 ///   leaf = sha256(0x00 || json.Marshal(record))
-/// — domain separator `0x00` distinguishes leaves from parents at
+/// 鈥?domain separator `0x00` distinguishes leaves from parents at
 /// the wire-format boundary.
 ///
 /// The Rust off-chain records use `borsh::to_vec(record)` for the
@@ -458,19 +458,9 @@ pub fn aggregate_record_to_chain_json(
 }
 
 pub fn cid_from_hash(hash: Hash32, namespace: &str) -> ContentId {
-    format!("cid://{namespace}/{}", hex_lower(&hash))
+    format!("cid://{namespace}/{}", hex::encode(&hash))
 }
 
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -500,7 +490,7 @@ mod tests {
     use super::*;
 
     fn hex_of(bytes: &[u8]) -> String {
-        hex_lower(bytes)
+        hex::encode(bytes)
     }
 
     fn parse_hex_32(s: &str) -> Hash32 {
@@ -562,8 +552,8 @@ mod tests {
 
     #[test]
     fn root_three_leaves_odd_duplicates_last() {
-        // Three leaves: parent pair (a,b) → p_ab; odd leaf c duplicates with
-        // itself → p_cc; root = parent(p_ab, p_cc).
+        // Three leaves: parent pair (a,b) 鈫?p_ab; odd leaf c duplicates with
+        // itself 鈫?p_cc; root = parent(p_ab, p_cc).
         // Expected: e9636069c740c9ff51625b01a0b040396d265a9b920cc6febdfa5ecc9f58ecce
         let leaves = [
             merkle_leaf_sha256(b"a"),

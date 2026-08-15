@@ -66,24 +66,11 @@ pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8])
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
+    hex::encode(bytes)
 }
 
 pub fn hex_decode(hex: &str) -> Result<Vec<u8>> {
-    let hex = hex.trim();
-    if hex.len() % 2 != 0 {
-        return Err(WalletError::InvalidHex("odd length".to_string()));
-    }
-    let mut out = Vec::with_capacity(hex.len() / 2);
-    for i in (0..hex.len()).step_by(2) {
-        let byte = u8::from_str_radix(&hex[i..i + 2], 16)
-            .map_err(|_| WalletError::InvalidHex(hex.to_string()))?;
-        out.push(byte);
-    }
-    Ok(out)
+    hex::decode(hex.trim()).map_err(|e| WalletError::InvalidHex(e.to_string()))
 }
 
 /// Derives a child key from a parent key pair.
