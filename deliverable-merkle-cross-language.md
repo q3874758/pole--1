@@ -156,6 +156,12 @@ PS> cargo clippy --lib --tests
 
 ### 1. Rust 端 leaf 编码仍用 borsh，chain 端用 json.Marshal
 
+> **更新（checklist 1.1，本轮）**：以下"by design 隔离"在 `FinalizeEpoch` 交叉点被打破——链端 `ValidateEpochRoots` 会用 json 叶重算 rewards/aggregates root 并与 Rust 提交的 borsh 叶 root 比对，Rust 构造的 CommitEpoch 必然 Finalize 失败。本轮已修复：
+> - Rust `reward_record_root`/`aggregate_record_root` 改用**链式 json 叶**（`node_pipeline.rs::reward_record_to_chain_json`/`aggregate_record_to_chain_json`，与 Go `json.Marshal` 字节一致），并按链端 store key 序排序；
+> - 链端奖励 root 检查条件化（链上无奖励记录时接受 proposer 承诺，aggregates 仍强制）；
+> - `UpsertAggregateRecord` 后刷新 aggregates 承诺。
+> 跨语言 golden 双侧锁定（Go `merkle_cross_language_test.go` ↔ Rust fixture 测试，同一 root hex）。
+
 这是**设计选择**，不是 bug：
 
 - **Rust off-chain**：`borsh::to_vec(record)` —— 紧凑、定长、可推导 schema，适合 P2P 传输和持久化

@@ -2,6 +2,12 @@
 /target/
 **/target/
 
+# Local Go toolchain caches (sandbox workaround: GOCACHE/GOPATH/GOENV
+# pointed into the workspace so `go` can build inside the DSH ACL sandbox)
+/.gocache/
+/.gopath/
+/.goenv
+
 # Runtime data
 /pole-node-data/
 **/pole-node-data/

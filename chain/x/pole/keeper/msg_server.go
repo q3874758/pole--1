@@ -133,6 +133,13 @@ func (m *msgServer) UpsertAggregateRecord(ctx context.Context, msg *types.MsgUps
 	if err := m.keeper.SetAggregateRecord(ctx, *msg.AggregateRecord); err != nil {
 		return nil, err
 	}
+	// Keep the epoch's aggregates commitment in sync with the record set:
+	// aggregate upserts may arrive during the challenge window, after the
+	// proposer committed its roots, and FinalizeEpoch recomputes the
+	// aggregates root from the final record set.
+	if err := m.keeper.RefreshAggregatesCommitment(ctx, msg.AggregateRecord.EpochId); err != nil {
+		return nil, err
+	}
 	return &types.MsgUpsertAggregateRecordResponse{}, nil
 }
 

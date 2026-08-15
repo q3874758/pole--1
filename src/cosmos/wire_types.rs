@@ -174,7 +174,7 @@ pub struct GameWeightEntryWire {
 
 // --- Params --------------------------------------------------------------
 
-/// `pole.chain.pole.v1.Params` — 21 primitive fields, flattened
+/// `pole.chain.pole.v1.Params` — 23 primitive fields, flattened
 /// (the off-chain `params::ProtocolParams` packs these into nested
 /// `FeeParams` / `RewardParams` / `GovernanceParams` /
 /// `SlashingParams` structs; the wire form is flat to match proto).
@@ -201,11 +201,20 @@ pub struct ParamsWire {
     pub reward_burn_threshold: u64,
     pub reward_burn_bps: u32,
     pub governance_burn_bps: u32,
+    /// Minimum number of independent verification credentials required
+    /// before an epoch can be finalized (proto field 22). Omitting this
+    /// on the wire zeroes the chain-side finalize verification gate.
+    #[serde(default)]
+    pub min_verification_count: u64,
+    /// Minimum share (bps, 10000 = 100%) of verification credentials
+    /// that must come from player verifiers (proto field 23).
+    #[serde(default)]
+    pub min_player_verifier_share_bps: u32,
 }
 
 impl Default for ParamsWire {
     /// Empty / all-zero defaults. Callers should overwrite before
-    /// sending; the encoder will emit all 21 fields either way.
+    /// sending; the encoder will emit all 23 fields either way.
     fn default() -> Self {
         Self {
             reward_block_duration_seconds: 0,
@@ -229,6 +238,8 @@ impl Default for ParamsWire {
             reward_burn_threshold: 0,
             reward_burn_bps: 0,
             governance_burn_bps: 0,
+            min_verification_count: 0,
+            min_player_verifier_share_bps: 0,
         }
     }
 }

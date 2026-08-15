@@ -704,14 +704,32 @@ pub fn record_player_reward_tick(
 }
 
 pub fn reward_record_root(records: &[RewardRecord]) -> Result<Hash32, NodeRewardError> {
-    let leaf_hashes = records
+    // The chain recomputes the rewards root from its own store in key
+    // order (epoch_id, then recipient bech32 ascending) and hashes
+    // Go-json leaves. Reproduce that ordering and encoding so an
+    // off-chain root is byte-identical to the chain's
+    // `MerkleRootHexForRecords` recomputation for the same records.
+    let mut with_recipient = records
         .iter()
         .map(|record| {
-            borsh::to_vec(record)
-                .map(|encoded| crate::node_pipeline::merkle_leaf_sha256(&encoded))
-                .map_err(|err: std::io::Error| NodeRewardError::Borsh(err.to_string()))
+            let recipient = crate::cosmos::address::node_id_to_bech32(
+                crate::cosmos::address::DEFAULT_BECH32_PREFIX,
+                &record.node_id,
+            )
+            .map_err(|err| NodeRewardError::Io(std::io::Error::other(err)))?;
+            Ok((record.epoch_id, recipient, record))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, NodeRewardError>>()?;
+    with_recipient.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+
+    let leaf_hashes = with_recipient
+        .iter()
+        .map(|(_, recipient, record)| {
+            let json = crate::node_pipeline::reward_record_to_chain_json(record, recipient)
+                .map_err(NodeRewardError::Json)?;
+            Ok(crate::node_pipeline::merkle_leaf_sha256(&json))
+        })
+        .collect::<Result<Vec<_>, NodeRewardError>>()?;
     Ok(crate::merkle_root(&leaf_hashes))
 }
 
@@ -1160,6 +1178,80 @@ mod tests {
         let mut w = BTreeMap::new();
         w.insert(node_id(1), 10u128);
         assert!(allocate_proportional(&w, 0).is_empty());
+    }
+
+    // Cross-language golden: reward_record_root over node_ids
+    // 0x31/0x32/0x33 (recipients cosmos1xy.../cosmos1xg.../cosmos1xv...)
+    // must equal the chain's MerkleRootHexForRecords recomputation over
+    // the same records in key order — computed independently in Go
+    // (chain/x/pole/types/merkle_cross_language_test.go) and locked here
+    // byte-for-byte. Input order is scrambled on purpose: the function
+    // must sort by (epoch_id, recipient) itself.
+    #[test]
+    fn reward_record_root_matches_chain_go_fixture() {
+        let records = vec![
+            RewardRecord {
+                epoch_id: 9,
+                node_id: node_id(0x33),
+                player_reward: 0,
+                collect_reward: 0,
+                store_reward: 0,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 77,
+            },
+            RewardRecord {
+                epoch_id: 9,
+                node_id: node_id(0x31),
+                player_reward: 50,
+                collect_reward: 0,
+                store_reward: 0,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 50,
+            },
+            RewardRecord {
+                epoch_id: 9,
+                node_id: node_id(0x32),
+                player_reward: 0,
+                collect_reward: 10,
+                store_reward: 20,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 30,
+            },
+        ];
+        let root = reward_record_root(&records).unwrap();
+        assert_eq!(
+            crate::hex_32(root),
+            "7b5705b4575beb29632679dc1ec335d98dadd52fd2c3ca33f0e084dda57cc33f"
+        );
+        // Same records as json leaves must reproduce the same root via
+        // the public chain-json helper (recipients derived from node_ids).
+        let mut with_recipient = records
+            .iter()
+            .map(|record| {
+                let recipient = crate::cosmos::address::node_id_to_bech32(
+                    crate::cosmos::address::DEFAULT_BECH32_PREFIX,
+                    &record.node_id,
+                )
+                .unwrap();
+                (recipient, record)
+            })
+            .collect::<Vec<_>>();
+        with_recipient.sort_by(|a, b| a.0.cmp(&b.0));
+        let leaves = with_recipient
+            .iter()
+            .map(|(recipient, record)| {
+                let json = crate::node_pipeline::reward_record_to_chain_json(record, recipient)
+                    .unwrap();
+                crate::node_pipeline::merkle_leaf_sha256(&json)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(crate::hex_32(crate::merkle_root(&leaves)), crate::hex_32(root));
     }
 
     #[test]

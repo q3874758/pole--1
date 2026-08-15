@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::node_config::NodeConfig;
 use crate::node_daemon::NodeDaemonError;
 use crate::node_gvs::compute_gvs_factors;
-use crate::node_pipeline::{merkle_leaf_sha256, merkle_root};
+use crate::node_pipeline::{aggregate_record_to_chain_json, merkle_leaf_sha256, merkle_root};
 use crate::primitives::{ActivitySourceKind, AppId, EpochId, Hash32, NodeId, SlotId};
 use crate::records::{AggregateRecord, BatchCommit, ObservationRecord};
 
@@ -233,17 +233,21 @@ pub fn compute_local_epoch_aggregation(
 }
 
 pub fn aggregate_record_root(records: &[AggregateRecord]) -> Result<Hash32, NodeAggregationError> {
-    let leaf_hashes = records
+    // The chain recomputes the aggregates root from its own store in key
+    // order (epoch_id, then app_id ascending). Reproduce that order and
+    // use chain-json leaves so an off-chain root is byte-identical to
+    // the chain's `MerkleRootHexForRecords` recomputation.
+    let mut sorted = records.iter().collect::<Vec<_>>();
+    sorted.sort_by_key(|record| (record.epoch_id, record.app_id));
+    let leaf_hashes = sorted
         .iter()
-        .map(hash_aggregate_record)
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|record| {
+            let json = aggregate_record_to_chain_json(record)
+                .map_err(NodeAggregationError::Json)?;
+            Ok(merkle_leaf_sha256(&json))
+        })
+        .collect::<Result<Vec<_>, NodeAggregationError>>()?;
     Ok(merkle_root(&leaf_hashes))
-}
-
-fn hash_aggregate_record(record: &AggregateRecord) -> Result<Hash32, NodeAggregationError> {
-    let encoded =
-        borsh::to_vec(record).map_err(|err| NodeAggregationError::Borsh(err.to_string()))?;
-    Ok(merkle_leaf_sha256(&encoded))
 }
 
 fn hash_batch_commit(batch_commit: &BatchCommit) -> Result<Hash32, NodeAggregationError> {
@@ -348,5 +352,48 @@ fn median_players(inputs: &[AggregateInput]) -> u64 {
         players[middle]
     } else {
         players[middle - 1].saturating_add(players[middle]) / 2
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn aggregate(app_id: u32, gvs_microunits: u64, median_players: u64) -> AggregateRecord {
+        AggregateRecord {
+            epoch_id: 9,
+            slot_id: 0,
+            app_id,
+            gvs_tier: crate::node_gvs::GvsTier::Tier1,
+            primary_source_kind: ActivitySourceKind::Steam,
+            source_confidence_ppm: 1_000_000,
+            accepted_observations: 1,
+            median_players,
+            base_glv_microunits: 0,
+            tier_weight_ppm: 0,
+            time_decay_ppm: 0,
+            coverage_bonus_ppm: 0,
+            gvs_microunits,
+            source_batch_root: [0u8; 32],
+        }
+    }
+
+    #[test]
+    fn aggregate_record_root_matches_chain_go_fixture() {
+        // Cross-language golden: over app_ids 7/42/730 the root must
+        // equal Go's MerkleRootHexForRecords recomputation (key order =
+        // app_id ascending), computed independently in
+        // chain/x/pole/types/merkle_cross_language_test.go. Input order
+        // is scrambled to prove the function sorts internally.
+        let records = vec![
+            aggregate(730, 88, 2),
+            aggregate(7, 5, 0),
+            aggregate(42, 100, 1),
+        ];
+        let root = aggregate_record_root(&records).unwrap();
+        assert_eq!(
+            crate::hex_32(root),
+            "29ec12416d68c6ae3c5e0d86f57e6501a2571086788252bbb07644eb05dcc7a8"
+        );
     }
 }

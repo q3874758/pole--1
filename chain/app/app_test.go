@@ -334,6 +334,159 @@ func TestFinalizeEpochValidatesRoots(t *testing.T) {
 	}
 }
 
+// TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords
+// covers the live cross-language flow: an off-chain Rust proposer
+// commits a rewards root over ITS computed reward set, but reward
+// records are never submitted on-chain (they enter the store only via
+// genesis or challenge resolutions), so the chain holds none for the
+// epoch. FinalizeEpoch must accept the proposer's committed rewards
+// root in that case while still enforcing the aggregates root and
+// total-weight checks.
+func TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(25)
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{7}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+	aggregate := types.AggregateRecord{EpochId: 20, AppId: 730, TotalWeightUnits: 88, PlayerCount: 2}
+	if err := app.PoleKeeper.SetAggregateRecord(ctx, aggregate); err != nil {
+		t.Fatalf("set aggregate record: %v", err)
+	}
+	// Proposer-side rewards root over a reward set that never lands on-chain.
+	offchainReward := types.RewardRecord{EpochId: 20, Recipient: recipient, PlayerReward: 50, NetReward: 50}
+	aggregateRoot := testCommitmentRoot(t, []types.AggregateRecord{aggregate})
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId:                 20,
+		ProposerAddress:         recipient,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 10,
+		Rewards:                 &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.RewardRecord{offchainReward}), LeafCount: 1},
+		Aggregates:              &types.MerkleCommitment{Root: aggregateRoot, LeafCount: 1},
+		TotalNetworkWeightUnits: 88,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+
+	finalize := app.MsgServiceRouter().Handler(&types.MsgFinalizeEpoch{})
+	if finalize == nil {
+		t.Fatalf("expected finalize epoch handler")
+	}
+	seedVerificationCoverage(t, app, ctx, 20)
+	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 20})
+	if err != nil {
+		t.Fatalf("finalize epoch with proposer-only rewards root: %v", err)
+	}
+
+	// The aggregates root and total-weight checks must still be strict:
+	// a wrong aggregates root fails even with no reward records.
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId:                 22,
+		ProposerAddress:         recipient,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 10,
+		Rewards:                 &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.RewardRecord{offchainReward}), LeafCount: 1},
+		Aggregates:              &types.MerkleCommitment{Root: "bad-root", LeafCount: 1},
+		TotalNetworkWeightUnits: 88,
+	}); err != nil {
+		t.Fatalf("set invalid epoch commit: %v", err)
+	}
+	if err := app.PoleKeeper.SetAggregateRecord(ctx, types.AggregateRecord{EpochId: 22, AppId: 730, TotalWeightUnits: 88, PlayerCount: 2}); err != nil {
+		t.Fatalf("set aggregate record for invalid finalize: %v", err)
+	}
+	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 22})
+	if err == nil {
+		t.Fatalf("expected finalize epoch to fail on invalid aggregate root")
+	}
+}
+
+// TestUpsertAggregateRefreshesEpochCommitment covers the challenge-window
+// flow: a proposer commits aggregates root R over the record set known at
+// commit time; a verifier then upserts an additional aggregate record. The
+// stored epoch commit must track the on-chain record set (aggregates root
+// + total weight refreshed, rewards root untouched) so FinalizeEpoch
+// succeeds against the final record set.
+func TestUpsertAggregateRefreshesEpochCommitment(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(25)
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{8}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+	operatorAddr := sdk.AccAddress(bytes.Repeat([]byte{9}, 20))
+	operator, err := app.AccountKeeper.AddressCodec().BytesToString(operatorAddr)
+	if err != nil {
+		t.Fatalf("operator bech32: %v", err)
+	}
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: operator,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Verify: true},
+		BondedTokens:    types.MinVerifyBondedTokens,
+	}); err != nil {
+		t.Fatalf("set verifier node: %v", err)
+	}
+
+	aggA := types.AggregateRecord{EpochId: 21, AppId: 730, TotalWeightUnits: 88, PlayerCount: 2}
+	if err := app.PoleKeeper.SetAggregateRecord(ctx, aggA); err != nil {
+		t.Fatalf("set aggregate record A: %v", err)
+	}
+	rewardRoot := testCommitmentRoot(t, []types.RewardRecord{{EpochId: 21, Recipient: recipient, NetReward: 77}})
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId:                 21,
+		ProposerAddress:         recipient,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 10,
+		Rewards:                 &types.MerkleCommitment{Root: rewardRoot, LeafCount: 1},
+		Aggregates:              &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.AggregateRecord{aggA}), LeafCount: 1},
+		TotalNetworkWeightUnits: 88,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+
+	// Verifier upserts a second aggregate during the challenge window.
+	aggB := types.AggregateRecord{EpochId: 21, AppId: 42, TotalWeightUnits: 100, PlayerCount: 1}
+	upsert := app.MsgServiceRouter().Handler(&types.MsgUpsertAggregateRecord{})
+	if upsert == nil {
+		t.Fatalf("expected upsert aggregate handler")
+	}
+	_, err = upsert(ctx, &types.MsgUpsertAggregateRecord{Operator: operator, AggregateRecord: &aggB})
+	if err != nil {
+		t.Fatalf("upsert aggregate record B: %v", err)
+	}
+
+	commit, err := app.PoleKeeper.GetEpochCommit(ctx, 21)
+	if err != nil {
+		t.Fatalf("epoch commit after upsert: %v", err)
+	}
+	// Aggregates commitment refreshed to the union in key order (app 42, 730).
+	wantAggRoot := testCommitmentRoot(t, []types.AggregateRecord{aggB, aggA})
+	if commit.Aggregates == nil || commit.Aggregates.Root != wantAggRoot || commit.Aggregates.LeafCount != 2 {
+		t.Fatalf("expected refreshed aggregates commitment %s (2 leaves), got %+v", wantAggRoot, commit.Aggregates)
+	}
+	if commit.TotalNetworkWeightUnits != 188 {
+		t.Fatalf("expected refreshed total weight 188, got %d", commit.TotalNetworkWeightUnits)
+	}
+	// Rewards commitment must be untouched (proposer-side).
+	if commit.Rewards == nil || commit.Rewards.Root != rewardRoot {
+		t.Fatalf("expected rewards commitment to stay untouched, got %+v", commit.Rewards)
+	}
+
+	finalize := app.MsgServiceRouter().Handler(&types.MsgFinalizeEpoch{})
+	if finalize == nil {
+		t.Fatalf("expected finalize epoch handler")
+	}
+	seedVerificationCoverage(t, app, ctx, 21)
+	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 21})
+	if err != nil {
+		t.Fatalf("finalize epoch after window upsert: %v", err)
+	}
+}
+
 func TestVerifyBatchEnforcesRulesAndStoresRecord(t *testing.T) {
 	app := initTestApp(t)
 	ctx := initTestContext(app).WithBlockHeight(100)

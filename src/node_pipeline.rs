@@ -1,12 +1,13 @@
 use std::fmt;
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::primitives::{
     ActivitySourceKind, AppId, ContentId, EpochId, Hash32, Height, NodeId, SignatureBytes, SlotId,
     UnixMillis,
 };
-use crate::records::{BatchCommit, ObservationRecord};
+use crate::records::{AggregateRecord, BatchCommit, ObservationRecord, RewardRecord};
 use crate::MerkleCommitment;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,6 +358,105 @@ pub fn merkle_leaf_sha256(record_bytes: &[u8]) -> Hash32 {
     hasher.finalize().into()
 }
 
+// --- Chain-side record JSON (byte-identical to Go json.Marshal) ----------
+//
+// The chain recomputes Merkle roots over the records **it stores** using
+// `json.Marshal(record)` (chain/x/pole/types/merkle.go). For an
+// off-chain Rust root to match the chain's recomputation, the leaf bytes
+// must equal Go's `json.Marshal` of the corresponding chain proto struct:
+//   - field names/order follow the proto `json:"..."` tags
+//     (snake_case, declaration order);
+//   - `omitempty` drops zero-valued fields;
+//   - values are uint64/uint32 decimals and ASCII-safe strings (bech32
+//     addresses / hex), so serde_json's escaping matches Go's (no `<`,
+//     `>`, `&`, U+2028/2029 appear in these domains).
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u128(v: &u128) -> bool {
+    *v == 0
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_empty_str(v: &str) -> bool {
+    v.is_empty()
+}
+
+#[derive(Serialize)]
+struct ChainRewardRecordJson<'a> {
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    epoch_id: u64,
+    #[serde(skip_serializing_if = "is_empty_str")]
+    recipient: &'a str,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    player_reward: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    collect_reward: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    store_reward: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    verify_reward: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    propose_reward: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    slash_debit: u128,
+    #[serde(skip_serializing_if = "is_zero_u128")]
+    net_reward: u128,
+}
+
+#[derive(Serialize)]
+struct ChainAggregateRecordJson {
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    epoch_id: u64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    app_id: u32,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    total_weight_units: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    player_count: u64,
+}
+
+/// Serialize a reward record the way the chain's
+/// `json.Marshal(types.RewardRecord{...})` does. `recipient` must be the
+/// on-chain bech32 recipient (the chain cannot see the Rust `node_id`);
+/// callers derive it with `cosmos::address::node_id_to_bech32`.
+pub fn reward_record_to_chain_json(
+    record: &RewardRecord,
+    recipient: &str,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&ChainRewardRecordJson {
+        epoch_id: record.epoch_id,
+        recipient,
+        player_reward: record.player_reward,
+        collect_reward: record.collect_reward,
+        store_reward: record.store_reward,
+        verify_reward: record.verify_reward,
+        propose_reward: record.propose_reward,
+        slash_debit: record.slash_debit,
+        net_reward: record.net_reward,
+    })
+}
+
+/// Serialize an aggregate record the way the chain's
+/// `json.Marshal(types.AggregateRecord{...})` does. Maps the Rust
+/// aggregate fields onto the chain's 4-field record:
+/// `total_weight_units = gvs_microunits`, `player_count = median_players`.
+pub fn aggregate_record_to_chain_json(
+    record: &AggregateRecord,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&ChainAggregateRecordJson {
+        epoch_id: record.epoch_id,
+        app_id: record.app_id,
+        total_weight_units: record.gvs_microunits,
+        player_count: record.median_players,
+    })
+}
+
 pub fn cid_from_hash(hash: Hash32, namespace: &str) -> ContentId {
     format!("cid://{namespace}/{}", hex_lower(&hash))
 }
@@ -690,6 +790,94 @@ mod tests {
         assert_eq!(
             tampered.verify_collector_signature(Some(&keypair.public)),
             SignatureStatus::Invalid
+        );
+    }
+
+    #[test]
+    fn reward_record_chain_json_matches_go_json_marshal() {
+        // Byte-identical to Go's json.Marshal(types.RewardRecord{...}):
+        // field order follows the proto declaration, omitempty drops
+        // zero fields, values are decimals. Verified against Go output
+        // in chain/tmp_golden and locked in
+        // chain/x/pole/types/merkle_cross_language_test.go.
+        let record = RewardRecord {
+            epoch_id: 9,
+            node_id: [0u8; 32],
+            player_reward: 50,
+            collect_reward: 0,
+            store_reward: 0,
+            verify_reward: 0,
+            propose_reward: 0,
+            slash_debit: 0,
+            net_reward: 50,
+        };
+        let json = reward_record_to_chain_json(
+            &record,
+            "cosmos1xyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq65su5v",
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(json).unwrap(),
+            "{\"epoch_id\":9,\"recipient\":\"cosmos1xyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq65su5v\",\"player_reward\":50,\"net_reward\":50}"
+        );
+
+        // Omitempty: all-zero amounts collapse to just epoch_id.
+        let empty = RewardRecord {
+            epoch_id: 9,
+            node_id: [0u8; 32],
+            player_reward: 0,
+            collect_reward: 0,
+            store_reward: 0,
+            verify_reward: 0,
+            propose_reward: 0,
+            slash_debit: 0,
+            net_reward: 0,
+        };
+        let json = reward_record_to_chain_json(&empty, "cosmos1abc").unwrap();
+        assert_eq!(
+            String::from_utf8(json).unwrap(),
+            "{\"epoch_id\":9,\"recipient\":\"cosmos1abc\"}"
+        );
+    }
+
+    #[test]
+    fn aggregate_record_chain_json_matches_go_json_marshal() {
+        // Byte-identical to Go's json.Marshal(types.AggregateRecord{...})
+        // with total_weight_units = gvs_microunits, player_count =
+        // median_players. Verified against Go output and locked in
+        // chain/x/pole/types/merkle_cross_language_test.go.
+        let record = AggregateRecord {
+            epoch_id: 9,
+            slot_id: 0,
+            app_id: 730,
+            gvs_tier: crate::node_gvs::GvsTier::Tier1,
+            primary_source_kind: crate::primitives::ActivitySourceKind::Steam,
+            source_confidence_ppm: 0,
+            accepted_observations: 0,
+            median_players: 2,
+            base_glv_microunits: 0,
+            tier_weight_ppm: 0,
+            time_decay_ppm: 0,
+            coverage_bonus_ppm: 0,
+            gvs_microunits: 88,
+            source_batch_root: [0u8; 32],
+        };
+        let json = aggregate_record_to_chain_json(&record).unwrap();
+        assert_eq!(
+            String::from_utf8(json).unwrap(),
+            "{\"epoch_id\":9,\"app_id\":730,\"total_weight_units\":88,\"player_count\":2}"
+        );
+
+        // player_count = 0 is omitted (Go omitempty).
+        let zero_players = AggregateRecord {
+            median_players: 0,
+            gvs_microunits: 5,
+            ..record
+        };
+        let json = aggregate_record_to_chain_json(&zero_players).unwrap();
+        assert_eq!(
+            String::from_utf8(json).unwrap(),
+            "{\"epoch_id\":9,\"app_id\":730,\"total_weight_units\":5}"
         );
     }
 }

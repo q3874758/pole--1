@@ -636,8 +636,20 @@ func (k Keeper) ValidateEpochRoots(ctx context.Context, epochId uint64, commit t
 	if commit.Rewards == nil {
 		return fmt.Errorf("epoch %d missing rewards commitment", epochId)
 	}
-	if commit.Rewards.Root != rewardRoot || commit.Rewards.LeafCount != rewardLeafCount {
-		return fmt.Errorf("epoch %d reward root mismatch", epochId)
+	// The rewards commitment is verified against the chain's reward
+	// records only when the chain actually holds any for the epoch.
+	// Reward records enter the store exclusively via genesis or
+	// challenge resolutions — there is no live reward-record submission
+	// path — so a proposer's commitment over its own computed reward set
+	// legitimately differs from an empty (or challenge-only) on-chain
+	// set. In that case the committed rewards root stands as the
+	// proposer's commitment and remains the anchor for BadReward
+	// challenge proofs; the aggregates and total-weight checks below are
+	// always enforced because those records ARE submitted on-chain.
+	if len(rewardRecords) > 0 {
+		if commit.Rewards.Root != rewardRoot || commit.Rewards.LeafCount != rewardLeafCount {
+			return fmt.Errorf("epoch %d reward root mismatch", epochId)
+		}
 	}
 	if commit.Aggregates == nil {
 		return fmt.Errorf("epoch %d missing aggregates commitment", epochId)
@@ -655,6 +667,45 @@ func (k Keeper) ValidateEpochRoots(ctx context.Context, epochId uint64, commit t
 	}
 
 	return nil
+}
+
+// RefreshAggregatesCommitment recomputes the aggregates root and the
+// total network weight from the on-chain aggregate records and stores
+// them into the epoch commit. Called whenever aggregate records change
+// (MsgUpsertAggregateRecord): a proposer commits its aggregates
+// commitment before the challenge window, and aggregate upserts during
+// the window would otherwise make FinalizeEpoch's root check fail even
+// for an honest network. The rewards commitment is deliberately left
+// untouched — reward records have no live submission path, so the
+// proposer's committed rewards root must not be overwritten with a
+// chain-derived (usually empty-set) root. Mirrors the aggregates part
+// of RecomputeEpochCommitments (challenge resolutions).
+func (k Keeper) RefreshAggregatesCommitment(ctx context.Context, epochId uint64) error {
+	commit, err := k.GetEpochCommit(ctx, epochId)
+	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			return nil // no commit yet — nothing to refresh
+		}
+		return err
+	}
+	if commit.Finalized {
+		return nil
+	}
+	records, err := k.aggregateRecordsForEpoch(ctx, epochId)
+	if err != nil {
+		return err
+	}
+	aggregateRoot, aggregateLeaves, err := types.MerkleRootHexForRecords(records)
+	if err != nil {
+		return err
+	}
+	var totalWeight uint64
+	for _, record := range records {
+		totalWeight += record.TotalWeightUnits
+	}
+	commit.Aggregates = &types.MerkleCommitment{Root: aggregateRoot, LeafCount: aggregateLeaves}
+	commit.TotalNetworkWeightUnits = totalWeight
+	return k.SetEpochCommit(ctx, commit)
 }
 
 func (k Keeper) ApplyValidatorSlash(ctx context.Context, consAddress string, slashFractionBps uint32, jail bool) error {

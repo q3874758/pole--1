@@ -16,12 +16,14 @@
 
 ## 1. 🔴 代码缺陷（阻断上线）
 
-- [ ] **1.1 FinalizeEpoch root 交叉冲突**：链端 `ValidateEpochRoots` 用 `json.Marshal` 叶重算 root，Rust 链下 root 基于 borsh 叶 → Rust 构造的 CommitEpoch 上链后 Finalize 必失败。
+- [x] **1.1 FinalizeEpoch root 交叉冲突**：链端 `ValidateEpochRoots` 用 `json.Marshal` 叶重算 root，Rust 链下 root 基于 borsh 叶 → Rust 构造的 CommitEpoch 上链后 Finalize 必失败。 ✅ 本轮修复
   - 证据：`chain/x/pole/keeper/keeper.go:586,617-657,839` + `deliverable-merkle-cross-language.md:157-178`
-  - 修法：Rust commit 前改用链式 json 叶计算 root，或链端对 CommitEpoch 校验 root 来源。
-- [ ] **1.2 MsgUpdateParams 缺 proto field 22/23**：Rust 端 `encode_params_inner` 只编到 field21，`min_verification_count`(22)/`min_player_verifier_share_bps`(23) 恒缺省 0 → Rust 治理调参把链上验证门禁清零。
+  - 修复：①Rust `reward_record_root`/`aggregate_record_root` 叶编码从 borsh 切到链式 json（`node_pipeline.rs::reward_record_to_chain_json`/`aggregate_record_to_chain_json`，字段序+omitempty 与 Go `json.Marshal` 字节一致），并按链端 store key 序排序（rewards=recipient 升序、aggregates=app_id 升序）；②链端 `ValidateEpochRoots` 奖励 root 检查条件化——奖励记录仅经 genesis/challenge 入库、无实时提交路径，链上无记录时接受 proposer 承诺（aggregates/total_weight 检查仍强制）；③`UpsertAggregateRecord` 后 `RefreshAggregatesCommitment` 刷新 aggregates 承诺（挑战窗口内 upsert 不再使 Finalize 失败，rewards 承诺不被覆盖）。
+  - 验证：跨语言 golden 双侧锁定——`chain/x/pole/types/merkle_cross_language_test.go`（Go）与 `src/node_rewards.rs::reward_record_root_matches_chain_go_fixture`、`src/node_aggregator.rs::aggregate_record_root_matches_chain_go_fixture`、`src/node_pipeline.rs` 两个 json 字节级测试（Rust）断言同一 root hex；`go test ./...` 全绿（新增 2 个 app 测试：无链上奖励记录时 finalize 通过、upsert 刷新承诺）。
+- [x] **1.2 MsgUpdateParams 缺 proto field 22/23**：Rust 端 `encode_params_inner` 只编到 field21，`min_verification_count`(22)/`min_player_verifier_share_bps`(23) 恒缺省 0 → Rust 治理调参把链上验证门禁清零。 ✅ 本轮修复
   - 证据：`src/cosmos/pole_msgs.rs:632-656` vs `chain/proto/pole/chain/pole/v1/state.proto:65-69`
-  - 修法：Rust 编码器补 field 22/23；加 golden wire 测试。
+  - 修复：`ParamsWire` 补 `min_verification_count`(u64)/`min_player_verifier_share_bps`(u32)（serde default 向后兼容）；`encode_params_inner` 补 field 22/23。
+  - 验证：golden wire 测试 `params_wire_matches_go_proto_marshal_golden`——与 Go gogoproto `proto.Marshal` 输出字节级一致（78 字节，含 `b0 01 03` + `b8 01 88 27` 尾部锁定）。
 
 ## 2. 🔴 安全（发布前必须）
 

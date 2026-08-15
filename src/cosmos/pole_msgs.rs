@@ -652,6 +652,11 @@ fn encode_params_inner(p: &ParamsWire) -> Vec<u8> {
     encode_uint64(19, p.reward_burn_threshold, &mut buf);
     encode_uint32(20, p.reward_burn_bps, &mut buf);
     encode_uint32(21, p.governance_burn_bps, &mut buf);
+    // proto field 22 (uint64): min_verification_count — the FinalizeEpoch
+    // verification-coverage gate. Omitting it zeroes the gate on-chain.
+    encode_uint64(22, p.min_verification_count, &mut buf);
+    // proto field 23 (uint32): min_player_verifier_share_bps.
+    encode_uint32(23, p.min_player_verifier_share_bps, &mut buf);
     buf
 }
 
@@ -1307,7 +1312,56 @@ mod tests {
 
     #[test]
     fn update_params_emits_non_empty_wire_bytes() {
-        let p = ParamsWire {
+        let p = full_params_fixture();
+        let any = encode_msg_update_params("cosmos10authority", &p);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpdateParams");
+        assert!(!any.value.is_empty());
+        assert_eq!(any.value[0], 0x0A);
+        // 23 uint64/uint32 fields inside. Verify the inner last-field
+        // tags: field 21 (0xA8 0x01 + varint 100 = 0x64), field 22
+        // (0xB0 0x01 + varint 3), field 23 (0xB8 0x01 + varint 5000 =
+        // 0x88 0x27) all appear at the tail.
+        let triple21 = [0xA8u8, 0x01, 0x64];
+        let triple22 = [0xB0u8, 0x01, 0x03];
+        let quad23 = [0xB8u8, 0x01, 0x88, 0x27];
+        assert!(
+            any.value.windows(3).any(|w| w == triple21),
+            "expected governance_burn_bps tag 0xA8 0x01 + varint 0x64, got bytes {:02x?}",
+            any.value
+        );
+        assert!(
+            any.value.windows(3).any(|w| w == triple22),
+            "expected min_verification_count tag 0xB0 0x01 + varint 0x03, got bytes {:02x?}",
+            any.value
+        );
+        assert!(
+            any.value.windows(4).any(|w| w == quad23),
+            "expected min_player_verifier_share_bps tag 0xB8 0x01 + varint 5000, got bytes {:02x?}",
+            any.value
+        );
+    }
+
+    #[test]
+    fn params_wire_matches_go_proto_marshal_golden() {
+        // Cross-language golden: the same 23-field Params marshaled by
+        // Go's gogoproto (chain/x/pole/types Params, proto.Marshal)
+        // produced this exact byte string. Any drift in field order,
+        // tag, or varint encoding breaks the byte-identical lock.
+        let p = full_params_fixture();
+        let expected = hex_decode(
+            "08901c106418c0843d20d00f2864300538d83640d00f48c41350c41358c41360c41368a0c21e70c09a0c7880ea308001a08d068801a0f7369001f4039801c0843da00164a80164b00103b8018827",
+        );
+        let inner = encode_params_inner(&p);
+        assert_eq!(inner, expected);
+        assert_eq!(inner.len(), 78);
+        // The two verification gates must be present: a Rust-built
+        // MsgUpdateParams must never silently zero them (that would
+        // disable FinalizeEpoch's verification-coverage gates).
+        assert!(inner.ends_with(&[0xB0, 0x01, 0x03, 0xB8, 0x01, 0x88, 0x27]));
+    }
+
+    fn full_params_fixture() -> ParamsWire {
+        ParamsWire {
             reward_block_duration_seconds: 3600,
             base_hourly_reward: 100,
             target_network_weight_units: 1_000_000,
@@ -1329,20 +1383,15 @@ mod tests {
             reward_burn_threshold: 1_000_000,
             reward_burn_bps: 100,
             governance_burn_bps: 100,
-        };
-        let any = encode_msg_update_params("cosmos10authority", &p);
-        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgUpdateParams");
-        assert!(!any.value.is_empty());
-        assert_eq!(any.value[0], 0x0A);
-        // 21 uint64/uint32 fields inside. Verify the inner last-field
-        // tag (21 << 3) | 0 = 0xA8 appears (as 2-byte varint for
-        // field numbers >= 16, since 168 has MSB set), with varint
-        // value 100 = 0x64 following.
-        let triple = [0xA8u8, 0x01, 0x64];
-        assert!(
-            any.value.windows(3).any(|w| w == triple),
-            "expected governance_burn_bps tag 0xA8 0x01 + varint 0x64, got bytes {:02x?}",
-            any.value
-        );
+            min_verification_count: 3,
+            min_player_verifier_share_bps: 5_000,
+        }
+    }
+
+    fn hex_decode(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("golden hex"))
+            .collect()
     }
 }
