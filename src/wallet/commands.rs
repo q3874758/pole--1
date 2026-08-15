@@ -2,10 +2,10 @@ use crate::wallet::error::Result;
 use crate::wallet::keys::{hex_decode, KeyPair};
 use crate::wallet::keystore::EncryptedKeystore;
 use crate::wallet::mnemonic::{generate_mnemonic, Mnemonic};
-use std::path::PathBuf;
+use std::path::Path;
 
 pub fn create_wallet(
-    data_dir: &PathBuf,
+    data_dir: &Path,
     comment: Option<String>,
     password: &str,
 ) -> Result<String> {
@@ -25,7 +25,7 @@ pub fn create_wallet(
 
 pub fn recover_wallet(
     words: &[String],
-    data_dir: &PathBuf,
+    data_dir: &Path,
     comment: Option<String>,
     password: &str,
 ) -> Result<String> {
@@ -44,25 +44,25 @@ pub fn recover_wallet(
     Ok(address)
 }
 
-pub fn show_address(data_dir: &PathBuf) -> Result<String> {
+pub fn show_address(data_dir: &Path) -> Result<String> {
     let path = data_dir.join("wallet").join("keystore.json");
     let ks = EncryptedKeystore::decrypt("", &path)?;
     Ok(ks.keypair.address_hex())
 }
 
-pub fn show_address_with_password(data_dir: &PathBuf, password: &str) -> Result<String> {
+pub fn show_address_with_password(data_dir: &Path, password: &str) -> Result<String> {
     let path = data_dir.join("wallet").join("keystore.json");
     let ks = EncryptedKeystore::decrypt(password, &path)?;
     Ok(ks.keypair.address_hex())
 }
 
-pub fn export_secret(data_dir: &PathBuf, password: &str) -> Result<String> {
+pub fn export_secret(data_dir: &Path, password: &str) -> Result<String> {
     let path = data_dir.join("wallet").join("keystore.json");
     let ks = EncryptedKeystore::decrypt(password, &path)?;
     Ok(ks.keypair.secret_hex())
 }
 
-pub fn sign_transaction(data_dir: &PathBuf, password: &str, tx_hex: &str) -> Result<String> {
+pub fn sign_transaction(data_dir: &Path, password: &str, tx_hex: &str) -> Result<String> {
     let path = data_dir.join("wallet").join("keystore.json");
     let ks = EncryptedKeystore::decrypt(password, &path)?;
     let tx_bytes = hex_decode(tx_hex)?;
@@ -78,8 +78,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 pub fn set_reward_address(
-    data_dir: &PathBuf,
-    config_path: &PathBuf,
+    data_dir: &Path,
+    config_path: &Path,
     password: &str,
 ) -> Result<String> {
     let wallet_path = data_dir.join("wallet").join("keystore.json");
@@ -88,7 +88,7 @@ pub fn set_reward_address(
 
     let content = std::fs::read_to_string(config_path)?;
     let mut config: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| crate::wallet::error::WalletError::Json(e))?;
+        serde_json::from_str(&content).map_err(crate::wallet::error::WalletError::Json)?;
     config["reward_address_hex"] = serde_json::Value::String(addr_hex.clone());
     let output = serde_json::to_string_pretty(&config)?;
     std::fs::write(config_path, output)?;

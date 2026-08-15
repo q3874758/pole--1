@@ -31,11 +31,6 @@ use pole_protocol_draft::cosmos::wire_types::{
 };
 use pole_protocol_draft::wallet::KeyPair;
 
-/// Test feature gate. Callers should `#[cfg(feature = "integration")]`
-/// their test modules so `cargo test` still passes on dev machines
-/// without a built `poled` binary.
-pub const HARNESS_FEATURE: &str = "integration";
-
 pub const DEFAULT_CHAIN_ID: &str = "pole-test";
 pub const DEFAULT_RPC_URL: &str = "http://127.0.0.1:26657";
 pub const DEFAULT_REST_URL: &str = "http://127.0.0.1:1317";

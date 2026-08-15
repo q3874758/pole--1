@@ -564,10 +564,7 @@ impl NodeConfig {
             });
         }
         if self.runtime.poll_interval_secs > 0
-            && !self
-                .reward
-                .reward_block_secs
-                .is_multiple_of(self.runtime.poll_interval_secs)
+            && self.reward.reward_block_secs % self.runtime.poll_interval_secs != 0
         {
             return Err(NodeConfigError::InvalidValue {
                 field: "reward.reward_block_secs",

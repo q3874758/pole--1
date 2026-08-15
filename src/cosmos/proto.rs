@@ -42,6 +42,6 @@ pub fn sign_doc_hash(
     hasher.update(body_bytes);
     hasher.update(auth_info_bytes);
     hasher.update(chain_id.as_bytes());
-    hasher.update(&account_number.to_be_bytes());
+    hasher.update(account_number.to_be_bytes());
     hasher.finalize().into()
 }

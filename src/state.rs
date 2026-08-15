@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::primitives::{
-    Address, Amount, Capability, EpochId, Hash32, Height, NodeId, NodeStatus, ServeClass,
+    Address, Amount, Capability, EpochId, Height, NodeId, NodeStatus, ServeClass,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -47,13 +47,4 @@ pub struct StorageOffer {
     pub serve_class: ServeClass,
     pub valid_from_epoch: EpochId,
     pub max_response_millis: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct CommitteeAssignment {
-    pub epoch_id: EpochId,
-    pub seed: Hash32,
-    pub collectors: Vec<NodeId>,
-    pub verifiers: Vec<NodeId>,
-    pub proposers: Vec<NodeId>,
 }

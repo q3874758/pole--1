@@ -81,12 +81,7 @@ pub fn annual_emission_amount_with_tail(
     )
 }
 
-pub fn cumulative_emission_amount(years: u32) -> Amount {
-    (1..=years).map(annual_emission_amount).sum()
-}
-
-pub fn annual_emission_schedule(years: u32) -> Vec<AnnualEmissionSchedule> {
-    annual_emission_schedule_with_tail(
+pub fn annual_emission_schedule(years: u32) -> Vec<AnnualEmissionSchedule> {    annual_emission_schedule_with_tail(
         years,
         LONG_TERM_TAIL_START_YEAR,
         LONG_TERM_TAIL_EMISSION_RATE_BPS,

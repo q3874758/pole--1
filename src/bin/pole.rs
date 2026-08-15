@@ -239,10 +239,10 @@ fn run_full(binary_dir: &Path, _args: &[String]) -> i32 {
 
 fn print_usage() {
     eprintln!("PoLE V1 - Unified Client");
-    eprintln!("");
+    eprintln!();
     eprintln!("Usage:");
     eprintln!("  pole [client|node|gui|full|help] <command> [args...]");
-    eprintln!("");
+    eprintln!();
     eprintln!("Modes:");
     eprintln!("  pole              - Start everything (default)");
     eprintln!("  pole full         - Start blockchain + GUI");
@@ -250,12 +250,12 @@ fn print_usage() {
     eprintln!("  pole client <cmd> - Run client commands");
     eprintln!("  pole node <cmd>   - Run node commands");
     eprintln!("  pole help         - Show this help");
-    eprintln!("");
+    eprintln!();
     eprintln!("One-click startup (pole or pole full):");
     eprintln!("  1. Starts embedded Cosmos blockchain (poled)");
     eprintln!("  2. Waits for RPC to be ready");
     eprintln!("  3. Opens the GUI dashboard");
-    eprintln!("");
+    eprintln!();
     eprintln!("Examples:");
     eprintln!("  pole              - Start everything (default)");
     eprintln!("  pole full         - Same as above, explicit");

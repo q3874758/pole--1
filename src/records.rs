@@ -77,15 +77,6 @@ pub struct RewardRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct AvailabilityRecord {
-    pub epoch_id: EpochId,
-    pub node_id: NodeId,
-    pub payload_cid: ContentId,
-    pub retention_until_epoch: EpochId,
-    pub receipt_hash: Hash32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct EpochCommit {
     pub epoch_id: EpochId,
     pub accepted_batches: MerkleCommitment,

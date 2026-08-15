@@ -3554,7 +3554,7 @@ mod tests {
         signed.signature_hex = "deadbeef".into();
         assert_eq!(payload, signed.signing_payload());
 
-        save_verification_credentials(&config, 7, &[credential.clone()]).unwrap();
+        save_verification_credentials(&config, 7, std::slice::from_ref(&credential)).unwrap();
         let loaded = load_verification_credentials(&config, 7);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], credential);

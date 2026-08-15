@@ -22,8 +22,6 @@ pub mod tx_builder;
 pub mod tx_signer;
 pub mod wire_types;
 
-use std::time::Duration;
-
 pub use address::{
     bech32_to_address, bech32_to_hex, hex_to_bech32, CosmosAddress, DEFAULT_BECH32_PREFIX,
     POLE_BECH32_PREFIX,
@@ -93,24 +91,6 @@ impl CosmosClient {
     pub fn new(endpoint: CosmosEndpoint) -> Result<Self> {
         let rpc = TendermintRpc::new(endpoint.rpc_url.clone())?;
         let rest = RestClient::new(endpoint.rest_url.clone())?;
-        Ok(Self {
-            endpoint,
-            rpc,
-            rest,
-        })
-    }
-
-    pub fn with_timeout(endpoint: CosmosEndpoint, timeout: Duration) -> Result<Self> {
-        let rpc_client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| CosmosError::Http(e.to_string()))?;
-        let rest_client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| CosmosError::Http(e.to_string()))?;
-        let rpc = TendermintRpc::with_client(endpoint.rpc_url.clone(), rpc_client);
-        let rest = RestClient::with_client(endpoint.rest_url.clone(), rest_client);
         Ok(Self {
             endpoint,
             rpc,

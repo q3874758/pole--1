@@ -230,7 +230,7 @@ fn resolve_license(pkg: &Package) -> Option<String> {
 
 fn license_tokens(license: &str) -> Vec<String> {
     license
-        .split(|c: char| c == '/' || c == ' ' || c == '(' || c == ')')
+        .split(['/', ' ', '(', ')'])
         .filter_map(|tok| {
             let t = tok.trim().trim_end_matches(')').trim_start_matches('(');
             if t.is_empty() {

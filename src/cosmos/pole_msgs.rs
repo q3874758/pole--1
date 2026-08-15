@@ -253,14 +253,15 @@ fn challenge_kind_to_proto(kind: ChallengeKind) -> i32 {
 /// (state.proto:123). Proto exposes only three concrete states
 /// (OPEN / RESOLVED / REJECTED); the richer Rust enum collapses as
 /// follows:
-/// - `Open` / `Responded` -> OPEN (the chain handler defaults OPEN
-/// on open-time, so a Responded challenge is still treated as OPEN
-/// until a ResolveChallenge call lands)
-/// - `Succeeded` -> RESOLVED
-/// - `Rejected` -> REJECTED
-/// - `Expired` -> REJECTED (proto has no Expired slot;
-/// expiration is modelled as a rejection with a resolution_summary
-/// set on the chain side)
+///
+///   - `Open` / `Responded` -> OPEN (the chain handler defaults OPEN
+///     on open-time, so a Responded challenge is still treated as OPEN
+///     until a ResolveChallenge call lands)
+///   - `Succeeded` -> RESOLVED
+///   - `Rejected` -> REJECTED
+///   - `Expired` -> REJECTED (proto has no Expired slot;
+///     expiration is modelled as a rejection with a resolution_summary
+///     set on the chain side)
 fn challenge_state_to_proto(state: ChallengeState) -> i32 {
     match state {
         ChallengeState::Open => 1,
@@ -561,6 +562,7 @@ fn encode_epoch_commit_inner(c: &EpochCommitWire) -> Vec<u8> {
 ///   uint32 slash_fraction_bps = 7;
 ///   bool jail_validator = 8;
 /// }
+#[allow(clippy::too_many_arguments)]
 pub fn encode_msg_resolve_challenge(
     resolver_bech32: &str,
     challenge_id_hex: &str,
@@ -1259,7 +1261,7 @@ mod tests {
         // Just sanity-check that we see all 5 expected outer tags.
         for tag in [0x12u8, 0x1A, 0x22, 0x2A, 0x32] {
             assert!(
-                any.value.iter().any(|b| *b == tag),
+                any.value.contains(&tag),
                 "expected outer MerkleCommitment tag 0x{:02x} in encoded bytes",
                 tag
             );

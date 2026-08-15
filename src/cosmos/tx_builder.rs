@@ -12,7 +12,7 @@ use crate::records::Challenge;
 use crate::wallet::KeyPair;
 
 pub use crate::cosmos::proto::Any;
-use crate::cosmos::proto::{mode_info, AuthInfo, Coin, Fee, ModeInfo, SignDoc, SignerInfo, TxBody};
+use crate::cosmos::proto::{mode_info, AuthInfo, Coin, Fee, ModeInfo, SignerInfo, TxBody};
 
 /// Cosmos gas configuration. Real values come from `fee_params` in
 /// `genesis.json`; the defaults here are conservative for a local node.
@@ -252,16 +252,6 @@ impl<'a> TxBuilder<'a> {
         self
     }
 
-    pub fn with_fee(mut self, fee: FeeConfig) -> Self {
-        self.fee = fee;
-        self
-    }
-
-    pub fn with_memo(mut self, memo: &'a str) -> Self {
-        self.memo = memo;
-        self
-    }
-
     /// Build the real `TxBody` proto.
     pub fn build_body(&self, msg: &BridgeMessage) -> Result<TxBody> {
         Ok(TxBody {
@@ -335,21 +325,6 @@ impl<'a> TxBuilder<'a> {
             self.chain_id,
             self.account_number,
         )
-    }
-
-    /// Build a `SignDoc` for the message. Exposed for tests that want
-    /// to assert on the signing bytes without going through signing.
-    pub fn build_sign_doc(&self, msg: &BridgeMessage, signer_pubkey: &[u8; 32]) -> Result<SignDoc> {
-        let body = self.build_body(msg)?;
-        let auth_info = self.build_auth_info(signer_pubkey)?;
-        Ok(SignDoc {
-            body_bytes: crate::cosmos::proto::encode(&body)
-                .map_err(|e| CosmosError::Encode(format!("TxBody: {e}")))?,
-            auth_info_bytes: crate::cosmos::proto::encode(&auth_info)
-                .map_err(|e| CosmosError::Encode(format!("AuthInfo: {e}")))?,
-            chain_id: self.chain_id.to_string(),
-            account_number: self.account_number,
-        })
     }
 }
 

@@ -75,19 +75,6 @@ pub struct GenesisInputs {
     pub params_overrides: serde_json::Value,
 }
 
-/// Field-level knobs that get merged into `app_state.pole.params`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoleParamsOverrides {
-    pub reward_block_duration_seconds: Option<u64>,
-    pub base_hourly_reward: Option<u128>,
-    pub target_network_weight_units: Option<u128>,
-    pub reward_adjustment_cap_bps: Option<u16>,
-    pub challenge_window_blocks: Option<u32>,
-    pub min_retention_epochs: Option<u32>,
-    pub player_reward_allocation_bps: Option<u16>,
-    pub service_reward_allocation_bps: Option<u16>,
-}
-
 /// Loader entry points.
 pub mod input;
 pub mod output;
@@ -390,7 +377,7 @@ mod tests {
         // 1e15 upole * 1e6 microupole/upole * 0.02 / 8760 ≈ 2.28e15
         let v: u128 = json["base_hourly_reward"].as_u64().unwrap() as u128;
         assert!(
-            v >= 2_000_000_000_000_000 && v <= 2_500_000_000_000_000,
+            (2_000_000_000_000_000..=2_500_000_000_000_000).contains(&v),
             "base_hourly_reward out of range: {v}"
         );
     }

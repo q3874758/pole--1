@@ -62,11 +62,6 @@ impl<T> Versioned<T> {
             data,
         }
     }
-
-    pub fn with_version(mut self, v: SchemaVersion) -> Self {
-        self.schema_version = v;
-        self
-    }
 }
 
 impl<T: serde::Serialize> serde::Serialize for Versioned<T> {

@@ -61,17 +61,6 @@ impl SignedTx {
             bytes,
         ))
     }
-
-    /// Encode to raw `TxRaw` bytes (no base64). Useful for the
-    /// `POST /cosmos/tx/v1beta1/txs` REST path.
-    pub fn to_tx_raw_bytes(&self) -> Result<Vec<u8>> {
-        let raw = crate::cosmos::proto::TxRaw {
-            body_bytes: self.body_bytes.clone(),
-            auth_info_bytes: self.auth_info_bytes.clone(),
-            signatures: self.signatures.clone(),
-        };
-        crate::cosmos::proto::encode(&raw).map_err(|e| CosmosError::Encode(format!("TxRaw: {e}")))
-    }
 }
 
 /// Sign the canonical SignDoc inputs with the given keypair. The

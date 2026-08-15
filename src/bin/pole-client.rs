@@ -1404,7 +1404,7 @@ fn collect_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if should_capture_foreground_process(&foreground) {
             let game_process = canonical_process_name(&foreground);
             let merged =
-                merge_process_names(&config.runtime.game_process_names, &[game_process.clone()]);
+                merge_process_names(&config.runtime.game_process_names, std::slice::from_ref(&game_process));
             if !merged.is_empty() && merged != config.runtime.game_process_names {
                 configure_game_process_awareness(&mut config);
                 config.runtime.game_process_names = merged;
@@ -4224,7 +4224,7 @@ fn wallet_create_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
         .get(3)
         .cloned()
         .unwrap_or_else(|| rpassword::prompt_password("password: ").unwrap_or_default());
-    let comment = args.get(4).map(String::clone);
+    let comment = args.get(4).cloned();
 
     let mnemonic = pole_protocol_draft::create_wallet(&data_dir, comment, &password)?;
     println!("wallet_created");

@@ -1,4 +1,3 @@
-use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -96,17 +95,5 @@ impl RestClient {
         }
         let parsed: AuthAccountResponse = resp.json().await?;
         parsed.account.into_info()
-    }
-
-    /// Helper: build a URL that the bridge can call for arbitrary module
-    /// queries. Returns the path; callers add params + decode the body.
-    pub fn module_query_path(&self, module: &str, query: &str) -> String {
-        format!("{}/{}/v1/{}", self.base_url, module, query)
-    }
-
-    /// Helper: decode a base64 string to raw bytes, used for response
-    /// payloads that the SDK returns as base64.
-    pub fn decode_b64(s: &str) -> Result<Vec<u8>> {
-        Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
     }
 }

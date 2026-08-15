@@ -82,7 +82,7 @@ fn print_help() {
 }
 
 fn run() -> Result<(), GenesisError> {
-    let cli = Cli::from_env().map_err(|e| GenesisError::Validation(e))?;
+    let cli = Cli::from_env().map_err(GenesisError::Validation)?;
     let builder = if let Some(alloc) = cli.allocations {
         GenesisBuilder::from_paths(
             cli.chain_id,

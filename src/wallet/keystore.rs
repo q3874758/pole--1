@@ -57,7 +57,7 @@ impl EncryptedKeystore {
         let mut key = [0u8; 32];
         let res = scrypt::scrypt(password.as_bytes(), salt, &params, &mut key);
         if res.is_err() {
-            return Err(WalletError::KdfError(format!("scrypt error")));
+            return Err(WalletError::KdfError("scrypt error".to_string()));
         }
         Ok(key)
     }
@@ -75,7 +75,7 @@ impl EncryptedKeystore {
 
         let plaintext = self.keypair.secret_hex();
         let ciphertext = cipher
-            .encrypt(&nonce_bytes, plaintext.as_bytes())
+            .encrypt(nonce_bytes, plaintext.as_bytes())
             .map_err(|e| WalletError::EncryptionFailed(e.to_string()))?;
 
         let keystore = KeystoreJson {

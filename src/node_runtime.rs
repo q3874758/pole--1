@@ -99,15 +99,6 @@ impl LocalNodeRuntime {
         }
     }
 
-    pub fn collect_batch_from_sample(
-        &self,
-        epoch_id: EpochId,
-        slot_id: u64,
-        sample: SteamCurrentPlayersSample,
-    ) -> Result<AssembledBatch, NodeRuntimeError> {
-        self.collect_batch_from_samples(epoch_id, slot_id, vec![sample])
-    }
-
     pub fn collect_batch_from_samples(
         &self,
         epoch_id: EpochId,
