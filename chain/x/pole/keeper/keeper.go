@@ -37,11 +37,13 @@ type Keeper struct {
 	ClaimedRewards    collections.Map[collections.Pair[uint64, string], types.ClaimedReward]
 	ReplicaReceipts   collections.Map[collections.Triple[uint64, string, string], types.ReplicaReceipt]
 	VerificationRecords collections.Map[collections.Triple[uint64, string, string], types.VerificationRecord]
+	AnnualEmission   collections.Item[[]byte]
 }
 
 type bankKeeper interface {
 	MintCoins(ctx context.Context, moduleName string, amounts sdk.Coins) error
 	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
+	BurnCoins(ctx context.Context, moduleName string, amounts sdk.Coins) error
 }
 
 type stakingKeeper interface {
@@ -196,6 +198,12 @@ func NewKeeper(storeService store.KVStoreService, authority string) (Keeper, err
 				collections.StringKey,
 			),
 			sdkcodec.CollValue[types.VerificationRecord](protoCodec),
+		),
+		AnnualEmission: collections.NewItem(
+			sb,
+			types.AnnualEmissionKeyPrefix,
+			"annual_emission",
+			collections.BytesValue,
 		),
 	}
 
@@ -387,6 +395,9 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) er
 		genesis.Params = &defaultParams
 	}
 	if err := k.SetParams(ctx, *genesis.Params); err != nil {
+		return err
+	}
+	if err := k.InitAnnualEmission(ctx); err != nil {
 		return err
 	}
 	for _, node := range genesis.Nodes {
@@ -752,11 +763,37 @@ func (k Keeper) PayoutClaimedReward(ctx context.Context, claim types.ClaimedRewa
 	if err != nil {
 		return err
 	}
-	coins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(claim.Amount)))
-	if err := k.bankKeeper.MintCoins(ctx, types.ModuleName, coins); err != nil {
+
+	// Scheme-A burn channel: the excess above RewardBurnThreshold is
+	// burned at RewardBurnBps (Net Supply = Emission - Burn). Both
+	// parameters are governance-tunable.
+	burnAmount := uint64(0)
+	params, err := k.GetParams(ctx)
+	if err != nil {
 		return err
 	}
-	return k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, recipient, coins)
+	if claim.Amount > params.RewardBurnThreshold && params.RewardBurnBps > 0 {
+		excess := claim.Amount - params.RewardBurnThreshold
+		burnAmount = excess * uint64(params.RewardBurnBps) / 10_000
+	}
+	payout := claim.Amount - burnAmount
+
+	if payout > 0 {
+		coins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(payout)))
+		// Rewards are paid from the scheme-A annual emission pool minted
+		// by BeginBlock; an exhausted pool fails the claim (the yearly
+		// budget is the hard issuance cap).
+		if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, recipient, coins); err != nil {
+			return err
+		}
+	}
+	if burnAmount > 0 {
+		burnCoins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(burnAmount)))
+		if err := k.bankKeeper.BurnCoins(ctx, types.ModuleName, burnCoins); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (k Keeper) rewardRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.RewardRecord, error) {

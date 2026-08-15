@@ -894,7 +894,7 @@ pub fn adjusted_player_block_reward(
 
     let scaled_ratio = target_network_weight_units.saturating_mul(1_000_000_000_000u128)
         / current_network_weight_units;
-    let ratio_sqrt = integer_sqrt(scaled_ratio);
+    let ratio_sqrt = crate::tokenomics::integer_sqrt(scaled_ratio);
     let adjusted = base_block_reward.saturating_mul(ratio_sqrt) / 1_000_000;
     adjusted.clamp(lower_bound, upper_bound).max(1)
 }
@@ -940,20 +940,6 @@ pub fn effective_min_retention_epochs(config: &NodeConfig) -> u32 {
     latest_activated_protocol_params(config)
         .map(|params| params.min_retention_epochs)
         .unwrap_or(config.storage.retention_epochs)
-}
-
-fn integer_sqrt(value: Amount) -> Amount {
-    if value < 2 {
-        return value;
-    }
-
-    let mut x0 = value;
-    let mut x1 = (x0 + value / x0) / 2;
-    while x1 < x0 {
-        x0 = x1;
-        x1 = (x0 + value / x0) / 2;
-    }
-    x0
 }
 
 fn network_weight_units_for_duration(

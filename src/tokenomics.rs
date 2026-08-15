@@ -201,6 +201,63 @@ fn proportional_amount(total: Amount, bps: u16) -> Amount {
     total.saturating_mul(Amount::from(bps)) / 10_000
 }
 
+/// 方案 A：年度发行活跃度调节的默认 cap（10%）。
+pub const ANNUAL_EMISSION_ADJUSTMENT_CAP_BPS: u16 = 1_000;
+
+/// Integer square root (floor), Newton's method. Shared by the tokenomics
+/// activity adjustment and the network-weight reward adjustment.
+pub(crate) fn integer_sqrt(value: Amount) -> Amount {
+    if value < 2 {
+        return value;
+    }
+    let mut x0 = value;
+    let mut x1 = (x0 + value / x0) / 2;
+    while x1 < x0 {
+        x0 = x1;
+        x1 = (x0 + value / x0) / 2;
+    }
+    x0
+}
+
+/// 方案 A 活跃度调节因子（ppm，`1_000_000` = 1.0）：
+/// `sqrt(锚点 / 实际活跃度)`，截断到 `[1 - cap, 1 + cap]`。
+///
+/// 与链上 `AdjustedHourlyReward` / 链下 `adjusted_player_block_reward`
+/// 同一公式方向：网络实际活跃度低于锚点时上调发行（激励补足），
+/// 高于锚点时下调，单向最大偏差受 `cap_bps` 约束（默认 10%）。
+/// 锚点或实际权重为 0 时返回 1.0（不调节）。
+pub fn annual_emission_activity_factor(
+    target_network_weight_units: Amount,
+    current_network_weight_units: Amount,
+    cap_bps: u16,
+) -> Amount {
+    if target_network_weight_units == 0 || current_network_weight_units == 0 {
+        return 1_000_000;
+    }
+    let cap_ppm = Amount::from(cap_bps.min(10_000)) * 100;
+    let lower = 1_000_000u128.saturating_sub(cap_ppm);
+    let upper = 1_000_000u128.saturating_add(cap_ppm);
+    let scaled_ratio = target_network_weight_units.saturating_mul(1_000_000_000_000u128)
+        / current_network_weight_units;
+    integer_sqrt(scaled_ratio).clamp(lower, upper)
+}
+
+/// 方案 A：年度发行 = 基准名义发行 × 活跃度调节因子（sqrt + cap）。
+pub fn annual_emission(
+    year: u32,
+    target_network_weight_units: Amount,
+    current_network_weight_units: Amount,
+    cap_bps: u16,
+) -> Amount {
+    let base = annual_emission_amount(year);
+    let factor = annual_emission_activity_factor(
+        target_network_weight_units,
+        current_network_weight_units,
+        cap_bps,
+    );
+    base.saturating_mul(factor) / 1_000_000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +352,73 @@ mod tests {
             base_player_reward_per_block_with_tail(4, 3_600, 4, 180),
             1_643
         );
+    }
+
+    #[test]
+    fn annual_emission_activity_factor_is_neutral_when_weights_missing() {
+        assert_eq!(annual_emission_activity_factor(0, 100, 1_000), 1_000_000);
+        assert_eq!(annual_emission_activity_factor(100, 0, 1_000), 1_000_000);
+        assert_eq!(annual_emission_activity_factor(0, 0, 1_000), 1_000_000);
+    }
+
+    #[test]
+    fn annual_emission_activity_factor_is_one_when_weights_equal() {
+        assert_eq!(annual_emission_activity_factor(1_000, 1_000, 1_000), 1_000_000);
+        assert_eq!(annual_emission_activity_factor(7_777, 7_777, 500), 1_000_000);
+    }
+
+    #[test]
+    fn annual_emission_activity_factor_clamps_to_cap() {
+        // current 远低于 target → 上调被 cap 截断（10%）。
+        assert_eq!(annual_emission_activity_factor(100_000, 100, 1_000), 1_100_000);
+        // current 远高于 target → 下调被 cap 截断。
+        assert_eq!(annual_emission_activity_factor(100, 100_000, 1_000), 900_000);
+        // cap = 0 → 恒 1.0。
+        assert_eq!(annual_emission_activity_factor(100_000, 100, 0), 1_000_000);
+    }
+
+    #[test]
+    fn annual_emission_scales_with_activity_and_respects_cap() {
+        // 基准：第 1 年 200_000_000；权重相等 → 无调节。
+        assert_eq!(annual_emission(1, 100_000, 100_000, 1_000), 200_000_000);
+        // 活跃不足（current = target/4）→ 上调至 cap 上限：220M。
+        assert_eq!(annual_emission(1, 100_000, 25_000, 1_000), 220_000_000);
+        // 活跃过剩（current = 4×target）→ 下调至 cap 下限：180M。
+        assert_eq!(annual_emission(1, 25_000, 100_000, 1_000), 180_000_000);
+        // 第 4 年 tail：基准 20M，cap 下调 10% → 18M。
+        assert_eq!(annual_emission(4, 25_000, 100_000, 1_000), 18_000_000);
+    }
+
+    #[test]
+    fn annual_emission_matches_integer_sqrt_reference() {
+        // current = target/4 → factor = sqrt(4e12) = 2_000_000，clamp 1_100_000。
+        assert_eq!(annual_emission_activity_factor(4_000, 1_000, 10_000), 2_000_000);
+        // current = target → factor 1.0。
+        assert_eq!(annual_emission_activity_factor(4_000, 4_000, 10_000), 1_000_000);
+    }
+
+    /// Cross-language fixtures shared with
+    /// `chain/x/pole/types/emission_cross_language_test.go`: the same
+    /// (year, target, current, cap) rows must produce identical annual
+    /// emissions on both sides (scheme A, 3.4).
+    #[test]
+    fn annual_emission_matches_chain_go_fixtures() {
+        let fixtures = [
+            (1u32, 100_000u128, 100_000u128, 1_000u16, 200_000_000u128),
+            (1, 100_000, 25_000, 1_000, 220_000_000),
+            (1, 25_000, 100_000, 1_000, 180_000_000),
+            (2, 150_000_000_000_000, 50, 1_000, 220_000_000),
+            (3, 100_000, 100_000, 0, 100_000_000),
+            (4, 25_000, 100_000, 1_000, 18_000_000),
+            (5, 100_000, 25_000, 1_000, 22_000_000),
+            (10, 400, 100, 1_000, 22_000_000),
+        ];
+        for (year, target, current, cap, want) in fixtures {
+            let got = annual_emission(year, target, current, cap);
+            assert_eq!(
+                got, want,
+                "year={year} target={target} current={current} cap={cap}"
+            );
+        }
     }
 }

@@ -117,8 +117,10 @@ func (am AppModule) ExportGenesis(ctx sdk.Context, _ codec.JSONCodec) json.RawMe
 	return bz
 }
 
-func (am AppModule) BeginBlock(context.Context) error {
-	return nil
+func (am AppModule) BeginBlock(ctx context.Context) error {
+	// Scheme A: mint the activity-linked annual emission budget into the
+	// module reward pool proportionally to elapsed block time.
+	return am.keeper.BeginBlockAnnualEmission(ctx)
 }
 
 func (am AppModule) EndBlock(context.Context) error {

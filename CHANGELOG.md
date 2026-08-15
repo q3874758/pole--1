@@ -77,6 +77,31 @@ changing protocol behaviour. Every change is backward compatible.
 - `LICENSE-MIT` and `LICENSE-APACHE` — dual-license texts at the
   repo root.
 
+### Scheme A — activity-linked annual emission
+- `src/tokenomics.rs` — `annual_emission(year, target, current, cap)` and
+  `annual_emission_activity_factor`: nominal annual issuance scaled by
+  `sqrt(target/current)` clamped to ±cap (default 10%,
+  `ANNUAL_EMISSION_ADJUSTMENT_CAP_BPS`). `integer_sqrt` is now shared
+  (`tokenomics::integer_sqrt`, reused by `node_rewards`). Cross-language
+  fixtures lock Rust and chain values to the same rows.
+- `chain/x/pole` — scheme A on-chain execution:
+  - `types/emission.go` — `AnnualEmissionRateBps` / `AnnualEmissionAmount`
+    (mirror of the Rust curve) and `AnnualAdjustedEmission`, which calls
+    `AdjustedHourlyReward` (its first real call site).
+  - `keeper/emission.go` — `annualEmissionState` (collections.Item[[]byte],
+    no proto regeneration) and `BeginBlockAnnualEmission`: 365-day
+    protocol years from genesis, activity = latest finalized epoch's
+    `TotalNetworkWeightUnits`, time-proportional minting of the yearly
+    budget into the module reward pool with a hard yearly cap.
+  - `PayoutClaimedReward` now pays from the scheme-A pool (rewards no
+    longer mint on demand) and burns the excess above
+    `RewardBurnThreshold` at `RewardBurnBps` (Net Supply = Emission −
+    Burn); `bankKeeper` gained `BurnCoins`.
+  - `module.go BeginBlock` wired to the annual mint.
+- `docs_PoLE_Whitepaper.md` §4.4.5 — activity-linked issuance formula,
+  anchor (`TargetNetworkWeightUnits`) and 10% cap, on-chain execution
+  semantics.
+
 ### Security
 - `src/wallet/keystore.rs` + `src/node_config.rs` — node identity
   (`identity.json`) is now stored as an AES-256-GCM + scrypt encrypted
