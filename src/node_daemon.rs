@@ -206,6 +206,7 @@ pub fn build_verification_credentials(
                         && batch.obs_count_matches
                         && batch.retention_hash_matches
                         && !batch.signature_status.contains("invalid")
+                        && batch.signatures_audit_valid
                 })
                 .unwrap_or(false);
             let target_collector_hex = batch_report

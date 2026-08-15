@@ -1,4 +1,4 @@
-﻿use crate::wallet::error::{Result, WalletError};
+use crate::wallet::error::{Result, WalletError};
 use crate::wallet::keys::KeyPair;
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -8,6 +8,7 @@ use aes_gcm::{
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
@@ -37,6 +38,55 @@ pub struct EncryptedKeystore {
     pub keypair: KeyPair,
     pub comment: Option<String>,
     pub created_at: u64,
+}
+
+/// Environment variable holding the node identity password. The node
+/// loads its Ed25519 identity from an AES-GCM encrypted `identity.json`;
+/// the password is supplied through this variable (or an interactive TTY
+/// prompt during generation). Keep it out of plaintext config files.
+pub const IDENTITY_PASSWORD_ENV: &str = "POLE_IDENTITY_PASSWORD";
+
+/// Reads the identity password from [`IDENTITY_PASSWORD_ENV`]. A missing
+/// or blank variable yields `None`; the caller must zeroize the returned
+/// value once done with it.
+pub fn identity_password_from_env() -> Option<String> {
+    let value = std::env::var(IDENTITY_PASSWORD_ENV).ok()?;
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Resolves the node identity password: first from
+/// [`IDENTITY_PASSWORD_ENV`], otherwise — when `allow_prompt` **and** the
+/// process has a controlling terminal — by prompting twice on it. Empty
+/// passwords are rejected (an empty password would defeat the encryption).
+/// In non-interactive environments (scripts, CI, services) a missing
+/// environment variable fails fast instead of blocking on a prompt.
+pub fn resolve_identity_password(allow_prompt: bool) -> Result<String> {
+    if let Some(password) = identity_password_from_env() {
+        return Ok(password);
+    }
+    if allow_prompt && std::io::stdin().is_terminal() {
+        let first = rpassword::prompt_password("identity password (POLE_IDENTITY_PASSWORD): ")?;
+        if first.is_empty() {
+            return Err(WalletError::IdentityPasswordRequired(
+                "identity password must not be empty".to_string(),
+            ));
+        }
+        let second = rpassword::prompt_password("confirm identity password: ")?;
+        if first != second {
+            return Err(WalletError::IdentityPasswordRequired(
+                "identity passwords do not match".to_string(),
+            ));
+        }
+        return Ok(first);
+    }
+    Err(WalletError::IdentityPasswordRequired(format!(
+        "encrypted identity.json requires the {IDENTITY_PASSWORD_ENV} environment variable \
+         (set it before running; interactive prompt is only available on a terminal)"
+    )))
 }
 
 impl EncryptedKeystore {
@@ -158,5 +208,21 @@ mod tests {
         assert!(bad.is_err());
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_identity_password_reads_env() {
+        std::env::set_var("POLE_IDENTITY_PASSWORD", "env-pass");
+        let pw = resolve_identity_password(false).unwrap();
+        assert_eq!(pw, "env-pass");
+        std::env::remove_var("POLE_IDENTITY_PASSWORD");
+    }
+
+    #[test]
+    fn resolve_identity_password_rejects_blank_and_requires_env_when_not_prompting() {
+        std::env::set_var("POLE_IDENTITY_PASSWORD", "   ");
+        assert!(resolve_identity_password(false).is_err());
+        std::env::remove_var("POLE_IDENTITY_PASSWORD");
+        assert!(resolve_identity_password(false).is_err());
     }
 }

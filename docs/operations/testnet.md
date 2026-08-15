@@ -14,6 +14,16 @@ pole-client init node-a.json player
 pole-client init node-b.json player
 ```
 
+> 自 V1 起 `identity.json` 以 AES-256-GCM 加密存储（`POLE_IDENTITY_PASSWORD`
+> 环境变量提供口令；未设置时 init 会交互式提示输入两次）。脚本化/无人值守
+> 初始化请先导出环境变量，例如：
+>
+> ```bash
+> export POLE_IDENTITY_PASSWORD='dev-testnet-password'
+> ```
+>
+> 节点与守护进程每次加载身份都需要该口令（建议配置为系统/服务级环境变量）。
+
 分别给两个节点设置固定监听地址：
 
 `node-a.json`

@@ -221,6 +221,7 @@ pub use updater::{
 };
 pub use wallet::{
     create_wallet, derive_child_key, export_secret, generate_mnemonic, hex_decode, hex_encode,
-    recover_wallet, set_reward_address, show_address, show_address_with_password, sign_transaction,
-    word_to_index, EncryptedKeystore, KeyPair, Mnemonic, WalletError,
+    identity_password_from_env, recover_wallet, resolve_identity_password, set_reward_address,
+    show_address, show_address_with_password, sign_transaction, word_to_index, EncryptedKeystore,
+    KeyPair, Mnemonic, WalletError, IDENTITY_PASSWORD_ENV,
 };

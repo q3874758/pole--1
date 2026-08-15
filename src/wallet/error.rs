@@ -28,6 +28,8 @@ pub enum WalletError {
     Json(#[from] serde_json::Error),
     #[error("crypto error: {0}")]
     Crypto(String),
+    #[error("identity password required: {0}")]
+    IdentityPasswordRequired(String),
 }
 
 impl From<hex::FromHexError> for WalletError {

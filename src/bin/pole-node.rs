@@ -2209,13 +2209,15 @@ fn verify_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("all_valid={}", report.all_valid);
     for batch in &report.reports {
         println!(
-            "slot={} payload_hash_ok={} batch_root_ok={} obs_count_ok={} retention_record={} retention_hash_ok={} signature_status={} signatures_present={} signatures_verified={}",
+            "slot={} payload_hash_ok={} batch_root_ok={} obs_count_ok={} retention_record={} retention_hash_ok={} own_batch={} signature_audit_valid={} signature_status={} signatures_present={} signatures_verified={}",
             batch.slot_id,
             batch.payload_hash_matches,
             batch.batch_root_matches,
             batch.obs_count_matches,
             batch.retention_record_present,
             batch.retention_hash_matches,
+            batch.own_batch,
+            batch.signatures_audit_valid,
             batch.signature_status,
             batch.signatures_present,
             batch.signatures_verified
@@ -2339,13 +2341,19 @@ fn build_single_sample_batch(
     sample: SteamCurrentPlayersSample,
 ) -> Result<pole_protocol_draft::AssembledBatch, Box<dyn std::error::Error>> {
     let collector_id = config.node_id()?;
-    let signature = development_signature_placeholder(
+    let identity = config.identity_keypair().ok();
+    let placeholder = development_signature_placeholder(
         epoch_id,
         slot_id,
         sample.app_id,
         sample.observed_players,
     );
-    let observation = sample.into_observation(epoch_id, slot_id, collector_id, signature)?;
+    let mut observation =
+        sample.into_observation(epoch_id, slot_id, collector_id, placeholder)?;
+    if let Some(keypair) = &identity {
+        let payload = observation.signing_payload();
+        observation.collector_signature = keypair.sign(&payload);
+    }
 
     let mut builder = BatchBuilder::new(epoch_id, collector_id);
     builder.push(observation)?;

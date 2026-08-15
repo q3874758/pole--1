@@ -1,12 +1,19 @@
 use crate::wallet::error::{Result, WalletError};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyPair {
     pub secret: [u8; 32],
     pub public: [u8; 32],
     pub address: [u8; 32],
+}
+
+impl Drop for KeyPair {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
 }
 
 impl KeyPair {

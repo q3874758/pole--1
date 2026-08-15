@@ -10,5 +10,8 @@ pub use commands::{
 };
 pub use error::{Result, WalletError};
 pub use keys::{derive_child_key, hex_decode, hex_encode, verify_signature, KeyPair};
-pub use keystore::EncryptedKeystore;
+pub use keystore::{
+    identity_password_from_env, resolve_identity_password, EncryptedKeystore,
+    IDENTITY_PASSWORD_ENV,
+};
 pub use mnemonic::{generate_mnemonic, word_at_index, word_to_index, Mnemonic};

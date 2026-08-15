@@ -1,4 +1,4 @@
-﻿use std::fmt;
+use std::fmt;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -178,13 +178,14 @@ impl ObservationRecord {
     ///
     /// `pubkey` is the collector's Ed25519 public key when known (e.g. from
     /// the local node table for our own batches); `None` yields
-    /// [`SignatureStatus::Unverifiable`] for real signatures. Legacy
-    /// 32-byte dev placeholders are reported as
-    /// [`SignatureStatus::DevPlaceholder`] and never count as failures.
+    /// [`SignatureStatus::Unverifiable`] for real signatures. The legacy
+    /// 32-byte dev placeholder is only recognised in debug builds; release
+    /// builds treat it as an ordinary (invalid) signature.
     pub fn verify_collector_signature(&self, pubkey: Option<&[u8; 32]>) -> SignatureStatus {
         if self.collector_signature.is_empty() {
             return SignatureStatus::Empty;
         }
+        #[cfg(debug_assertions)]
         if self.collector_signature.len() == 32 {
             return SignatureStatus::DevPlaceholder;
         }
@@ -740,13 +741,17 @@ mod tests {
             SignatureStatus::Empty
         );
 
-        // Legacy 32-byte dev placeholder is recognised, never a failure.
+        // 32-byte dev placeholder: recognised only in debug builds; in
+        // release builds it must never be treated as a valid signature.
         let mut dev = sample_observation();
         dev.collector_signature = [0xABu8; 32].to_vec();
+        #[cfg(debug_assertions)]
         assert_eq!(
             dev.verify_collector_signature(None),
             SignatureStatus::DevPlaceholder
         );
+        #[cfg(not(debug_assertions))]
+        assert_ne!(dev.verify_collector_signature(None), SignatureStatus::Valid);
 
         // Real-looking 64-byte signature without a known public key.
         let mut real = sample_observation();

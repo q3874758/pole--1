@@ -28,6 +28,19 @@ pub struct BatchVerificationReport {
     pub signatures_present: usize,
     /// Observations whose Ed25519 signature verified.
     pub signatures_verified: usize,
+    /// Whether this batch was collected by the local node, so its identity
+    /// key was available for a real signature audit.
+    #[serde(default)]
+    pub own_batch: bool,
+    /// Signature audit outcome. For own batches every observation must
+    /// carry a valid Ed25519 signature (no empty/dev/invalid/unverifiable);
+    /// non-own batches have no collector key and always pass this flag.
+    #[serde(default = "default_signatures_audit_valid")]
+    pub signatures_audit_valid: bool,
+}
+
+fn default_signatures_audit_valid() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,7 +176,8 @@ pub fn verify_local_epoch(
                 .first()
                 .map(|observation| observation.collector_id)
                 .filter(|collector| config.node_id().ok().as_ref() == Some(collector));
-            let local_pubkey = if own_collector.is_some() {
+            let is_own_batch = own_collector.is_some();
+            let local_pubkey = if is_own_batch {
                 config.identity_keypair().ok().map(|keypair| keypair.public)
             } else {
                 None
@@ -171,9 +185,17 @@ pub fn verify_local_epoch(
             let mut signature_statuses = Vec::new();
             let mut signatures_present = 0usize;
             let mut signatures_verified = 0usize;
+            // Own batches are held to a hard bar: every observation must
+            // carry a valid Ed25519 signature. Empty, dev placeholder,
+            // invalid and unverifiable signatures all fail the audit;
+            // non-own batches (no collector key) always pass this flag.
+            let mut signature_audit_ok = true;
             for observation in &observations {
                 let status = observation
                     .verify_collector_signature(local_pubkey.as_ref());
+                if is_own_batch && status != SignatureStatus::Valid {
+                    signature_audit_ok = false;
+                }
                 match status {
                     SignatureStatus::Empty => {}
                     SignatureStatus::DevPlaceholder => {
@@ -211,6 +233,8 @@ pub fn verify_local_epoch(
                 },
                 signatures_present,
                 signatures_verified,
+                own_batch: is_own_batch,
+                signatures_audit_valid: signature_audit_ok,
             });
         }
     }
@@ -222,6 +246,7 @@ pub fn verify_local_epoch(
                 && report.obs_count_matches
                 && report.retention_record_present
                 && report.retention_hash_matches
+                && report.signatures_audit_valid
         });
 
     Ok(EpochVerificationReport {

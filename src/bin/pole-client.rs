@@ -12,6 +12,7 @@ use std::os::windows::process::CommandExt;
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
@@ -304,9 +305,11 @@ fn init_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("node_id={}", config.node_id_hex);
     println!("data_dir={}", config.runtime.data_dir);
     println!("capabilities={}", format_capabilities(&config));
-    println!(
-        "next_step={}",
+    println!("next_step={}",
         command_hint("status", config_path.to_string_lossy().as_ref())
+    );
+    println!(
+        "identity_protection=encrypted-aes-256-gcm (password: POLE_IDENTITY_PASSWORD env or the prompt used at init)"
     );
 
     Ok(())
@@ -3711,8 +3714,16 @@ fn write_identity_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(data_dir)?;
     let identity_path = data_dir.join("identity.json");
-    let identity_json = serde_json::to_string_pretty(identity_keypair)?;
-    fs::write(identity_path, identity_json)?;
+    // Encrypted keystore format (AES-256-GCM + scrypt). The password comes
+    // from POLE_IDENTITY_PASSWORD or an interactive prompt; the secret is
+    // never written to disk in the clear.
+    let mut password = pole_protocol_draft::resolve_identity_password(true)?;
+    let store = pole_protocol_draft::EncryptedKeystore::new(
+        identity_keypair.clone(),
+        Some("node identity".to_string()),
+    );
+    store.encrypt(&password, &identity_path)?;
+    password.zeroize();
     Ok(())
 }
 

@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::primitives::{ActivitySourceKind, Address, Amount, AppId, NodeId};
-use crate::wallet::KeyPair;
+use crate::wallet::{resolve_identity_password, EncryptedKeystore, KeyPair};
+use zeroize::Zeroize;
 use crate::tokenomics::{
     base_player_reward_per_block_with_tail, LONG_TERM_TAIL_EMISSION_RATE_BPS,
     LONG_TERM_TAIL_START_YEAR,
@@ -194,6 +195,7 @@ pub struct StorageConfig {
 pub enum NodeConfigError {
     Io(io::Error),
     Json(serde_json::Error),
+    Wallet(crate::wallet::WalletError),
     InvalidHexLength {
         field: &'static str,
         expected: usize,
@@ -215,6 +217,7 @@ impl fmt::Display for NodeConfigError {
         match self {
             Self::Io(err) => write!(f, "io error: {err}"),
             Self::Json(err) => write!(f, "json error: {err}"),
+            Self::Wallet(err) => write!(f, "wallet error: {err}"),
             Self::InvalidHexLength {
                 field,
                 expected,
@@ -249,6 +252,12 @@ impl From<io::Error> for NodeConfigError {
 impl From<serde_json::Error> for NodeConfigError {
     fn from(value: serde_json::Error) -> Self {
         Self::Json(value)
+    }
+}
+
+impl From<crate::wallet::WalletError> for NodeConfigError {
+    fn from(value: crate::wallet::WalletError) -> Self {
+        Self::Wallet(value)
     }
 }
 
@@ -637,11 +646,25 @@ impl NodeConfig {
 
     /// Loads the node's Ed25519 identity key pair from `identity.json` in the
     /// runtime data directory. The node id is `stable_hash32(identity.public)`.
+    ///
+    /// Both legacy plaintext identity files (full `KeyPair` JSON, written
+    /// before identity encryption) and the AES-GCM encrypted keystore format
+    /// are accepted. Encrypted files require the password from
+    /// `POLE_IDENTITY_PASSWORD` (or a TTY prompt during generation).
     pub fn identity_keypair(&self) -> Result<KeyPair, NodeConfigError> {
         let path = Path::new(&self.runtime.data_dir).join("identity.json");
-        let text = fs::read_to_string(&path)?;
-        let keypair: KeyPair = serde_json::from_str(&text)?;
-        Ok(keypair)
+        let mut text = fs::read_to_string(&path)?;
+        // Legacy plaintext format: the KeyPair JSON carries a "secret" field.
+        if let Ok(keypair) = serde_json::from_str::<KeyPair>(&text) {
+            text.zeroize();
+            return Ok(keypair);
+        }
+        text.zeroize();
+        // Encrypted keystore format.
+        let mut password = resolve_identity_password(false)?;
+        let store = EncryptedKeystore::decrypt(&password, &path)?;
+        password.zeroize();
+        Ok(store.keypair)
     }
 
     pub fn inline_verify_enabled(&self) -> bool {
@@ -718,5 +741,53 @@ fn decode_nibble(byte: u8, field: &'static str, index: usize) -> Result<u8, Node
         b'a'..=b'f' => Ok(byte - b'a' + 10),
         b'A'..=b'F' => Ok(byte - b'A' + 10),
         _ => Err(NodeConfigError::InvalidHexCharacter { field, index, byte }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wallet::EncryptedKeystore;
+
+    #[test]
+    fn identity_keypair_roundtrips_encrypted_keystore_and_legacy_plaintext() {
+        let seed = [0x7Bu8; 32];
+        let keypair = KeyPair::from_seed(&seed);
+        let dir = std::env::temp_dir().join(format!(
+            "pole_node_config_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("identity.json");
+
+        let store = EncryptedKeystore::new(keypair.clone(), Some("test".to_string()));
+        store.encrypt("hunter2", &path).unwrap();
+
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = dir.to_string_lossy().into_owned();
+
+        // Without the password the encrypted file fails cleanly.
+        std::env::remove_var("POLE_IDENTITY_PASSWORD");
+        assert!(config.identity_keypair().is_err());
+
+        // With the password it round-trips to the same key pair.
+        std::env::set_var("POLE_IDENTITY_PASSWORD", "hunter2");
+        let loaded = config.identity_keypair().unwrap();
+        assert_eq!(loaded.address_hex(), keypair.address_hex());
+        assert_eq!(loaded.public, keypair.public);
+        std::env::remove_var("POLE_IDENTITY_PASSWORD");
+
+        // Legacy plaintext format (pre-encryption) still loads.
+        let plain = serde_json::to_vec(&keypair).unwrap();
+        std::fs::write(&path, plain).unwrap();
+        std::env::remove_var("POLE_IDENTITY_PASSWORD");
+        let legacy = config.identity_keypair().unwrap();
+        assert_eq!(legacy.address_hex(), keypair.address_hex());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

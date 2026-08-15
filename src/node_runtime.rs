@@ -107,17 +107,27 @@ impl LocalNodeRuntime {
     ) -> Result<AssembledBatch, NodeRuntimeError> {
         self.ensure_collect_enabled()?;
         let collector_id = self.config.node_id()?;
+        // Real Ed25519 collector signatures when the identity is available:
+        // the verifier's hard audit gate requires every own-batch
+        // observation to carry a valid signature. Without an identity we
+        // fall back to the legacy dev placeholder so development flows
+        // still collect (their verification will rightfully fail).
+        let identity = self.config.identity_keypair().ok();
         let mut builder = BatchBuilder::new(epoch_id, collector_id);
 
         for sample in samples {
-            let signature = development_signature_placeholder(
+            let placeholder = development_signature_placeholder(
                 epoch_id,
                 slot_id,
                 sample.app_id,
                 sample.observed_players,
             );
-            let observation =
-                sample.into_observation(epoch_id, slot_id, collector_id, signature)?;
+            let mut observation =
+                sample.into_observation(epoch_id, slot_id, collector_id, placeholder)?;
+            if let Some(keypair) = &identity {
+                let payload = observation.signing_payload();
+                observation.collector_signature = keypair.sign(&payload);
+            }
             builder.push(observation)?;
         }
 

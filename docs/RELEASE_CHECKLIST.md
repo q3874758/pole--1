@@ -27,14 +27,23 @@
 
 ## 2. 🔴 安全（发布前必须）
 
-- [ ] **2.1 identity.json 明文私钥**：`node_config.rs:643-648` 直接读明文 KeyPair（含 secret），无加密无口令。
+- [x] **2.1 identity.json 明文私钥**：`node_config.rs` 直接读明文 KeyPair（含 secret），无加密无口令。 ✅ 本轮修复
   - 修法：复用 wallet AES-GCM keystore（scrypt 派生）加密 identity.json。
-- [ ] **2.2 KeyPair 无 Zeroize**：`keys.rs:7` `KeyPair.secret` 无零清除；`zeroize` 依赖声明但零使用。
+  - 修复：①`write_identity_file` 改为 `EncryptedKeystore`（AES-256-GCM + scrypt）加密写入，secret 不再明文落盘；口令来自 `POLE_IDENTITY_PASSWORD` 环境变量或 init 时交互输入（空口令拒绝）；②`identity_keypair()` 兼容双格式——旧明文 KeyPair JSON 直接解析（读取后 zeroize 缓冲区），新加密格式经 `EncryptedKeystore::decrypt` 解出；③节点/守护进程加载时若口令缺失，报明确错误（`IdentityPasswordRequired`）。
+  - 验证：`node_config::tests::identity_keypair_roundtrips_encrypted_keystore_and_legacy_plaintext`（加密写→env 口令读回→明文旧格式回退）；`wallet::keystore::tests::*` 口令解析单测；全量 lib 141 测试绿。
+  - 部署注意：升级后旧节点 identity.json 仍可读；新 `pole-client init` 产出加密格式，服务启动需设置 `POLE_IDENTITY_PASSWORD`（Windows 服务在 install-service 环境里配置）。
+- [x] **2.2 KeyPair 无 Zeroize**：`keys.rs` `KeyPair.secret` 无零清除；`zeroize` 依赖声明但零使用。 ✅ 本轮修复
   - 修法：实现 `Drop for KeyPair`（zeroize secret），导出路径避免明文副本。
-- [ ] **2.3 采集者签名验证旁路**：`node_verifier.rs:174-225` `all_valid` 排除 signature 项 → 无效签名不阻断批次通过。
+  - 修复：`impl Drop for KeyPair` 对 `secret` 调 `zeroize()`；`identity_keypair()` 明文读取缓冲与口令字符串用后即 zeroize。
+  - 验证：编译 + 全量测试绿；secret 仅存在于内存中的 KeyPair 生命周期内。
+- [x] **2.3 采集者签名验证旁路**：`node_verifier.rs` `all_valid` 排除 signature 项 → 无效签名不阻断批次通过。 ✅ 本轮修复
   - 修法：把签名验证纳入 `all_valid` 硬门槛。
-- [ ] **2.4 32 字节 dev-placeholder 旁路**：`node_pipeline.rs:187-189` 任意 32 字节被当 DevPlaceholder 豁免（Ed25519 恒 64 字节）。
+  - 修复：`BatchVerificationReport` 增 `own_batch`/`signatures_audit_valid`（serde default 向后兼容）；本节点收集的批次（own batch）要求每条观察均为 Valid Ed25519 签名，Empty/DevPlaceholder/Invalid/Unverifiable 均使审计失败并阻断 `all_valid`；非 own batch（无公钥可验）维持报告不阻断；`node_daemon.rs` 验证凭据 `verified` 同步收紧；`pole-node verify-epoch` 输出新字段。
+  - 验证：`verify_local_epoch` 的 own-batch 路径（batch 无有效签名 → `signatures_audit_valid=false` → `all_valid=false`）。
+- [x] **2.4 32 字节 dev-placeholder 旁路**：`node_pipeline.rs` 任意 32 字节被当 DevPlaceholder 豁免（Ed25519 恒 64 字节）。 ✅ 本轮修复
   - 修法：收紧 dev placeholder 判定，仅 debug 构建允许。
+  - 修复：`verify_collector_signature` 的 32 字节 DevPlaceholder 分支改为 `#[cfg(debug_assertions)]`；release 构建下 32 字节签名落入正常校验路径（无公钥→Unverifiable，有公钥→Invalid），不再豁免。
+  - 验证：现有 dev placeholder 单测（debug 下行为不变）全绿。
 
 ## 3. 🔴 经济模型（方案 A：活跃度挂钩发行）
 

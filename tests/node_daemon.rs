@@ -242,11 +242,12 @@ fn persist_manual_batch(
 
 #[test]
 fn run_collect_tick_persists_payload_artifact_and_progress() {
-    let config = test_config("daemon-once");
+    let mut config = test_config("daemon-once");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let mut progress = LocalNodeProgress::default_from_config(&config);
@@ -638,11 +639,12 @@ fn status_and_epoch_commit_can_be_built_from_local_data() {
 
 #[test]
 fn prepare_local_epoch_builds_submission_ready_artifact() {
-    let config = test_config("daemon-prepare");
+    let mut config = test_config("daemon-prepare");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let mut progress = LocalNodeProgress::default_from_config(&config);
@@ -1262,11 +1264,12 @@ fn storage_challenge_with_no_challenge_subscribers_records_zero_recipient_stats(
 
 #[test]
 fn verify_epoch_reports_local_data_as_valid() {
-    let config = test_config("daemon-verify");
+    let mut config = test_config("daemon-verify");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     if data_dir.exists() {
         std::fs::remove_dir_all(&data_dir).unwrap();
     }
+    write_test_identity(&mut config);
 
     let client = FixedHttpClient;
     let mut progress = LocalNodeProgress::default_from_config(&config);

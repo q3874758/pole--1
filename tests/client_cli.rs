@@ -26,6 +26,35 @@ fn write_test_identity(config: &mut NodeConfig) {
     std::fs::write(data_dir.join("identity.json"), serde_json::to_string(&keypair).unwrap()).unwrap();
 }
 
+/// Runs `pole-client init` with the identity password pre-set so the
+/// test never blocks on the interactive password prompt.
+fn init_client(
+    binary: &str,
+    config_path: &Path,
+    profile: Option<&str>,
+    current_dir: Option<&Path>,
+) -> std::process::Output {
+    let mut cmd = Command::new(binary);
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+    cmd.arg("init").arg(config_path);
+    if let Some(profile) = profile {
+        cmd.arg(profile);
+    }
+    cmd.env("POLE_IDENTITY_PASSWORD", "test-identity-password");
+    cmd.output().unwrap()
+}
+
+/// Sets `POLE_IDENTITY_PASSWORD` for the current test process so lib
+/// calls and child commands that load the (encrypted) node identity
+/// work. Deliberately never unset: tests in this file run concurrently,
+/// and removing the variable in one test would break others mid-flight.
+/// The value is constant and harmless for unrelated commands.
+fn set_test_identity_password() {
+    std::env::set_var("POLE_IDENTITY_PASSWORD", "test-identity-password");
+}
+
 fn wait_for_file(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -106,11 +135,7 @@ fn init_creates_player_profile_workspace() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let output = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .output()
-        .unwrap();
+    let output = init_client(binary, &config_path, None, None);
 
     assert!(
         output.status.success(),
@@ -242,11 +267,7 @@ fn activity_source_commands_manage_configured_sources() {
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, None, None);
     assert!(init.status.success());
 
     let add = Command::new(binary)
@@ -304,11 +325,7 @@ fn reward_config_commands_manage_tokenomics_settings() {
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, None, None);
     assert!(init.status.success());
 
     let show = Command::new(binary)
@@ -385,13 +402,7 @@ fn reward_config_set_uses_default_config_when_subcommand_is_first_arg() {
     let config_path = root.join("node.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .current_dir(&root)
-        .arg("init")
-        .arg(&config_path)
-        .arg("player")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("player"), Some(&root));
     assert!(init.status.success());
 
     let set_mode = Command::new(binary)
@@ -420,6 +431,7 @@ fn reward_config_set_uses_default_config_when_subcommand_is_first_arg() {
 
 #[test]
 fn governance_param_commands_propose_and_vote_future_update() {
+    set_test_identity_password();
     let root = temp_root("governance-params");
     if root.exists() {
         std::fs::remove_dir_all(&root).unwrap();
@@ -429,12 +441,7 @@ fn governance_param_commands_propose_and_vote_future_update() {
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("validator")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("validator"), None);
     assert!(init.status.success());
 
     let (_, config) = NodeConfig::load_json_with_runtime_paths(&config_path).unwrap();
@@ -573,6 +580,7 @@ fn governance_param_commands_propose_and_vote_future_update() {
 
 #[test]
 fn governance_commands_use_default_config_when_proposal_id_is_first_arg() {
+    set_test_identity_password();
     let root = temp_root("governance-default-path");
     if root.exists() {
         std::fs::remove_dir_all(&root).unwrap();
@@ -582,13 +590,7 @@ fn governance_commands_use_default_config_when_proposal_id_is_first_arg() {
     let config_path = root.join("node.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .current_dir(&root)
-        .arg("init")
-        .arg(&config_path)
-        .arg("validator")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("validator"), Some(&root));
     assert!(init.status.success());
 
     let (_, config) = NodeConfig::load_json_with_runtime_paths(&config_path).unwrap();
@@ -700,6 +702,7 @@ fn governance_commands_use_default_config_when_proposal_id_is_first_arg() {
 
 #[test]
 fn governance_service_split_and_threshold_proposals_are_queryable() {
+    set_test_identity_password();
     let root = temp_root("governance-proposal-types");
     if root.exists() {
         std::fs::remove_dir_all(&root).unwrap();
@@ -709,12 +712,7 @@ fn governance_service_split_and_threshold_proposals_are_queryable() {
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("validator")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("validator"), None);
     assert!(init.status.success());
 
     let (_, config) = NodeConfig::load_json_with_runtime_paths(&config_path).unwrap();
@@ -1277,12 +1275,7 @@ fn status_reports_fresh_workspace() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("minimal")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("minimal"), None);
     assert!(init.status.success());
 
     let status = Command::new(binary)
@@ -1353,12 +1346,7 @@ fn doctor_reports_initialized_workspace_is_healthy() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("validator")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("validator"), None);
     assert!(init.status.success());
 
     let doctor = Command::new(binary)
@@ -2319,7 +2307,7 @@ fn prepare_epoch_builds_local_epoch_artifact() {
 
     let config_path = root.join("client.json");
     let data_dir = root.join("pole-node-data");
-    let config = NodeConfig {
+    let mut config = NodeConfig {
         chain_id: "pole-local".into(),
         node_id_hex: pole_protocol_draft::hex_32([0x31; 32]),
         reward_address_hex: pole_protocol_draft::hex_32([0x41; 32]),
@@ -2356,6 +2344,9 @@ fn prepare_epoch_builds_local_epoch_artifact() {
         },
         reward: RewardConfig::default(),
     };
+    // Real identity so collected observations carry valid Ed25519
+    // collector signatures (the verification audit gate requires them).
+    write_test_identity(&mut config);
     config.save_json(&config_path).unwrap();
 
     let client = FixedHttpClient;
@@ -2621,12 +2612,7 @@ fn capture_foreground_process_adds_detected_process_to_config() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("player")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("player"), None);
     assert!(init.status.success());
 
     let capture = Command::new(binary)
@@ -2669,12 +2655,7 @@ fn set_game_processes_updates_config_for_game_aware_mode() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("player")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("player"), None);
     assert!(init.status.success());
 
     let update = Command::new(binary)
@@ -2812,12 +2793,7 @@ fn paths_reports_install_layout_directories() {
 
     let config_path = config_dir.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("player")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("player"), None);
     assert!(init.status.success());
 
     let paths = Command::new(binary)
@@ -2866,12 +2842,7 @@ fn control_api_open_starts_dashboard_server_and_uses_browser_opener() {
 
     let config_path = root.join("client.json");
     let binary = env!("CARGO_BIN_EXE_pole-client");
-    let init = Command::new(binary)
-        .arg("init")
-        .arg(&config_path)
-        .arg("player")
-        .output()
-        .unwrap();
+    let init = init_client(binary, &config_path, Some("player"), None);
     assert!(init.status.success());
 
     let opener_log = root.join("opened-url.txt");

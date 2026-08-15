@@ -77,6 +77,28 @@ changing protocol behaviour. Every change is backward compatible.
 - `LICENSE-MIT` and `LICENSE-APACHE` — dual-license texts at the
   repo root.
 
+### Security
+- `src/wallet/keystore.rs` + `src/node_config.rs` — node identity
+  (`identity.json`) is now stored as an AES-256-GCM + scrypt encrypted
+  keystore instead of a plaintext private key. Password comes from the
+  `POLE_IDENTITY_PASSWORD` environment variable or an interactive prompt
+  during `pole-client init` / `repair-identity` (empty passwords are
+  rejected). Legacy plaintext identity files remain readable for a smooth
+  upgrade; the plaintext buffer and password strings are zeroized after use.
+- `src/wallet/keys.rs` — `KeyPair` now implements `Drop` and zeroizes its
+  secret on drop.
+- `src/node_verifier.rs` — collector-signature audit is now a hard gate of
+  `all_valid` for own batches: every observation in a locally collected
+  batch must carry a valid Ed25519 signature (empty / dev / invalid /
+  unverifiable signatures fail the epoch). Non-own batches (no collector
+  key available) keep reporting-only semantics. `BatchVerificationReport`
+  gains `own_batch` / `signatures_audit_valid` (serde defaults keep old
+  reports readable); `node_daemon` verification credentials use the same
+  bar.
+- `src/node_pipeline.rs` — the 32-byte dev-placeholder signature shortcut
+  is now compiled only in debug builds; release builds treat any
+  non-64-byte signature as invalid, closing the bypass.
+
 ### Fixed
 - `src/observability/server.rs` — replaced a broken
   `UnixMillis::default_or_now()` reference with a direct
