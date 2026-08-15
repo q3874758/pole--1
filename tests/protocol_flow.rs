@@ -3,7 +3,7 @@ use pole_protocol_draft::{
     ChallengeResolution, ChallengeResponseTx, ChallengeState, ClaimRewardTx, CommitEpochTx,
     EpochCommit, FeeParams, GovernanceParams, MerkleCommitment, NodeRegistry, NodeStatus,
     OpenChallengeTx, ProposeProtocolParamsUpdateTx, ProtocolParams, ProtocolState, ProtocolStore,
-    RewardParams, RewardRecord, SlashingParams, StakeTx, SubmitBatchTx, Transaction, TransferTx,
+    RewardParams, RewardRecord, SlashingParams, StakeTx, SubmitBatchTx, Transaction,
     TransitionError, UnbondTx, VoteChoice, VoteTx,
 };
 
@@ -425,80 +425,6 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
 }
 
 #[test]
-fn transfer_and_proto_roundtrip_work() {
-    let tx = TransferTx {
-        from: keypair(71).address,
-        to: fixed32(72),
-        amount: 123,
-        fee: 7,
-        nonce: 2,
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-    let proto = pole_protocol_draft::ProtoTransferTx::from(tx.clone());
-    let roundtrip = TransferTx::try_from(proto).unwrap();
-    assert_eq!(tx, roundtrip);
-
-    let stake = pole_protocol_draft::StakeTx {
-        delegator: keypair(73).address,
-        operator: fixed32(74),
-        amount: 999,
-        nonce: 4,
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-    let stake_roundtrip = pole_protocol_draft::StakeTx::try_from(
-        pole_protocol_draft::ProtoStakeTx::from(stake.clone()),
-    )
-    .unwrap();
-    assert_eq!(stake, stake_roundtrip);
-
-    let unbond = UnbondTx {
-        delegator: keypair(77).address,
-        operator: fixed32(78),
-        amount: 222,
-        nonce: 5,
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-    let unbond_roundtrip =
-        UnbondTx::try_from(pole_protocol_draft::ProtoUnbondTx::from(unbond.clone())).unwrap();
-    assert_eq!(unbond, unbond_roundtrip);
-
-    let vote = VoteTx {
-        proposal_id: fixed32(75),
-        voter: keypair(76).address,
-        choice: VoteChoice::Yes,
-        voting_power: 456,
-        nonce: 9,
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-    let vote_roundtrip =
-        VoteTx::try_from(pole_protocol_draft::ProtoVoteTx::from(vote.clone())).unwrap();
-    assert_eq!(vote, vote_roundtrip);
-
-    let response = ChallengeResponseTx {
-        challenge_id: fixed32(79),
-        responder: keypair(80).address,
-        response_payload_cid: Some("cid://response-roundtrip".into()),
-        response_hash: Some(fixed32(81)),
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-    let response_roundtrip = ChallengeResponseTx::try_from(
-        pole_protocol_draft::ProtoChallengeResponseTx::from(response.clone()),
-    )
-    .unwrap();
-    assert_eq!(response, response_roundtrip);
-}
-
-#[test]
 fn executor_rejects_height_regression() {
     let params = test_params();
     let mut state = ProtocolState::new(params, 10, 1);
@@ -514,26 +440,6 @@ fn executor_rejects_height_regression() {
         result,
         Err(pole_protocol_draft::BlockExecutionError::HeightRegression { .. })
     ));
-}
-
-#[test]
-fn protocol_params_update_tx_proto_roundtrip_works() {
-    let tx = ProposeProtocolParamsUpdateTx {
-        proposal_id: fixed32(77),
-        proposer: keypair(78).address,
-        effective_epoch: 3,
-        params: test_params(),
-        nonce: 9,
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    };
-
-    let roundtrip = ProposeProtocolParamsUpdateTx::try_from(
-        pole_protocol_draft::ProtoProposeProtocolParamsUpdateTx::from(tx.clone()),
-    )
-    .unwrap();
-    assert_eq!(tx, roundtrip);
 }
 
 #[test]

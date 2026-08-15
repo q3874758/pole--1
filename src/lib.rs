@@ -33,7 +33,6 @@ pub mod p2p;
 pub mod p2p_libp2p;
 pub mod params;
 pub mod primitives;
-pub mod proto;
 pub mod records;
 pub mod schema;
 pub mod service_runtime;
@@ -178,7 +177,6 @@ pub use p2p_libp2p::{
 };
 pub use params::*;
 pub use primitives::*;
-pub use proto::*;
 pub use records::*;
 pub use service_runtime::{
     ManagedServiceStatus, ServiceManager, ServiceManagerError, ServiceRuntime, ServiceSnapshot,
