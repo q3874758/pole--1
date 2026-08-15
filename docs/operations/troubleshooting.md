@@ -175,4 +175,4 @@ pole-client tokenomics client-config.json
 ## 获取帮助
 
 - 查看文档: `docs/`
-- 提交 Issue: https://github.com/pole-local/pole/issues
+- 提交 Issue: https://github.com/q3874758/pole--1/issues
