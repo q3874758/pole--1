@@ -240,11 +240,47 @@ fn windows_manager_install_and_uninstall_track_registration_file() {
     }
     std::fs::create_dir_all(&root).unwrap();
 
+    // Mock `sc.exe` so the manager never probes the real Windows service
+    // database (which would legitimately report 1060 "service does not exist"
+    // for a service that is only tracked by a local registration file). See
+    // windows_manager_status_uses_binary_output for the status-query convention.
+    #[cfg(windows)]
+    let sc_binary = root.join("sc.cmd");
+    #[cfg(not(windows))]
+    let sc_binary = root.join("sc");
+    let log_path = root.join("sc.log");
+
+    #[cfg(windows)]
+    std::fs::write(
+        &sc_binary,
+        format!(
+            "@echo off\r\nif \"%1\"==\"query\" echo STATE              : 1  STOPPED\r\necho %*>>\"{}\"\r\nexit /b 0\r\n",
+            log_path.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(not(windows))]
+    {
+        std::fs::write(
+            &sc_binary,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"query\" ]; then echo 'STATE              : 1  STOPPED'; fi\necho \"$@\" >> \"{}\"\nexit 0\n",
+                log_path.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&sc_binary).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&sc_binary, perms).unwrap();
+    }
+
     let definition = WindowsServiceDefinition::new(
         "C:/Program Files/PoLE/pole-node.exe",
         "C:/Program Files/PoLE/config/node.json",
     )
-    .with_service_root(&root);
+    .with_service_root(&root)
+    .with_sc_binary(&sc_binary);
     let registration_path = definition.registration_path();
     let manager = WindowsServiceManager::new(definition);
 
