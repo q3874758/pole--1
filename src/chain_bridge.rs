@@ -89,11 +89,11 @@ pub fn build_epoch_commit_tx(
 pub fn batch_commit_to_cosmos_json(batch: &BatchCommit) -> serde_json::Value {
     serde_json::json!({
         "epoch_id": batch.epoch_id,
-        "collector_address": hex::encode(&batch.collector_id),
+        "collector_address": hex::encode(batch.collector_id),
         "slot_start": batch.slot_start,
         "slot_end": batch.slot_end,
         "batch": {
-            "root": hex::encode(&batch.batch.root),
+            "root": hex::encode(batch.batch.root),
             "leaf_count": batch.batch.leaf_count,
         },
         "payload_cid": batch.payload_cid,
@@ -106,27 +106,27 @@ pub fn epoch_commit_to_cosmos_json(commit: &EpochCommit) -> serde_json::Value {
     serde_json::json!({
         "epoch_id": commit.epoch_id,
         "accepted_batches": {
-            "root": hex::encode(&commit.accepted_batches.root),
+            "root": hex::encode(commit.accepted_batches.root),
             "leaf_count": commit.accepted_batches.leaf_count,
         },
         "observations": {
-            "root": hex::encode(&commit.observations.root),
+            "root": hex::encode(commit.observations.root),
             "leaf_count": commit.observations.leaf_count,
         },
         "aggregates": {
-            "root": hex::encode(&commit.aggregates.root),
+            "root": hex::encode(commit.aggregates.root),
             "leaf_count": commit.aggregates.leaf_count,
         },
         "rewards": {
-            "root": hex::encode(&commit.rewards.root),
+            "root": hex::encode(commit.rewards.root),
             "leaf_count": commit.rewards.leaf_count,
         },
         "availability": {
-            "root": hex::encode(&commit.availability.root),
+            "root": hex::encode(commit.availability.root),
             "leaf_count": commit.availability.leaf_count,
         },
-        "randomness_seed_hex": hex::encode(&commit.randomness_seed),
-        "proposer_address": hex::encode(&commit.proposer_id),
+        "randomness_seed_hex": hex::encode(commit.randomness_seed),
+        "proposer_address": hex::encode(commit.proposer_id),
         "challenge_open_height": commit.challenge_open_height,
         "challenge_deadline_height": commit.challenge_deadline_height,
     })

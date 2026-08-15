@@ -2241,7 +2241,6 @@ fn verify_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 /// Submit locally stored verification credentials for an epoch to the
 /// chain as `MsgVerifyBatch` attestations. Requires a running chain
 /// (RPC on localhost:26657) and the node identity.
-
 fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 4 && args.len() != 5 {
         return Err("usage: pole-node verify-batch-submit <config-path> <epoch-id> [chain-id]".into());

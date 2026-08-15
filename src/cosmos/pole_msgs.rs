@@ -1,4 +1,4 @@
-//! Hand-rolled protobuf encoders for the PoLE `Msg*` types.
+﻿//! Hand-rolled protobuf encoders for the PoLE `Msg*` types.
 //!
 //! The `pole.chain.pole.v1` package types live in
 //! `chain/proto/pole/chain/pole/v1/tx.proto`. They aren't shipped in
@@ -14,7 +14,7 @@
 //! `encode_msg_xxx` function that lays out its fields. The
 //! [`MessageEncoder`] trait (added in Phase0.2) is the forward-compatible
 //! hook for plugging in new message types without touching the
-//! `BridgeMessage` enum 鈥?used heavily by later phases (session keys,
+//! `BridgeMessage` enum 閳?used heavily by later phases (session keys,
 //! withdrawals, threshold envelopes, PNT-20).
 //!
 //! `MsgOpenChallenge` carries a nested `Challenge` (state.proto:139)
@@ -31,7 +31,7 @@ use crate::records::{Challenge, ChallengeEvidenceRef};
 /// Forward-compatible hook for plugging new message types into the
 /// bridge without modifying the `BridgeMessage` enum.
 ///
-/// Implementations emit a fully-formed protobuf [`Any`] 鈥?the
+/// Implementations emit a fully-formed protobuf [`Any`] 閳?the
 /// `type_url` selects the chain-side `MsgServer` handler, and `value`
 /// is the proto3 wire-format byte string.
 ///
@@ -48,7 +48,7 @@ pub trait MessageEncoder {
     fn encode(&self) -> Vec<u8>;
 }
 
-/// `MsgFinalizeEpoch` 鈥?the simplest message in the suite.
+/// `MsgFinalizeEpoch` 閳?the simplest message in the suite.
 /// pole.chain.pole.v1.MsgFinalizeEpoch {
 /// string finalizer =1;
 /// uint64 epoch_id =2;
@@ -63,7 +63,7 @@ pub fn encode_msg_finalize_epoch(finalizer_bech32: &str, epoch_id: u64) -> Any {
     }
 }
 
-/// `MsgVerifyBatch` 鈥?verifier attestation for a batch.
+/// `MsgVerifyBatch` 閳?verifier attestation for a batch.
 ///
 /// pole.chain.pole.v1.MsgVerifyBatch {
 ///   string verifier = 1;
@@ -97,7 +97,7 @@ pub fn encode_msg_verify_batch(
     }
 }
 
-/// `MsgClaimReward` 鈥?the second-simplest.
+/// `MsgClaimReward` 閳?the second-simplest.
 pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_bech32: &str) -> Any {
     let mut buf = Vec::with_capacity(claimer_bech32.len() + recipient_bech32.len() + 24);
     encode_string(1, claimer_bech32, &mut buf);
@@ -109,7 +109,7 @@ pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_be
     }
 }
 
-/// `MsgOpenChallenge` 鈥?proto3 wire encoder.
+/// `MsgOpenChallenge` 閳?proto3 wire encoder.
 ///
 /// pole.chain.pole.v1.MsgOpenChallenge {
 /// string challenger =1;
@@ -124,7 +124,7 @@ pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_be
 ///
 /// `challenge_id`, `target_node`, `challenger_address` (from
 /// `records::Challenge`) and the evidence roots/cid are emitted as
-/// lowercase hex strings 鈥?the chain's `GetChallenge` / `GetNode`
+/// lowercase hex strings 閳?the chain's `GetChallenge` / `GetNode`
 /// lookup keys accept hex form for now (`chain_bridge.rs::challenge_to_json`
 /// uses the same convention).
 pub fn encode_msg_open_challenge(challenger_bech32: &str, challenge: &Challenge) -> Any {
@@ -150,8 +150,8 @@ pub fn encode_msg_open_challenge(challenger_bech32: &str, challenge: &Challenge)
 fn encode_challenge_inner(challenge: &Challenge, challenger_bech32: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(256);
     // Field1: challenge_id_hex (string, hex of32-byte hash).
-    encode_string(1, &hex::encode(&challenge.challenge_id), &mut buf);
-    // Field2: kind (varint i32 鈥?proto enum, UNSPECIFIED=0).
+    encode_string(1, &hex::encode(challenge.challenge_id), &mut buf);
+    // Field2: kind (varint i32 閳?proto enum, UNSPECIFIED=0).
     encode_int32(2, challenge_kind_to_proto(challenge.kind), &mut buf);
     // Field3: epoch_id (uint64).
     encode_uint64(3, challenge.epoch_id, &mut buf);
@@ -159,18 +159,18 @@ fn encode_challenge_inner(challenge: &Challenge, challenger_bech32: &str) -> Vec
     let target_address = challenge
         .target_node
         .as_ref()
-        .map(|n| hex::encode(n))
+        .map(hex::encode)
         .unwrap_or_default();
     encode_string(4, &target_address, &mut buf);
-    // Field5: challenger (string 鈥?bech32).
+    // Field5: challenger (string 閳?bech32).
     encode_string(5, challenger_bech32, &mut buf);
-    // Field6: bond_amount (uint64 鈥?low64 bits of the u128 bond).
+    // Field6: bond_amount (uint64 閳?low64 bits of the u128 bond).
     encode_uint64(6, challenge.bond as u64, &mut buf);
-    // Field7: opened_at_height (int64 鈥?non-negative u64 fits cleanly).
+    // Field7: opened_at_height (int64 閳?non-negative u64 fits cleanly).
     encode_int64(7, challenge.opened_at_height as i64, &mut buf);
-    // Field8: deadline_height (int64 鈥?non-negative u64 fits cleanly).
+    // Field8: deadline_height (int64 閳?non-negative u64 fits cleanly).
     encode_int64(8, challenge.deadline_height as i64, &mut buf);
-    // Field9: state (varint i32 鈥?proto enum, UNSPECIFIED=0).
+    // Field9: state (varint i32 閳?proto enum, UNSPECIFIED=0).
     // At open time the canonical state is OPEN; we still pass through the
     // caller-provided value so subsequent callers (resolve, expire) can
     // reuse the encoder.
@@ -178,13 +178,13 @@ fn encode_challenge_inner(challenge: &Challenge, challenger_bech32: &str) -> Vec
     // Field10: evidence (nested length-delimited message).
     let ev = encode_evidence_inner(&challenge.evidence);
     encode_bytes(10, &ev, &mut buf);
-    // Field11: slash_amount (uint64 鈥?zero at open time).
+    // Field11: slash_amount (uint64 閳?zero at open time).
     encode_uint64(11, 0, &mut buf);
-    // Field12: challenger_reward (uint64 鈥?zero at open time).
+    // Field12: challenger_reward (uint64 閳?zero at open time).
     encode_uint64(12, 0, &mut buf);
-    // Field13: resolution_summary (string 鈥?empty at open time).
+    // Field13: resolution_summary (string 閳?empty at open time).
     encode_string(13, "", &mut buf);
-    // Field14: target_cons_address (string 鈥?empty at open time;
+    // Field14: target_cons_address (string 閳?empty at open time;
     // the chain resolves it from the bonded validator set on its side).
     encode_string(14, "", &mut buf);
     buf
@@ -195,7 +195,7 @@ fn encode_challenge_inner(challenge: &Challenge, challenger_bech32: &str) -> Vec
 /// Encode the inner `ChallengeEvidenceRef` message
 /// (`chain/proto/pole/chain/pole/v1/state.proto:130`).
 ///
-/// Field5 (`merkle_proof_hex`) is `repeated string` 鈥?emit one
+/// Field5 (`merkle_proof_hex`) is `repeated string` 閳?emit one
 /// length-delimited field per proof element, all sharing tag0x2A.
 fn encode_evidence_inner(ev: &ChallengeEvidenceRef) -> Vec<u8> {
     let mut buf = Vec::with_capacity(128);
@@ -203,31 +203,31 @@ fn encode_evidence_inner(ev: &ChallengeEvidenceRef) -> Vec<u8> {
     let batch_root = ev
         .batch_root
         .as_ref()
-        .map(|h| hex::encode(h))
+        .map(hex::encode)
         .unwrap_or_default();
     encode_string(1, &batch_root, &mut buf);
     // Field2: aggregate_root_hex (string; empty when None).
     let aggregate_root = ev
         .aggregate_root
         .as_ref()
-        .map(|h| hex::encode(h))
+        .map(hex::encode)
         .unwrap_or_default();
     encode_string(2, &aggregate_root, &mut buf);
     // Field3: reward_root_hex (string; empty when None).
     let reward_root = ev
         .reward_root
         .as_ref()
-        .map(|h| hex::encode(h))
+        .map(hex::encode)
         .unwrap_or_default();
     encode_string(3, &reward_root, &mut buf);
     // Field4: payload_cid (string; empty when None).
     let payload_cid = ev.payload_cid.clone().unwrap_or_default();
     encode_string(4, &payload_cid, &mut buf);
-    // Field5: merkle_proof_hex (repeated string 鈥?one tag per element).
+    // Field5: merkle_proof_hex (repeated string 閳?one tag per element).
     for proof_hash in &ev.merkle_proof {
         encode_string(5, &hex::encode(proof_hash), &mut buf);
     }
-    // Field6: aggregate_app_id (uint32 鈥?Rust struct doesn't carry this
+    // Field6: aggregate_app_id (uint32 閳?Rust struct doesn't carry this
     // slot yet, so we emit the proto default of0).
     encode_uint32(6, 0, &mut buf);
     buf
@@ -237,7 +237,7 @@ fn encode_evidence_inner(ev: &ChallengeEvidenceRef) -> Vec<u8> {
 
 /// Map Rust `ChallengeKind` (0-based) to the chain-side proto enum i32
 /// (state.proto:114). Proto reserves `CHALLENGE_KIND_UNSPECIFIED =0`
-/// and assigns1..5 to the concrete variants 鈥?Rust's enum has no
+/// and assigns1..5 to the concrete variants 閳?Rust's enum has no
 /// `Unspecified` variant, so we shift the index up by1.
 fn challenge_kind_to_proto(kind: ChallengeKind) -> i32 {
     match kind {
@@ -354,7 +354,7 @@ use crate::cosmos::wire_types::{
 
 // --- MsgUpsertNode -------------------------------------------------------
 
-/// `MsgUpsertNode` 鈥?pole.chain.pole.v1.MsgUpsertNode {
+/// `MsgUpsertNode` 閳?pole.chain.pole.v1.MsgUpsertNode {
 ///   string operator = 1;
 ///   NodeRecord node = 2;
 /// }
@@ -401,7 +401,7 @@ fn node_role_to_proto(role: NodeRoleWire) -> i32 {
 
 // --- MsgUpsertAggregateRecord -------------------------------------------
 
-/// `MsgUpsertAggregateRecord` 鈥?pole.chain.pole.v1.MsgUpsertAggregateRecord {
+/// `MsgUpsertAggregateRecord` 閳?pole.chain.pole.v1.MsgUpsertAggregateRecord {
 ///   string operator = 1;
 ///   AggregateRecord aggregate_record = 2;
 /// }
@@ -430,7 +430,7 @@ fn encode_aggregate_record_inner(a: &AggregateRecordWire) -> Vec<u8> {
 
 // --- MsgSubmitBatch ------------------------------------------------------
 
-/// `MsgSubmitBatch` 鈥?pole.chain.pole.v1.MsgSubmitBatch {
+/// `MsgSubmitBatch` 閳?pole.chain.pole.v1.MsgSubmitBatch {
 ///   string collector = 1;
 ///   BatchCommit batch_commit = 2;
 /// }
@@ -468,7 +468,7 @@ fn encode_merkle_commitment_inner(m: &MerkleCommitmentWire) -> Vec<u8> {
 
 // --- MsgSubmitReplicaReceipt --------------------------------------------
 
-/// `MsgSubmitReplicaReceipt` 鈥?pole.chain.pole.v1.MsgSubmitReplicaReceipt {
+/// `MsgSubmitReplicaReceipt` 閳?pole.chain.pole.v1.MsgSubmitReplicaReceipt {
 ///   string storer = 1;
 ///   ReplicaReceipt replica_receipt = 2;
 /// }
@@ -496,7 +496,7 @@ fn encode_replica_receipt_inner(r: &ReplicaReceiptWire) -> Vec<u8> {
 
 // --- MsgCommitEpoch ------------------------------------------------------
 
-/// `MsgCommitEpoch` 鈥?pole.chain.pole.v1.MsgCommitEpoch {
+/// `MsgCommitEpoch` 閳?pole.chain.pole.v1.MsgCommitEpoch {
 ///   string proposer = 1;
 ///   EpochCommit epoch_commit = 2;
 /// }
@@ -542,7 +542,7 @@ fn encode_epoch_commit_inner(c: &EpochCommitWire) -> Vec<u8> {
 
 // --- MsgResolveChallenge (flat, no nested message) ----------------------
 
-/// `MsgResolveChallenge` 鈥?pole.chain.pole.v1.MsgResolveChallenge {
+/// `MsgResolveChallenge` 閳?pole.chain.pole.v1.MsgResolveChallenge {
 ///   string resolver = 1;
 ///   string challenge_id_hex = 2;
 ///   uint64 slash_amount = 3;
@@ -580,7 +580,7 @@ pub fn encode_msg_resolve_challenge(
 
 // --- MsgUpsertGameWeight -------------------------------------------------
 
-/// `MsgUpsertGameWeight` 鈥?pole.chain.pole.v1.MsgUpsertGameWeight {
+/// `MsgUpsertGameWeight` 閳?pole.chain.pole.v1.MsgUpsertGameWeight {
 ///   string authority = 1;
 ///   GameWeightEntry entry = 2;
 /// }
@@ -606,7 +606,7 @@ fn encode_game_weight_entry_inner(e: &GameWeightEntryWire) -> Vec<u8> {
 
 // --- MsgUpdateParams -----------------------------------------------------
 
-/// `MsgUpdateParams` 鈥?pole.chain.pole.v1.MsgUpdateParams {
+/// `MsgUpdateParams` 閳?pole.chain.pole.v1.MsgUpdateParams {
 ///   string authority = 1;
 ///   Params params = 2;
 /// }
@@ -644,7 +644,7 @@ fn encode_params_inner(p: &ParamsWire) -> Vec<u8> {
     encode_uint64(19, p.reward_burn_threshold, &mut buf);
     encode_uint32(20, p.reward_burn_bps, &mut buf);
     encode_uint32(21, p.governance_burn_bps, &mut buf);
-    // proto field 22 (uint64): min_verification_count 鈥?the FinalizeEpoch
+    // proto field 22 (uint64): min_verification_count 閳?the FinalizeEpoch
     // verification-coverage gate. Omitting it zeroes the gate on-chain.
     encode_uint64(22, p.min_verification_count, &mut buf);
     // proto field 23 (uint32): min_player_verifier_share_bps.
@@ -964,7 +964,7 @@ mod tests {
     /// Wire breakdown:
     /// outer field1 challenger = "cosmos1abc"
     /// [0x0A,0x0A, b"cosmos1abc"]
-    /// outer field2 challenge (nested) 鈥?length-prefixed inner:
+    /// outer field2 challenge (nested) 閳?length-prefixed inner:
     /// [0x12, <inner_len>, ...inner bytes...]
     /// inner field1 challenge_id_hex = "aaaa...aa" (64 chars)
     /// [0x0A,0x40, b"aa" *32]
@@ -984,7 +984,7 @@ mod tests {
     /// [0x40,0xC8,0x01]
     /// inner field9 state =1 (CHALLENGE_STATE_OPEN)
     /// [0x48,0x01]
-    /// inner field10 evidence (nested 鈥?empty evidence)
+    /// inner field10 evidence (nested 閳?empty evidence)
     /// [0x52,0x0A, ...evidence bytes...]
     /// inner field11 slash_amount =0
     /// [0x58,0x00]

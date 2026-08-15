@@ -85,8 +85,8 @@ impl EncryptedKeystore {
                 cipher: "aes-256-gcm".to_string(),
                 kdf: "scrypt".to_string(),
                 salt: hex::encode(salt.as_slice()),
-                nonce: hex::encode(&nonce_arr),
-                ciphertext: hex::encode(&ciphertext),
+                nonce: hex::encode(nonce_arr),
+                ciphertext: hex::encode(ciphertext),
             },
             metadata: MetadataJson {
                 created_at: self.created_at,

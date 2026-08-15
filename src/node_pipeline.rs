@@ -458,7 +458,7 @@ pub fn aggregate_record_to_chain_json(
 }
 
 pub fn cid_from_hash(hash: Hash32, namespace: &str) -> ContentId {
-    format!("cid://{namespace}/{}", hex::encode(&hash))
+    format!("cid://{namespace}/{}", hex::encode(hash))
 }
 
 
