@@ -1,27 +1,30 @@
 use crate::wallet::error::{Result, WalletError};
-use once_cell::sync::Lazy;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 
-static BIP39_WORDLIST: Lazy<RwLock<Vec<&'static str>>> = Lazy::new(|| {
-    let content = include_str!("bip39_wordlist.txt");
-    let mut words: Vec<&'static str> = Vec::with_capacity(2048);
-    for line in content.lines() {
-        let trimmed = line.trim();
-        let owned = String::from(trimmed);
-        let boxed = owned.into_boxed_str();
-        let leaked = Box::leak(boxed);
-        words.push(leaked);
-    }
-    RwLock::new(words)
-});
+static BIP39_WORDLIST: OnceLock<RwLock<Vec<&'static str>>> = OnceLock::new();
+
+fn bip39_wordlist() -> &'static RwLock<Vec<&'static str>> {
+    BIP39_WORDLIST.get_or_init(|| {
+        let content = include_str!("bip39_wordlist.txt");
+        let mut words: Vec<&'static str> = Vec::with_capacity(2048);
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let owned = String::from(trimmed);
+            let boxed = owned.into_boxed_str();
+            let leaked = Box::leak(boxed);
+            words.push(leaked);
+        }
+        RwLock::new(words)
+    })
+}
 
 pub fn word_at_index(index: usize) -> &'static str {
-    BIP39_WORDLIST.read().unwrap()[index]
+    bip39_wordlist().read().unwrap()[index]
 }
 
 pub fn word_to_index(word: &str) -> Result<usize> {
     let lower = word.to_lowercase();
-    BIP39_WORDLIST
+    bip39_wordlist()
         .read()
         .unwrap()
         .iter()
@@ -38,7 +41,7 @@ impl Mnemonic {
         if words.len() != 24 {
             return Err(WalletError::InvalidWordCount(words.len()));
         }
-        let list = BIP39_WORDLIST.read().unwrap();
+        let list = bip39_wordlist().read().unwrap();
         let mut validated = Vec::with_capacity(24);
         for w in words {
             let lower = w.to_lowercase();
@@ -83,7 +86,7 @@ pub fn generate_mnemonic() -> Mnemonic {
     for i in (0..8).rev() {
         entropy_bits.push((checksum >> i) & 1);
     }
-    let list = BIP39_WORDLIST.read().unwrap();
+    let list = bip39_wordlist().read().unwrap();
     let mut words_out = Vec::with_capacity(24);
     for chunk in entropy_bits.chunks(11) {
         let idx: usize = chunk
@@ -100,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_wordlist_count() {
-        let list = BIP39_WORDLIST.read().unwrap();
+        let list = bip39_wordlist().read().unwrap();
         assert_eq!(list.len(), 2048);
         assert_eq!(list[0], "abandon");
     }

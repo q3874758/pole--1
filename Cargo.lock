@@ -2507,7 +2507,6 @@ dependencies = [
  "libp2p",
  "libp2p-identity",
  "multiaddr",
- "once_cell",
  "prost 0.13.5",
  "rand 0.9.2",
  "reqwest",
