@@ -149,7 +149,7 @@
 
 | 平台 | 路径 |
 |------|------|
-| Windows (MSI 服务) | `%LOCALAPPDATA%\PoLE\logs\` （perUser 安装到 `%LOCALAPPDATA%\PoLE\`） |
+| Windows | `%LOCALAPPDATA%\PoLE\logs\` （perUser 安装/解压到 `%LOCALAPPDATA%\PoLE\`） |
 | Windows (绿色版) | `<安装目录>\pole-node-data\logs\` |
 | Linux | `/var/log/pole/` 或 `journalctl -u pole-node` |
 

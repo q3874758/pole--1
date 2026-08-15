@@ -59,7 +59,6 @@
 - [ ] **5.2 更新通道接真实发布**：`control_api.rs:529,574` 从编译期 `CARGO_MANIFEST_DIR` 读 stable.json → 改为安装布局路径 + GitHub Releases 拉取 + cosign 校验。
 - [ ] **5.3 路径矛盾修复**：`layout.json`/`install-service.cmd`/`pole-node-service.json` 硬编码 `C:\Program Files\PoLE` 与 perUser `%LOCALAPPDATA%\PoLE` 冲突。
 - [ ] **5.4 RELEASE_NOTES heredoc 变量展开**：`release.yml` 用 `<<'EOF'` 使 `${VERSION}` 变字面量。
-- [ ] **5.5 MSI Authenticode 签名决策**：无代码签名（SmartScreen 警告）——补签名或明确文档声明"未签名"。
 - [ ] **5.6 deb conffiles/版本号**：`conffiles` 未随包安装；deb 命名带 `v` 前缀与 control 版本不一致。
 - [ ] **5.7 stable.json 清理**：残留 `"signature": "dev-signature"` 字段（文档称已移除）——发布前移除。
 
@@ -77,7 +76,7 @@
 - [ ] 7.2 压力测试/benchmark（criterion）
 - [ ] 7.3 归档重放策略（IPFS/Arweave）
 - [ ] 7.4 灾难恢复手册
-- [ ] 7.5 GUI Tauri 壳 / CONFIG.md / macOS CI 矩阵
+- [ ] 7.5 CONFIG.md / macOS CI 矩阵
 - [ ] 7.6 keystore scrypt N 提升（2^14 → 2^18）
 
 ---
@@ -88,5 +87,5 @@
 - [ ] `cd chain && go test ./...` 全绿
 - [ ] `cargo test --features integration` 全绿（poled 在 PATH）
 - [ ] CI 三 job + go test job 全绿
-- [ ] 一次真实 `v0.1.0` 发布：MSI/deb/zip + SHA256 + cosign 签名 + stable.json 可被 `pole-client` 更新通道验证
+- [ ] 一次真实 `v0.1.0` 发布：zip + deb + SHA256 + cosign 签名 + stable.json 可被 `pole-client` 更新通道验证
 - [ ] Rust↔Go 奖励/发行/Merkle 对账 fixtures 全部通过

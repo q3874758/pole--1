@@ -1,6 +1,6 @@
 # PoLE 服务管理指南
 
-> **路径约定（Windows MSI 安装）**：PoLE V1 MSI 是 perUser 范围（`InstallScope="perUser"`），实际安装到用户目录 `%LOCALAPPDATA%\PoLE\`（`HKCU`）。本文所有 Windows 命令块中的 `%LOCALAPPDATA%` 都是 Windows 用户环境变量，可直接在 `cmd.exe` / PowerShell / 资源管理器中展开，等价于 PowerShell 中的 `$env:LOCALAPPDATA` 或 `[Environment]::GetFolderPath('LocalApplicationData')`。子目录布局：`config\` / `data\` / `logs\` / `updates\`。
+> **路径约定（Windows 安装）**：Windows 安装/解压布局为 `%LOCALAPPDATA%\PoLE\`（perUser）。本文所有 Windows 命令块中的 `%LOCALAPPDATA%` 都是 Windows 用户环境变量，可直接在 `cmd.exe` / PowerShell / 资源管理器中展开，等价于 PowerShell 中的 `$env:LOCALAPPDATA` 或 `[Environment]::GetFolderPath('LocalApplicationData')`。子目录布局：`config\` / `data\` / `logs\` / `updates\`。
 
 ## Windows Service
 

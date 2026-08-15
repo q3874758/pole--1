@@ -12,7 +12,6 @@ V1 的正式发布口径与白皮书保持一致：
 
 - `pole-client`：玩家端与运维端 CLI
 - `pole-node`：节点服务 CLI
-- `pole-gui`：桌面 GUI 入口（启用 `gui` feature）
 - `desktop/web/`：本地控制台页面
 - `docs_PoLE_Whitepaper.md`：PoLE 正式发布版白皮书
 
@@ -34,7 +33,6 @@ cargo test
 
 正式对外发布前，建议至少交付以下产物：
 
-- Windows MSI 安装包
 - Windows portable 压缩包
 - Linux `deb` 包
 - 对应版本的发布说明与校验信息

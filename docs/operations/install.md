@@ -14,42 +14,24 @@
 
 建议发布至少包含以下产物：
 
-- `PoLE-x.x.x-x64.msi`
 - `PoLE-x.x.x-x64-portable.zip`
 - `pole-node_x.x.x_amd64.deb`
 
 ## Windows 安装
-
-### MSI 安装包（推荐）
-
-1. 打开项目发布仓库的 GitHub Releases 页面
-2. 下载 `PoLE-x.x.x-x64.msi`
-3. 双击运行安装程序
-4. 安装完成后，从开始菜单或桌面快捷方式启动
-
-安装内容：
-- `pole-gui.exe` - 图形界面
-- `pole-client.exe` - 客户端 CLI
-- `pole-node.exe` - 节点服务
-- 开始菜单和桌面快捷方式
-
-可选功能：
-- `Start with Windows`：开机自动启动 GUI
 
 ### 便携版
 
 1. 打开项目发布仓库的 GitHub Releases 页面
 2. 下载 `PoLE-x.x.x-x64-portable.zip`
 3. 解压到任意目录
-4. 运行 `pole-gui.exe`
+4. 运行 `pole-node.exe`（节点服务）与 `pole-client.exe`（客户端 CLI）
 
-### Windows 安装位置（MSI）
+### Windows 目录布局
 
-PoLE V1 MSI 是 **perUser 范围**（`InstallScope="perUser"`，`HKCU` 写注册表），不写入系统级 `Program Files` 目录（仅写入当前用户环境，避免 UAC 提权）。实际安装根目录为：
+绿色版和本地解压运行目录默认采用以下结构：
 
 ```
-%LOCALAPPDATA%\PoLE\        # = C:\Users\<当前用户>\AppData\Local\PoLE\
-├── pole-gui.exe
+<解压目录>\                    # 或 %LOCALAPPDATA%\PoLE\
 ├── pole-client.exe
 ├── pole-node.exe
 ├── config\                  # node.json / client.json
@@ -86,7 +68,6 @@ Windows 绿色版和本地解压运行目录默认采用以下结构：
 
 - `pole-client.exe`
 - `pole-node.exe`
-- `pole-gui.exe`
 - `client.json` 或 `node.json`
 - `pole-node-data/`
 - `pole-node-data/logs/`
@@ -98,7 +79,7 @@ Windows 绿色版和本地解压运行目录默认采用以下结构：
 
 ### Windows
 
-GUI 启动后访问：`http://127.0.0.1:8787/`
+启动 `pole-node.exe` 后，浏览器访问控制台：`http://127.0.0.1:8787/`
 
 CLI 状态检查：
 ```cmd
@@ -117,8 +98,7 @@ pole-client status /etc/pole/node.json
 
 ### Windows
 
-- MSI 安装版：通过"应用和功能"卸载
-- 便携版：直接删除目录
+- 便携版：直接删除解压目录
 
 ### Linux
 

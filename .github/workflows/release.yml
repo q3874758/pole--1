@@ -71,45 +71,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binaries
-        run: cargo build --release --features gui --manifest-path Cargo.toml
-
-      - name: Setup WiX
-        run: |
-          mkdir -p tools/wix
-          if (!(Test-Path "tools/wix/candle.exe")) {
-            Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix314rtm/wix314-binaries.zip" -OutFile "tools/wix.zip"
-            Expand-Archive -Path "tools/wix.zip" -DestinationPath "tools/wix" -Force
-            Remove-Item "tools/wix.zip"
-          }
-
-      - name: Generate icon
-        run: |
-          if (!(Test-Path "packaging/windows/pole.ico")) {
-            powershell -ExecutionPolicy Bypass -File "packaging/windows/generate-icon.ps1"
-          }
-
-      - name: Build MSI installer
-        run: |
-          mkdir dist/packages
-          $env:RootDir = $PWD.Path
-          & "tools/wix/candle.exe" -nologo -ext WixUIExtension `
-            -dRootDir="$env:RootDir" `
-            -dSourceDir="target/release" `
-            "packaging/windows/Product.wxs" `
-            -out "dist/packages/Product.wixobj"
-          & "tools/wix/light.exe" -nologo -ext WixUIExtension `
-            "dist/packages/Product.wixobj" `
-            -out "dist/packages/PoLE-Desktop-$env:VERSION-x64.msi"
+        run: cargo build --release --manifest-path Cargo.toml
 
       - name: Create portable zip
         run: |
-          Compress-Archive -Path target/release/pole-gui.exe,target/release/pole-client.exe,target/release/pole-node.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
+          Compress-Archive -Path target/release/pole-client.exe,target/release/pole-node.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums
         run: |
           cd dist/packages
           Get-ChildItem *.exe | ForEach-Object { certutil -hashfile $_.FullName SHA256 | Select-String -Pattern "^[a-f0-9]{64}" > "$($_.BaseName).sha256" }
-          Get-ChildItem *.msi | ForEach-Object { certutil -hashfile $_.FullName SHA256 | Select-String -Pattern "^[a-f0-9]{64}" > "$($_.BaseName).sha256" }
           Get-ChildItem *.zip | ForEach-Object { certutil -hashfile $_.FullName SHA256 | Select-String -Pattern "^[a-f0-9]{64}" > "$($_.BaseName).sha256" }
 
       - name: Upload Windows artifacts
@@ -117,7 +88,6 @@ jobs:
         with:
           name: windows-artifacts
           path: |
-            dist/packages/*.msi
             dist/packages/*.zip
             dist/packages/*.sha256
 
@@ -146,7 +116,6 @@ jobs:
           mkdir -p dist/release
           cp artifacts/linux-artifacts/pole-node_${VERSION}_amd64.deb dist/release/
           cp artifacts/windows-artifacts/PoLE-${VERSION}-x64-portable.zip dist/release/
-          cp artifacts/windows-artifacts/PoLE-${VERSION}-x64.msi dist/release/
           cp artifacts/linux-artifacts/*.sha256 dist/release/
           cp artifacts/windows-artifacts/*.sha256 dist/release/
 
@@ -238,7 +207,6 @@ jobs:
           # PoLE ${VERSION} Release Notes
 
           ## Downloads
-          - **Windows MSI**: `PoLE-${VERSION}-x64.msi` - Full installer with shortcuts
           - **Windows Portable**: `PoLE-${VERSION}-x64-portable.zip` - No installation required
           - **Linux DEB**: `pole-node_${VERSION}_amd64.deb` - For Debian/Ubuntu systems
 
@@ -262,21 +230,15 @@ jobs:
           ## What's New
           - Full PoLE protocol implementation with hour-based reward blocks
           - P2P network with libp2p (QUIC, TCP, mDNS, Kademlia)
-          - Local Web GUI control console
+          - Local Web control console (browser dashboard via control API)
           - Windows Service and Linux systemd integration
           - Automatic update with rollback support
           - Challenge and dispute resolution system
 
           ## Windows Installation
-          ### MSI (Recommended)
-          1. Download `PoLE-${VERSION}-x64.msi`
-          2. Double-click to install
-          3. Launch from Start Menu or Desktop shortcut
-
-          ### Portable
           1. Download `PoLE-${VERSION}-x64-portable.zip`
           2. Extract to any folder
-          3. Run `pole-gui.exe`
+          3. Run `pole-node.exe` (daemon) and `pole-client.exe` (CLI)
 
           ## Linux Installation
           ```bash
