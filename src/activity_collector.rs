@@ -321,8 +321,7 @@ pub fn cross_validate_samples(samples: &mut [ActivitySample]) -> usize {
             .max(1);
         for &index in indexes {
             let sample = &mut samples[index];
-            let difference_ppm = (sample.observed_players.abs_diff(strongest) as u128
-                * 1_000_000
+            let difference_ppm = (sample.observed_players.abs_diff(strongest) as u128 * 1_000_000
                 / strongest as u128) as u64;
             if difference_ppm > CROSS_VALIDATION_DISAGREEMENT_THRESHOLD_PPM {
                 // Compute in u64: ppm * ppm can exceed u32 before the
@@ -356,8 +355,22 @@ mod tests {
     #[test]
     fn cross_validate_lowers_outlier_confidence_for_same_app() {
         let mut samples = vec![
-            ActivitySample::new(730, 500_000, 1, "{\"player_count\":500000}", ActivitySourceKind::Steam, 1_000_000),
-            ActivitySample::new(730, 100_000, 1, "{\"player_count\":100000}", ActivitySourceKind::Epic, 1_000_000),
+            ActivitySample::new(
+                730,
+                500_000,
+                1,
+                "{\"player_count\":500000}",
+                ActivitySourceKind::Steam,
+                1_000_000,
+            ),
+            ActivitySample::new(
+                730,
+                100_000,
+                1,
+                "{\"player_count\":100000}",
+                ActivitySourceKind::Epic,
+                1_000_000,
+            ),
         ];
         let adjusted = cross_validate_samples(&mut samples);
         assert_eq!(adjusted, 1);

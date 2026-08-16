@@ -29,7 +29,6 @@ macro_rules! sign {
     }};
 }
 
-
 fn test_params() -> ProtocolParams {
     ProtocolParams {
         slot_seconds: 300,
@@ -176,41 +175,47 @@ fn rewards_root_matches_reward_records_fixture() {
     rewards.sort_by_key(|record| record.node_id);
     let rewards_root = pole_protocol_draft::reward_record_root(&rewards).unwrap();
 
-    let submit = sign!(1, SubmitBatchTx {
-        batch_commit: BatchCommit {
-            epoch_id: 1,
-            collector_id: collector,
-            slot_start: 1,
-            slot_end: 1,
-            batch: merkle(21),
-            payload_cid: "cid://batch-1".to_string(),
-            obs_count: 1,
-            submitted_at_height: 0,
-        },
-        pubkey: [0u8; 32],
-
-        signature: Vec::new(),
-    });
-    let commit = sign!(2, CommitEpochTx {
-        epoch_commit: EpochCommit {
-            epoch_id: 1,
-            accepted_batches: merkle(31),
-            observations: merkle(32),
-            aggregates: merkle(33),
-            rewards: MerkleCommitment {
-                root: rewards_root,
-                leaf_count: rewards.len() as u32,
+    let submit = sign!(
+        1,
+        SubmitBatchTx {
+            batch_commit: BatchCommit {
+                epoch_id: 1,
+                collector_id: collector,
+                slot_start: 1,
+                slot_end: 1,
+                batch: merkle(21),
+                payload_cid: "cid://batch-1".to_string(),
+                obs_count: 1,
+                submitted_at_height: 0,
             },
-            availability: merkle(35),
-            randomness_seed: fixed32(36),
-            proposer_id: proposer,
-            challenge_open_height: 0,
-            challenge_deadline_height: 15,
-        },
-        pubkey: [0u8; 32],
+            pubkey: [0u8; 32],
 
-        signature: Vec::new(),
-    });
+            signature: Vec::new(),
+        }
+    );
+    let commit = sign!(
+        2,
+        CommitEpochTx {
+            epoch_commit: EpochCommit {
+                epoch_id: 1,
+                accepted_batches: merkle(31),
+                observations: merkle(32),
+                aggregates: merkle(33),
+                rewards: MerkleCommitment {
+                    root: rewards_root,
+                    leaf_count: rewards.len() as u32,
+                },
+                availability: merkle(35),
+                randomness_seed: fixed32(36),
+                proposer_id: proposer,
+                challenge_open_height: 0,
+                challenge_deadline_height: 15,
+            },
+            pubkey: [0u8; 32],
+
+            signature: Vec::new(),
+        }
+    );
 
     execute_block(
         &mut state,
@@ -280,38 +285,44 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
         nonce: 0,
     });
 
-    let submit = sign!(1, SubmitBatchTx {
-        batch_commit: BatchCommit {
-            epoch_id: 1,
-            collector_id: collector,
-            slot_start: 1,
-            slot_end: 1,
-            batch: merkle(21),
-            payload_cid: "cid://batch-1".to_string(),
-            obs_count: 1,
-            submitted_at_height: 0,
-        },
-        pubkey: [0u8; 32],
+    let submit = sign!(
+        1,
+        SubmitBatchTx {
+            batch_commit: BatchCommit {
+                epoch_id: 1,
+                collector_id: collector,
+                slot_start: 1,
+                slot_end: 1,
+                batch: merkle(21),
+                payload_cid: "cid://batch-1".to_string(),
+                obs_count: 1,
+                submitted_at_height: 0,
+            },
+            pubkey: [0u8; 32],
 
-        signature: Vec::new(),
-    });
-    let commit = sign!(2, CommitEpochTx {
-        epoch_commit: EpochCommit {
-            epoch_id: 1,
-            accepted_batches: merkle(31),
-            observations: merkle(32),
-            aggregates: merkle(33),
-            rewards: merkle(34),
-            availability: merkle(35),
-            randomness_seed: fixed32(36),
-            proposer_id: proposer,
-            challenge_open_height: 0,
-            challenge_deadline_height: 15,
-        },
-        pubkey: [0u8; 32],
+            signature: Vec::new(),
+        }
+    );
+    let commit = sign!(
+        2,
+        CommitEpochTx {
+            epoch_commit: EpochCommit {
+                epoch_id: 1,
+                accepted_batches: merkle(31),
+                observations: merkle(32),
+                aggregates: merkle(33),
+                rewards: merkle(34),
+                availability: merkle(35),
+                randomness_seed: fixed32(36),
+                proposer_id: proposer,
+                challenge_open_height: 0,
+                challenge_deadline_height: 15,
+            },
+            pubkey: [0u8; 32],
 
-        signature: Vec::new(),
-    });
+            signature: Vec::new(),
+        }
+    );
 
     execute_block(
         &mut state,
@@ -325,29 +336,32 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     )
     .unwrap();
 
-    let open = sign!(4, OpenChallengeTx {
-        challenge: Challenge {
-            challenge_id: fixed32(41),
-            kind: pole_protocol_draft::ChallengeKind::BadAggregate,
-            epoch_id: 1,
-            target_node: Some(target),
-            challenger,
-            bond: 100,
-            opened_at_height: 0,
-            deadline_height: 14,
-            state: ChallengeState::Open,
-            evidence: ChallengeEvidenceRef {
-                batch_root: Some(fixed32(21)),
-                aggregate_root: Some(fixed32(33)),
-                reward_root: None,
-                payload_cid: Some("cid://batch-1".to_string()),
-                merkle_proof: vec![fixed32(51)],
+    let open = sign!(
+        4,
+        OpenChallengeTx {
+            challenge: Challenge {
+                challenge_id: fixed32(41),
+                kind: pole_protocol_draft::ChallengeKind::BadAggregate,
+                epoch_id: 1,
+                target_node: Some(target),
+                challenger,
+                bond: 100,
+                opened_at_height: 0,
+                deadline_height: 14,
+                state: ChallengeState::Open,
+                evidence: ChallengeEvidenceRef {
+                    batch_root: Some(fixed32(21)),
+                    aggregate_root: Some(fixed32(33)),
+                    reward_root: None,
+                    payload_cid: Some("cid://batch-1".to_string()),
+                    merkle_proof: vec![fixed32(51)],
+                },
             },
-        },
-        pubkey: [0u8; 32],
+            pubkey: [0u8; 32],
 
-        signature: Vec::new(),
-    });
+            signature: Vec::new(),
+        }
+    );
 
     execute_block(
         &mut state,
@@ -396,17 +410,20 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     state.height = 16;
     state.finalize_epoch(1).unwrap();
 
-    let claim = sign!(12, ClaimRewardTx {
-        claimer,
-        epoch_id: 1,
-        node_id: proposer,
-        amount: 300,
-        merkle_proof: vec![fixed32(61)],
-        nonce: 0,
-        pubkey: [0u8; 32],
+    let claim = sign!(
+        12,
+        ClaimRewardTx {
+            claimer,
+            epoch_id: 1,
+            node_id: proposer,
+            amount: 300,
+            merkle_proof: vec![fixed32(61)],
+            nonce: 0,
+            pubkey: [0u8; 32],
 
-        signature: Vec::new(),
-    });
+            signature: Vec::new(),
+        }
+    );
     state.apply_claim_reward(claim).unwrap();
 
     assert_eq!(state.current_epoch, 2);
@@ -476,15 +493,18 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
         &mut state,
         Block {
             height: 2,
-            transactions: vec![Transaction::Stake(sign!(81, StakeTx {
-                delegator,
-                operator,
-                amount: 500,
-                nonce: 0,
-                pubkey: [0u8; 32],
+            transactions: vec![Transaction::Stake(sign!(
+                81,
+                StakeTx {
+                    delegator,
+                    operator,
+                    amount: 500,
+                    nonce: 0,
+                    pubkey: [0u8; 32],
 
-                signature: Vec::new(),
-            }))],
+                    signature: Vec::new(),
+                }
+            ))],
         },
     )
     .unwrap();
@@ -495,16 +515,19 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
 
     let proposal_id = fixed32(85);
     state
-        .apply_vote(sign!(81, VoteTx {
-            proposal_id,
-            voter: delegator,
-            choice: VoteChoice::No,
-            voting_power: 250,
-            nonce: 1,
-            pubkey: [0u8; 32],
+        .apply_vote(sign!(
+            81,
+            VoteTx {
+                proposal_id,
+                voter: delegator,
+                choice: VoteChoice::No,
+                voting_power: 250,
+                nonce: 1,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state.upsert_node(active_node(
@@ -514,115 +537,133 @@ fn stake_unbond_vote_and_challenge_response_flow_works() {
         vec![Capability::Collect],
     ));
     state
-        .apply_commit_epoch(sign!(82, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(91),
-                observations: merkle(92),
-                aggregates: merkle(93),
-                rewards: merkle(94),
-                availability: merkle(95),
-                randomness_seed: fixed32(96),
-                proposer_id: operator,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            82,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(91),
+                    observations: merkle(92),
+                    aggregates: merkle(93),
+                    rewards: merkle(94),
+                    availability: merkle(95),
+                    randomness_seed: fixed32(96),
+                    proposer_id: operator,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .err();
 
     state
-        .apply_submit_batch(sign!(86, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: keypair(86).address,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(97),
-                payload_cid: "cid://batch-2".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            86,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: keypair(86).address,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(97),
+                    payload_cid: "cid://batch-2".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_commit_epoch(sign!(82, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(91),
-                observations: merkle(92),
-                aggregates: merkle(93),
-                rewards: merkle(94),
-                availability: merkle(95),
-                randomness_seed: fixed32(96),
-                proposer_id: operator,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            82,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(91),
+                    observations: merkle(92),
+                    aggregates: merkle(93),
+                    rewards: merkle(94),
+                    availability: merkle(95),
+                    randomness_seed: fixed32(96),
+                    proposer_id: operator,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let challenge_id = fixed32(88);
     state
-        .apply_open_challenge(sign!(83, OpenChallengeTx {
-            challenge: Challenge {
-                challenge_id,
-                kind: pole_protocol_draft::ChallengeKind::BadStorage,
-                epoch_id: 1,
-                target_node: Some(operator),
-                challenger,
-                bond: 50,
-                opened_at_height: 0,
-                deadline_height: 15,
-                state: ChallengeState::Open,
-                evidence: ChallengeEvidenceRef {
-                    batch_root: None,
-                    aggregate_root: None,
-                    reward_root: None,
-                    payload_cid: Some("cid://batch-2".into()),
-                    merkle_proof: vec![fixed32(98)],
+        .apply_open_challenge(sign!(
+            83,
+            OpenChallengeTx {
+                challenge: Challenge {
+                    challenge_id,
+                    kind: pole_protocol_draft::ChallengeKind::BadStorage,
+                    epoch_id: 1,
+                    target_node: Some(operator),
+                    challenger,
+                    bond: 50,
+                    opened_at_height: 0,
+                    deadline_height: 15,
+                    state: ChallengeState::Open,
+                    evidence: ChallengeEvidenceRef {
+                        batch_root: None,
+                        aggregate_root: None,
+                        reward_root: None,
+                        payload_cid: Some("cid://batch-2".into()),
+                        merkle_proof: vec![fixed32(98)],
+                    },
                 },
-            },
-            pubkey: [0u8; 32],
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_challenge_response(sign!(82, ChallengeResponseTx {
-            challenge_id,
-            responder: operator,
-            response_payload_cid: Some("cid://response".into()),
-            response_hash: Some(fixed32(99)),
-            pubkey: [0u8; 32],
+        .apply_challenge_response(sign!(
+            82,
+            ChallengeResponseTx {
+                challenge_id,
+                responder: operator,
+                response_payload_cid: Some("cid://response".into()),
+                response_hash: Some(fixed32(99)),
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     execute_block(
         &mut state,
         Block {
             height: 3,
-            transactions: vec![Transaction::Unbond(sign!(81, UnbondTx {
-                delegator,
-                operator,
-                amount: 200,
-                nonce: 2,
-                pubkey: [0u8; 32],
+            transactions: vec![Transaction::Unbond(sign!(
+                81,
+                UnbondTx {
+                    delegator,
+                    operator,
+                    amount: 200,
+                    nonce: 2,
+                    pubkey: [0u8; 32],
 
-                signature: Vec::new(),
-            }))],
+                    signature: Vec::new(),
+                }
+            ))],
         },
     )
     .unwrap();
@@ -688,41 +729,47 @@ fn protocol_params_update_activates_only_after_epoch_rolls_forward() {
     ));
 
     state
-        .apply_submit_batch(sign!(140, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(150),
-                payload_cid: "cid://sched-batch".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            140,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(150),
+                    payload_cid: "cid://sched-batch".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_commit_epoch(sign!(141, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(151),
-                observations: merkle(152),
-                aggregates: merkle(153),
-                rewards: merkle(154),
-                availability: merkle(155),
-                randomness_seed: fixed32(156),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            141,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(151),
+                    observations: merkle(152),
+                    aggregates: merkle(153),
+                    rewards: merkle(154),
+                    availability: merkle(155),
+                    randomness_seed: fixed32(156),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let mut future_params = params.clone();
@@ -777,41 +824,47 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
     ));
 
     state
-        .apply_submit_batch(sign!(162, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(165),
-                payload_cid: "cid://gov-batch".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            162,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(165),
+                    payload_cid: "cid://gov-batch".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_commit_epoch(sign!(160, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(166),
-                observations: merkle(167),
-                aggregates: merkle(168),
-                rewards: merkle(169),
-                availability: merkle(170),
-                randomness_seed: fixed32(171),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            160,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(166),
+                    observations: merkle(167),
+                    aggregates: merkle(168),
+                    rewards: merkle(169),
+                    availability: merkle(170),
+                    randomness_seed: fixed32(171),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let mut updated_params = params.clone();
@@ -822,8 +875,9 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
         &mut state,
         Block {
             height: 2,
-            transactions: vec![Transaction::ProposeProtocolParamsUpdate(
-                sign!(161, ProposeProtocolParamsUpdateTx {
+            transactions: vec![Transaction::ProposeProtocolParamsUpdate(sign!(
+                161,
+                ProposeProtocolParamsUpdateTx {
                     proposal_id: fixed32(172),
                     proposer: proposer_account,
                     effective_epoch: 2,
@@ -832,8 +886,8 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
                     pubkey: [0u8; 32],
 
                     signature: Vec::new(),
-                }),
-            )],
+                }
+            ))],
         },
     )
     .unwrap();
@@ -856,16 +910,19 @@ fn protocol_params_update_transaction_schedules_future_epoch_activation() {
     assert!(state.store.scheduled_protocol_params(&2).is_none());
 
     state
-        .apply_vote(sign!(173, VoteTx {
-            proposal_id: fixed32(172),
-            voter,
-            choice: VoteChoice::Yes,
-            voting_power: 4_000,
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_vote(sign!(
+            173,
+            VoteTx {
+                proposal_id: fixed32(172),
+                voter,
+                choice: VoteChoice::Yes,
+                voting_power: 4_000,
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     assert!(state.store.scheduled_protocol_params(&2).is_some());
@@ -933,69 +990,81 @@ fn protocol_params_update_requires_quorum_and_approval_threshold() {
     ));
 
     state
-        .apply_submit_batch(sign!(184, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: keypair(184).address,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(186),
-                payload_cid: "cid://quorum-batch".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            184,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: keypair(184).address,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(186),
+                    payload_cid: "cid://quorum-batch".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_commit_epoch(sign!(180, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(187),
-                observations: merkle(188),
-                aggregates: merkle(189),
-                rewards: merkle(190),
-                availability: merkle(191),
-                randomness_seed: fixed32(192),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            180,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(187),
+                    observations: merkle(188),
+                    aggregates: merkle(189),
+                    rewards: merkle(190),
+                    availability: merkle(191),
+                    randomness_seed: fixed32(192),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let mut updated_params = params.clone();
     updated_params.rewards.emission_year = 5;
     state
-        .apply_propose_protocol_params_update(sign!(181, ProposeProtocolParamsUpdateTx {
-            proposal_id: fixed32(193),
-            proposer: proposer_account,
-            effective_epoch: 2,
-            params: updated_params,
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_propose_protocol_params_update(sign!(
+            181,
+            ProposeProtocolParamsUpdateTx {
+                proposal_id: fixed32(193),
+                proposer: proposer_account,
+                effective_epoch: 2,
+                params: updated_params,
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_vote(sign!(182, VoteTx {
-            proposal_id: fixed32(193),
-            voter: small_voter,
-            choice: VoteChoice::Yes,
-            voting_power: 1_000,
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_vote(sign!(
+            182,
+            VoteTx {
+                proposal_id: fixed32(193),
+                voter: small_voter,
+                choice: VoteChoice::Yes,
+                voting_power: 1_000,
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     assert!(state.store.scheduled_protocol_params(&2).is_none());
@@ -1030,54 +1099,63 @@ fn protocol_params_update_expires_and_burns_bond_when_epoch_passes_without_appro
     ));
 
     state
-        .apply_submit_batch(sign!(192, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(195),
-                payload_cid: "cid://expire-batch".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            192,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(195),
+                    payload_cid: "cid://expire-batch".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_commit_epoch(sign!(190, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(196),
-                observations: merkle(197),
-                aggregates: merkle(198),
-                rewards: merkle(199),
-                availability: merkle(200),
-                randomness_seed: fixed32(201),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            190,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(196),
+                    observations: merkle(197),
+                    aggregates: merkle(198),
+                    rewards: merkle(199),
+                    availability: merkle(200),
+                    randomness_seed: fixed32(201),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     state
-        .apply_propose_protocol_params_update(sign!(191, ProposeProtocolParamsUpdateTx {
-            proposal_id: fixed32(202),
-            proposer: proposer_account,
-            effective_epoch: 2,
-            params: params.clone(),
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_propose_protocol_params_update(sign!(
+            191,
+            ProposeProtocolParamsUpdateTx {
+                proposal_id: fixed32(202),
+                proposer: proposer_account,
+                effective_epoch: 2,
+                params: params.clone(),
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     assert_eq!(state.store.account(&proposer_account).unwrap().balance, 0);
@@ -1141,17 +1219,20 @@ fn claim_reward_must_use_registered_reward_address() {
     state.store.mark_epoch_finalized(1);
 
     let err = state
-        .apply_claim_reward(sign!(93, ClaimRewardTx {
-            claimer: wrong_claimer,
-            epoch_id: 1,
-            node_id,
-            amount: 500,
-            merkle_proof: vec![fixed32(94)],
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_claim_reward(sign!(
+            93,
+            ClaimRewardTx {
+                claimer: wrong_claimer,
+                epoch_id: 1,
+                node_id,
+                amount: 500,
+                merkle_proof: vec![fixed32(94)],
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap_err();
 
     assert!(matches!(
@@ -1177,16 +1258,19 @@ fn vote_cannot_exceed_available_voting_power() {
     });
 
     let err = state
-        .apply_vote(sign!(95, VoteTx {
-            proposal_id: fixed32(96),
-            voter,
-            choice: VoteChoice::Yes,
-            voting_power: 500,
-            nonce: 0,
-            pubkey: [0u8; 32],
+        .apply_vote(sign!(
+            95,
+            VoteTx {
+                proposal_id: fixed32(96),
+                voter,
+                choice: VoteChoice::Yes,
+                voting_power: 500,
+                nonce: 0,
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap_err();
 
     assert!(matches!(
@@ -1243,79 +1327,91 @@ fn wrong_challenge_response_does_not_remove_open_challenge() {
     });
 
     state
-        .apply_submit_batch(sign!(98, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(106),
-                payload_cid: "cid://batch-3".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            98,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(106),
+                    payload_cid: "cid://batch-3".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
     state
-        .apply_commit_epoch(sign!(97, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(107),
-                observations: merkle(108),
-                aggregates: merkle(109),
-                rewards: merkle(110),
-                availability: merkle(111),
-                randomness_seed: fixed32(112),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            97,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(107),
+                    observations: merkle(108),
+                    aggregates: merkle(109),
+                    rewards: merkle(110),
+                    availability: merkle(111),
+                    randomness_seed: fixed32(112),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let challenge_id = fixed32(113);
     state
-        .apply_open_challenge(sign!(101, OpenChallengeTx {
-            challenge: Challenge {
-                challenge_id,
-                kind: pole_protocol_draft::ChallengeKind::BadStorage,
-                epoch_id: 1,
-                target_node: Some(target),
-                challenger,
-                bond: 50,
-                opened_at_height: 0,
-                deadline_height: 15,
-                state: ChallengeState::Open,
-                evidence: ChallengeEvidenceRef {
-                    batch_root: None,
-                    aggregate_root: None,
-                    reward_root: None,
-                    payload_cid: Some("cid://batch-3".into()),
-                    merkle_proof: vec![fixed32(114)],
+        .apply_open_challenge(sign!(
+            101,
+            OpenChallengeTx {
+                challenge: Challenge {
+                    challenge_id,
+                    kind: pole_protocol_draft::ChallengeKind::BadStorage,
+                    epoch_id: 1,
+                    target_node: Some(target),
+                    challenger,
+                    bond: 50,
+                    opened_at_height: 0,
+                    deadline_height: 15,
+                    state: ChallengeState::Open,
+                    evidence: ChallengeEvidenceRef {
+                        batch_root: None,
+                        aggregate_root: None,
+                        reward_root: None,
+                        payload_cid: Some("cid://batch-3".into()),
+                        merkle_proof: vec![fixed32(114)],
+                    },
                 },
-            },
-            pubkey: [0u8; 32],
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let err = state
-        .apply_challenge_response(sign!(100, ChallengeResponseTx {
-            challenge_id,
-            responder: wrong_responder,
-            response_payload_cid: Some("cid://wrong".into()),
-            response_hash: Some(fixed32(115)),
-            pubkey: [0u8; 32],
+        .apply_challenge_response(sign!(
+            100,
+            ChallengeResponseTx {
+                challenge_id,
+                responder: wrong_responder,
+                response_payload_cid: Some("cid://wrong".into()),
+                response_hash: Some(fixed32(115)),
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap_err();
 
     assert!(matches!(
@@ -1366,67 +1462,76 @@ fn challenge_response_cannot_arrive_after_deadline() {
     });
 
     state
-        .apply_submit_batch(sign!(117, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(123),
-                payload_cid: "cid://batch-4".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            117,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(123),
+                    payload_cid: "cid://batch-4".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
     state
-        .apply_commit_epoch(sign!(116, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(124),
-                observations: merkle(125),
-                aggregates: merkle(126),
-                rewards: merkle(127),
-                availability: merkle(128),
-                randomness_seed: fixed32(129),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            116,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(124),
+                    observations: merkle(125),
+                    aggregates: merkle(126),
+                    rewards: merkle(127),
+                    availability: merkle(128),
+                    randomness_seed: fixed32(129),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let challenge_id = fixed32(130);
     state
-        .apply_open_challenge(sign!(119, OpenChallengeTx {
-            challenge: Challenge {
-                challenge_id,
-                kind: pole_protocol_draft::ChallengeKind::BadStorage,
-                epoch_id: 1,
-                target_node: Some(target),
-                challenger,
-                bond: 50,
-                opened_at_height: 0,
-                deadline_height: 15,
-                state: ChallengeState::Open,
-                evidence: ChallengeEvidenceRef {
-                    batch_root: None,
-                    aggregate_root: None,
-                    reward_root: None,
-                    payload_cid: Some("cid://batch-4".into()),
-                    merkle_proof: vec![fixed32(131)],
+        .apply_open_challenge(sign!(
+            119,
+            OpenChallengeTx {
+                challenge: Challenge {
+                    challenge_id,
+                    kind: pole_protocol_draft::ChallengeKind::BadStorage,
+                    epoch_id: 1,
+                    target_node: Some(target),
+                    challenger,
+                    bond: 50,
+                    opened_at_height: 0,
+                    deadline_height: 15,
+                    state: ChallengeState::Open,
+                    evidence: ChallengeEvidenceRef {
+                        batch_root: None,
+                        aggregate_root: None,
+                        reward_root: None,
+                        payload_cid: Some("cid://batch-4".into()),
+                        merkle_proof: vec![fixed32(131)],
+                    },
                 },
-            },
-            pubkey: [0u8; 32],
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     execute_block(
@@ -1439,15 +1544,18 @@ fn challenge_response_cannot_arrive_after_deadline() {
     .unwrap();
 
     let err = state
-        .apply_challenge_response(sign!(118, ChallengeResponseTx {
-            challenge_id,
-            responder: target,
-            response_payload_cid: Some("cid://response".into()),
-            response_hash: Some(fixed32(132)),
-            pubkey: [0u8; 32],
+        .apply_challenge_response(sign!(
+            118,
+            ChallengeResponseTx {
+                challenge_id,
+                responder: target,
+                response_payload_cid: Some("cid://response".into()),
+                response_hash: Some(fixed32(132)),
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap_err();
 
     assert!(matches!(
@@ -1527,67 +1635,76 @@ fn challenge_resolution_must_match_challenge_kind() {
     });
 
     state
-        .apply_submit_batch(sign!(122, SubmitBatchTx {
-            batch_commit: BatchCommit {
-                epoch_id: 1,
-                collector_id: collector,
-                slot_start: 1,
-                slot_end: 1,
-                batch: merkle(128),
-                payload_cid: "cid://batch-4".into(),
-                obs_count: 1,
-                submitted_at_height: 0,
-            },
-            pubkey: [0u8; 32],
+        .apply_submit_batch(sign!(
+            122,
+            SubmitBatchTx {
+                batch_commit: BatchCommit {
+                    epoch_id: 1,
+                    collector_id: collector,
+                    slot_start: 1,
+                    slot_end: 1,
+                    batch: merkle(128),
+                    payload_cid: "cid://batch-4".into(),
+                    obs_count: 1,
+                    submitted_at_height: 0,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
     state
-        .apply_commit_epoch(sign!(121, CommitEpochTx {
-            epoch_commit: EpochCommit {
-                epoch_id: 1,
-                accepted_batches: merkle(129),
-                observations: merkle(130),
-                aggregates: merkle(131),
-                rewards: merkle(132),
-                availability: merkle(133),
-                randomness_seed: fixed32(134),
-                proposer_id: proposer,
-                challenge_open_height: 0,
-                challenge_deadline_height: 20,
-            },
-            pubkey: [0u8; 32],
+        .apply_commit_epoch(sign!(
+            121,
+            CommitEpochTx {
+                epoch_commit: EpochCommit {
+                    epoch_id: 1,
+                    accepted_batches: merkle(129),
+                    observations: merkle(130),
+                    aggregates: merkle(131),
+                    rewards: merkle(132),
+                    availability: merkle(133),
+                    randomness_seed: fixed32(134),
+                    proposer_id: proposer,
+                    challenge_open_height: 0,
+                    challenge_deadline_height: 20,
+                },
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let challenge_id = fixed32(135);
     state
-        .apply_open_challenge(sign!(124, OpenChallengeTx {
-            challenge: Challenge {
-                challenge_id,
-                kind: pole_protocol_draft::ChallengeKind::BadAggregate,
-                epoch_id: 1,
-                target_node: Some(target),
-                challenger,
-                bond: 50,
-                opened_at_height: 0,
-                deadline_height: 15,
-                state: ChallengeState::Open,
-                evidence: ChallengeEvidenceRef {
-                    batch_root: None,
-                    aggregate_root: Some(fixed32(131)),
-                    reward_root: None,
-                    payload_cid: None,
-                    merkle_proof: vec![fixed32(136)],
+        .apply_open_challenge(sign!(
+            124,
+            OpenChallengeTx {
+                challenge: Challenge {
+                    challenge_id,
+                    kind: pole_protocol_draft::ChallengeKind::BadAggregate,
+                    epoch_id: 1,
+                    target_node: Some(target),
+                    challenger,
+                    bond: 50,
+                    opened_at_height: 0,
+                    deadline_height: 15,
+                    state: ChallengeState::Open,
+                    evidence: ChallengeEvidenceRef {
+                        batch_root: None,
+                        aggregate_root: Some(fixed32(131)),
+                        reward_root: None,
+                        payload_cid: None,
+                        merkle_proof: vec![fixed32(136)],
+                    },
                 },
-            },
-            pubkey: [0u8; 32],
+                pubkey: [0u8; 32],
 
-            signature: Vec::new(),
-        }))
+                signature: Vec::new(),
+            }
+        ))
         .unwrap();
 
     let err = state

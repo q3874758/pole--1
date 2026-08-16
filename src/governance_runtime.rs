@@ -88,9 +88,7 @@ pub fn submit_protocol_params_update_proposal(
         &mut state,
         Block {
             height: block_height,
-            transactions: vec![crate::Transaction::ProposeProtocolParamsUpdate(
-                propose_tx,
-            )],
+            transactions: vec![crate::Transaction::ProposeProtocolParamsUpdate(propose_tx)],
         },
     )
     .map_err(|err| io::Error::other(format!("governance proposal execution failed: {err:?}")))?;

@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::primitives::{ActivitySourceKind, Address, Amount, AppId, NodeId};
-use crate::wallet::{resolve_identity_password, EncryptedKeystore, KeyPair};
-use zeroize::Zeroize;
 use crate::tokenomics::{
     base_player_reward_per_block_with_tail, LONG_TERM_TAIL_EMISSION_RATE_BPS,
     LONG_TERM_TAIL_START_YEAR,
 };
+use crate::wallet::{resolve_identity_password, EncryptedKeystore, KeyPair};
 use crate::{normalize_path, resolve_runtime_data_dir};
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeConfig {

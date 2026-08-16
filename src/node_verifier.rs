@@ -191,8 +191,7 @@ pub fn verify_local_epoch(
             // non-own batches (no collector key) always pass this flag.
             let mut signature_audit_ok = true;
             for observation in &observations {
-                let status = observation
-                    .verify_collector_signature(local_pubkey.as_ref());
+                let status = observation.verify_collector_signature(local_pubkey.as_ref());
                 if is_own_batch && status != SignatureStatus::Valid {
                     signature_audit_ok = false;
                 }

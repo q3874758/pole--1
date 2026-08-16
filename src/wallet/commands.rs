@@ -1,14 +1,10 @@
-﻿use crate::wallet::error::Result;
+use crate::wallet::error::Result;
 use crate::wallet::keys::{hex_decode, KeyPair};
 use crate::wallet::keystore::EncryptedKeystore;
 use crate::wallet::mnemonic::{generate_mnemonic, Mnemonic};
 use std::path::Path;
 
-pub fn create_wallet(
-    data_dir: &Path,
-    comment: Option<String>,
-    password: &str,
-) -> Result<String> {
+pub fn create_wallet(data_dir: &Path, comment: Option<String>, password: &str) -> Result<String> {
     let mnemonic = generate_mnemonic();
     let seed_bytes: [u8; 32] =
         mnemonic.to_seed("").as_slice().try_into().map_err(|_| {
@@ -70,12 +66,7 @@ pub fn sign_transaction(data_dir: &Path, password: &str, tx_hex: &str) -> Result
     Ok(hex::encode(&signature))
 }
 
-
-pub fn set_reward_address(
-    data_dir: &Path,
-    config_path: &Path,
-    password: &str,
-) -> Result<String> {
+pub fn set_reward_address(data_dir: &Path, config_path: &Path, password: &str) -> Result<String> {
     let wallet_path = data_dir.join("wallet").join("keystore.json");
     let ks = EncryptedKeystore::decrypt(password, &wallet_path)?;
     let addr_hex = ks.keypair.address_hex();

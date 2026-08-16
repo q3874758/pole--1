@@ -184,7 +184,6 @@ impl EncryptedKeystore {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

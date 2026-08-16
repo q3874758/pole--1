@@ -242,8 +242,8 @@ pub fn aggregate_record_root(records: &[AggregateRecord]) -> Result<Hash32, Node
     let leaf_hashes = sorted
         .iter()
         .map(|record| {
-            let json = aggregate_record_to_chain_json(record)
-                .map_err(NodeAggregationError::Json)?;
+            let json =
+                aggregate_record_to_chain_json(record).map_err(NodeAggregationError::Json)?;
             Ok(merkle_leaf_sha256(&json))
         })
         .collect::<Result<Vec<_>, NodeAggregationError>>()?;

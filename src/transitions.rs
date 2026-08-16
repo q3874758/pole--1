@@ -258,7 +258,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: SubmitBatchTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.batch_commit.collector_id, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.batch_commit.collector_id,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
 
         let mut batch = tx.batch_commit;
         ensure_epoch_not_stale(batch.epoch_id, self.current_epoch)?;
@@ -287,7 +292,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: CommitEpochTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.epoch_commit.proposer_id, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.epoch_commit.proposer_id,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
 
         let mut commit = tx.epoch_commit;
         ensure_epoch_not_stale(commit.epoch_id, self.current_epoch)?;
@@ -332,7 +342,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: OpenChallengeTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.challenge.challenger, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.challenge.challenger,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
 
         let mut challenge = tx.challenge;
         if challenge.bond == 0 {
@@ -539,7 +554,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ClaimRewardTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.claimer, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.claimer,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
 
         if !self.store.is_epoch_finalized(tx.epoch_id) {
             return Err(TransitionError::EpochNotFinalized(tx.epoch_id));
@@ -624,7 +644,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_stake(&mut self, tx: StakeTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.delegator, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.delegator,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
         ensure_positive_amount(tx.amount)?;
         self.require_active_node(tx.operator)?;
 
@@ -674,7 +699,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
     }
 
     pub fn apply_unbond(&mut self, tx: UnbondTx) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.delegator, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.delegator,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
         ensure_positive_amount(tx.amount)?;
 
         let key = (tx.delegator, tx.operator);
@@ -792,7 +822,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ProposeProtocolParamsUpdateTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.proposer, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.proposer,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
         if self.store.params_update_proposal(&tx.proposal_id).is_some() {
             return Err(TransitionError::DuplicateParamsUpdateProposal(
                 tx.proposal_id,
@@ -965,7 +1000,12 @@ impl<S: ProtocolStore> ProtocolState<S> {
         &mut self,
         tx: ChallengeResponseTx,
     ) -> Result<TransitionEffect, TransitionError> {
-        ensure_signature(&tx.pubkey, &tx.responder, &tx.signing_payload(), &tx.signature)?;
+        ensure_signature(
+            &tx.pubkey,
+            &tx.responder,
+            &tx.signing_payload(),
+            &tx.signature,
+        )?;
         if tx.response_payload_cid.is_none() && tx.response_hash.is_none() {
             return Err(TransitionError::EmptyChallengeResponse);
         }
@@ -1482,7 +1522,13 @@ mod tests {
         setup_full_node(&mut st, &kp, 100_000);
         let effect = st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
         assert!(matches!(effect, TransitionEffect::BatchAccepted { .. }));
-        assert_eq!(st.store.batch(&(1, node_id(&kp), [0x42u8; 32])).unwrap().submitted_at_height, 0);
+        assert_eq!(
+            st.store
+                .batch(&(1, node_id(&kp), [0x42u8; 32]))
+                .unwrap()
+                .submitted_at_height,
+            0
+        );
     }
 
     #[test]
@@ -1643,7 +1689,11 @@ mod tests {
         let mut st = state();
         let kp = keypair(2);
         st.upsert_account(account_of(&kp, 100_000));
-        st.upsert_node(default_node(&kp, &[Capability::Collect, Capability::Propose], 100));
+        st.upsert_node(default_node(
+            &kp,
+            &[Capability::Collect, Capability::Propose],
+            100,
+        ));
         st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
         assert!(matches!(
             st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10)),
@@ -1843,7 +1893,10 @@ mod tests {
         tx.signature = kp.sign(&tx.signing_payload());
         let effect = st.apply_claim_reward(tx).unwrap();
         assert!(matches!(effect, TransitionEffect::RewardClaimed { .. }));
-        assert_eq!(st.store.account(&node_id(&kp)).unwrap().balance, before + 5_000);
+        assert_eq!(
+            st.store.account(&node_id(&kp)).unwrap().balance,
+            before + 5_000
+        );
     }
 
     #[test]
@@ -2073,9 +2126,21 @@ mod tests {
         let TransitionEffect::UnbondQueued { unlock_height, .. } = effect else {
             panic!("expected UnbondQueued");
         };
-        assert_eq!(st.store.account(&node_id(&delegator)).unwrap().staked, 5_000);
-        assert_eq!(st.store.account(&node_id(&delegator)).unwrap().locked, 3_000);
-        assert_eq!(st.store.delegation(&(node_id(&delegator), node_id(&operator))).unwrap().amount, 5_000);
+        assert_eq!(
+            st.store.account(&node_id(&delegator)).unwrap().staked,
+            5_000
+        );
+        assert_eq!(
+            st.store.account(&node_id(&delegator)).unwrap().locked,
+            3_000
+        );
+        assert_eq!(
+            st.store
+                .delegation(&(node_id(&delegator), node_id(&operator)))
+                .unwrap()
+                .amount,
+            5_000
+        );
 
         // Not yet matured.
         st.height = unlock_height - 1;
@@ -2219,11 +2284,7 @@ mod tests {
         vote(&voter_a, 0, 30_000);
         vote(&voter_b, 0, 30_000);
 
-        let record = st
-            .store
-            .params_update_proposal(&proposal)
-            .unwrap()
-            .clone();
+        let record = st.store.params_update_proposal(&proposal).unwrap().clone();
         assert_eq!(record.state, GovernanceProposalState::Scheduled);
         // Proposer bond returned on scheduling.
         assert_eq!(st.store.account(&node_id(&proposer)).unwrap().locked, 0);
@@ -2311,7 +2372,10 @@ mod tests {
         };
         tx.signature = kp.sign(&tx.signing_payload());
         let effect = st.apply_challenge_response(tx).unwrap();
-        assert!(matches!(effect, TransitionEffect::ChallengeResponded { .. }));
+        assert!(matches!(
+            effect,
+            TransitionEffect::ChallengeResponded { .. }
+        ));
         assert!(st.store.challenge_response(&[0xABu8; 32]).is_some());
     }
 

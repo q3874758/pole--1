@@ -1232,12 +1232,15 @@ mod tests {
         let leaves = with_recipient
             .iter()
             .map(|(recipient, record)| {
-                let json = crate::node_pipeline::reward_record_to_chain_json(record, recipient)
-                    .unwrap();
+                let json =
+                    crate::node_pipeline::reward_record_to_chain_json(record, recipient).unwrap();
                 crate::node_pipeline::merkle_leaf_sha256(&json)
             })
             .collect::<Vec<_>>();
-        assert_eq!(crate::hex_32(crate::merkle_root(&leaves)), crate::hex_32(root));
+        assert_eq!(
+            crate::hex_32(crate::merkle_root(&leaves)),
+            crate::hex_32(root)
+        );
     }
 
     #[test]

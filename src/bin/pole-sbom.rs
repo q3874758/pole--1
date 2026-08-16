@@ -430,11 +430,18 @@ mod tests {
     use super::*;
 
     fn deny_strings() -> Vec<String> {
-        DEFAULT_DENY_LICENSES.iter().map(|s| (*s).to_string()).collect()
+        DEFAULT_DENY_LICENSES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
     }
 
     fn entry(name: &str, version: &str, license: Option<&str>) -> (String, String, Option<String>) {
-        (name.to_string(), version.to_string(), license.map(str::to_string))
+        (
+            name.to_string(),
+            version.to_string(),
+            license.map(str::to_string),
+        )
     }
 
     // --- DEFAULT_DENY_LICENSES sync guard -------------------------------
@@ -464,12 +471,19 @@ mod tests {
         // "Commons-Clause" was previously missing from pole-sbom's deny
         // list (only present in deny.toml). CI would let a Commons-Clause
         // dependency slip through on the pole-sbom gate.
-        let entries = vec![entry("acme-cc", "1.0.0", Some("Apache-2.0 WITH Commons-Clause"))];
+        let entries = vec![entry(
+            "acme-cc",
+            "1.0.0",
+            Some("Apache-2.0 WITH Commons-Clause"),
+        )];
         let (denials, warnings) = audit_license_entries(&entries, &deny_strings(), &[]);
         assert_eq!(denials.len(), 1, "expected 1 denial, got {denials:?}");
         assert!(denials[0].contains("Commons-Clause"));
         assert!(denials[0].contains("acme-cc@1.0.0"));
-        assert!(warnings.is_empty(), "Commons-Clause is a hard denial, not a warning");
+        assert!(
+            warnings.is_empty(),
+            "Commons-Clause is a hard denial, not a warning"
+        );
     }
 
     #[test]
@@ -545,7 +559,10 @@ mod tests {
         // default-deny kick-in path. Mirrors `parse_args()` reading
         // `std::env::args().skip(1)` with no flags.
         let parsed = parse_args_from(Vec::<&str>::new()).expect("parse_args_from empty");
-        let expected: Vec<String> = DEFAULT_DENY_LICENSES.iter().map(|s| (*s).to_string()).collect();
+        let expected: Vec<String> = DEFAULT_DENY_LICENSES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         assert_eq!(parsed.deny_licenses, expected);
     }
 
@@ -561,8 +578,8 @@ mod tests {
 
     #[test]
     fn parse_args_csv_deny_lists_are_trimmed() {
-        let parsed = parse_args_from(vec!["--deny-licenses", "GPL-3.0-only, AGPL-3.0-only "])
-            .unwrap();
+        let parsed =
+            parse_args_from(vec!["--deny-licenses", "GPL-3.0-only, AGPL-3.0-only "]).unwrap();
         assert_eq!(
             parsed.deny_licenses,
             vec!["GPL-3.0-only".to_string(), "AGPL-3.0-only".to_string()]

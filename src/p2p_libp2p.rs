@@ -563,10 +563,7 @@ fn validate_peer_id_like(peer_id: &str) -> Result<(), Libp2pBackendError> {
             "peer id {peer_id} must be a base58 libp2p-style identifier (40-60 chars)"
         )));
     }
-    if !peer_id
-        .chars()
-        .all(|ch| BASE58_ALPHABET.contains(ch))
-    {
+    if !peer_id.chars().all(|ch| BASE58_ALPHABET.contains(ch)) {
         return Err(Libp2pBackendError::Parse(format!(
             "peer id {peer_id} contains characters outside the base58 alphabet"
         )));
@@ -575,8 +572,7 @@ fn validate_peer_id_like(peer_id: &str) -> Result<(), Libp2pBackendError> {
 }
 
 /// base58btc alphabet (no `0`, `O`, `I`, `l`).
-const BASE58_ALPHABET: &str =
-    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 #[cfg(feature = "real-libp2p")]
 fn parse_peer_id(peer_id: &str) -> Result<libp2p_identity::PeerId, Libp2pBackendError> {
@@ -727,4 +723,3 @@ mod tests {
         assert!(validate_multiaddr_like("/ip4").is_err());
     }
 }
-

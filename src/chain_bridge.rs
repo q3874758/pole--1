@@ -1,4 +1,4 @@
-﻿//! Minimal tx-JSON projection helpers for the bridge skeleton.
+//! Minimal tx-JSON projection helpers for the bridge skeleton.
 //!
 //! This module was slimmed down from a full chain-bridge module: every
 //! other helper (export_*/parse_*/build_*/generate_* variants,
@@ -157,4 +157,3 @@ pub fn generate_tx_json_for_epoch_commit(
     });
     serde_json::to_string_pretty(&wrapper)
 }
-

@@ -7,13 +7,17 @@ use std::time::Duration;
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report,
-    collect_configured_activity_source, current_unix_millis, decode_hex32,
-    detect_active_game_processes, dispatch_command, effective_collect_interval_secs,
-    export_governance_proposal_artifact, export_governance_scheduled_artifact,
-    fetch_current_players_live, format_usage_block, governance_index_artifact_path,
-    governance_summary_artifact_path, inmemory_simulation_listener_peer_ids,
-    inmemory_simulation_retrieval_peer_id, load_status, maybe_write_payload,
+    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, build_verification_credentials,
+    collect_configured_activity_source,
+    cosmos::{
+        address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
+    },
+    current_unix_millis, decode_hex32, detect_active_game_processes, dispatch_command,
+    effective_collect_interval_secs, export_governance_proposal_artifact,
+    export_governance_scheduled_artifact, fetch_current_players_live, format_usage_block,
+    governance_index_artifact_path, governance_summary_artifact_path,
+    inmemory_simulation_listener_peer_ids, inmemory_simulation_retrieval_peer_id,
+    is_player_verifier, load_status, load_verification_credentials, maybe_write_payload,
     open_local_protocol_state, parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
     parse_socket_topics, parse_third_party_activity_response, parse_vote_choice,
@@ -21,11 +25,10 @@ use pole_protocol_draft::{
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
     prune_retention, reward_local_epoch, run_collect_tick_with_client,
-    run_collect_tick_with_client_and_network, run_libp2p_skeleton_loop, socket_peers_from_config,
-    build_verification_credentials, is_player_verifier, load_verification_credentials,
-    save_verification_credentials, source_kind_label, submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
+    run_collect_tick_with_client_and_network, run_libp2p_skeleton_loop,
+    save_verification_credentials, socket_peers_from_config, source_kind_label,
+    submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
-    cosmos::{address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint},
     BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
     GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient, InMemoryP2pNetwork,
     LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
@@ -2245,7 +2248,9 @@ fn verify_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 /// (RPC on localhost:26657) and the node identity.
 fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 4 && args.len() != 5 {
-        return Err("usage: pole-node verify-batch-submit <config-path> <epoch-id> [chain-id]".into());
+        return Err(
+            "usage: pole-node verify-batch-submit <config-path> <epoch-id> [chain-id]".into(),
+        );
     }
     let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     let epoch_id: u64 = args[3].parse()?;
@@ -2256,7 +2261,10 @@ fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Er
         println!("verification_credentials=0 epoch={epoch_id}");
         return Ok(());
     }
-    println!("verification_credentials={} epoch={epoch_id}", credentials.len());
+    println!(
+        "verification_credentials={} epoch={epoch_id}",
+        credentials.len()
+    );
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
@@ -2276,12 +2284,18 @@ fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Er
                 verified: cred.verified,
                 signature_hex: cred.signature_hex.clone(),
             };
-            match client.submit(&msg, &signer, &identity, &Default::default()).await {
+            match client
+                .submit(&msg, &signer, &identity, &Default::default())
+                .await
+            {
                 Ok(resp) => println!(
                     "verify_batch_root={} code={} log={}",
                     cred.target_batch_root_hex, resp.code, resp.log
                 ),
-                Err(err) => println!("verify_batch_root={} submit_error={err}", cred.target_batch_root_hex),
+                Err(err) => println!(
+                    "verify_batch_root={} submit_error={err}",
+                    cred.target_batch_root_hex
+                ),
             }
         }
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -2348,8 +2362,7 @@ fn build_single_sample_batch(
         sample.app_id,
         sample.observed_players,
     );
-    let mut observation =
-        sample.into_observation(epoch_id, slot_id, collector_id, placeholder)?;
+    let mut observation = sample.into_observation(epoch_id, slot_id, collector_id, placeholder)?;
     if let Some(keypair) = &identity {
         let payload = observation.signing_payload();
         observation.collector_signature = keypair.sign(&payload);

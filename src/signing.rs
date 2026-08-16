@@ -85,8 +85,14 @@ fn verify_cosign_keyless(
     signing: &ManifestSigning,
     manifest_path: &Path,
 ) -> Result<ManifestSignatureVerification, Box<dyn std::error::Error>> {
-    let sig_file = signing.signature_file.as_deref().unwrap_or("stable.json.sig");
-    let cert_file = signing.certificate_file.as_deref().unwrap_or("stable.json.cert");
+    let sig_file = signing
+        .signature_file
+        .as_deref()
+        .unwrap_or("stable.json.sig");
+    let cert_file = signing
+        .certificate_file
+        .as_deref()
+        .unwrap_or("stable.json.cert");
     let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let sig_path = dir.join(sig_file);
     let cert_path = dir.join(cert_file);

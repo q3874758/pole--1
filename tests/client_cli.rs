@@ -23,7 +23,11 @@ fn write_test_identity(config: &mut NodeConfig) {
     config.reward_address_hex = pole_protocol_draft::hex_32(keypair.address);
     let data_dir = Path::new(&config.runtime.data_dir);
     std::fs::create_dir_all(data_dir).unwrap();
-    std::fs::write(data_dir.join("identity.json"), serde_json::to_string(&keypair).unwrap()).unwrap();
+    std::fs::write(
+        data_dir.join("identity.json"),
+        serde_json::to_string(&keypair).unwrap(),
+    )
+    .unwrap();
 }
 
 /// Runs `pole-client init` with the identity password pre-set so the

@@ -195,7 +195,11 @@ impl ObservationRecord {
         if crate::stable_hash32(pubkey) != self.collector_id {
             return SignatureStatus::Invalid;
         }
-        if crate::wallet::verify_signature(pubkey, &self.signing_payload(), &self.collector_signature) {
+        if crate::wallet::verify_signature(
+            pubkey,
+            &self.signing_payload(),
+            &self.collector_signature,
+        ) {
             SignatureStatus::Valid
         } else {
             SignatureStatus::Invalid
@@ -461,7 +465,6 @@ pub fn aggregate_record_to_chain_json(
 pub fn cid_from_hash(hash: Hash32, namespace: &str) -> ContentId {
     format!("cid://{namespace}/{}", hex::encode(hash))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -806,11 +809,9 @@ mod tests {
             slash_debit: 0,
             net_reward: 50,
         };
-        let json = reward_record_to_chain_json(
-            &record,
-            "cosmos1xyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq65su5v",
-        )
-        .unwrap();
+        let json =
+            reward_record_to_chain_json(&record, "cosmos1xyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq65su5v")
+                .unwrap();
         assert_eq!(
             String::from_utf8(json).unwrap(),
             "{\"epoch_id\":9,\"recipient\":\"cosmos1xyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq65su5v\",\"player_reward\":50,\"net_reward\":50}"

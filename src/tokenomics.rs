@@ -81,7 +81,8 @@ pub fn annual_emission_amount_with_tail(
     )
 }
 
-pub fn annual_emission_schedule(years: u32) -> Vec<AnnualEmissionSchedule> {    annual_emission_schedule_with_tail(
+pub fn annual_emission_schedule(years: u32) -> Vec<AnnualEmissionSchedule> {
+    annual_emission_schedule_with_tail(
         years,
         LONG_TERM_TAIL_START_YEAR,
         LONG_TERM_TAIL_EMISSION_RATE_BPS,
@@ -363,16 +364,28 @@ mod tests {
 
     #[test]
     fn annual_emission_activity_factor_is_one_when_weights_equal() {
-        assert_eq!(annual_emission_activity_factor(1_000, 1_000, 1_000), 1_000_000);
-        assert_eq!(annual_emission_activity_factor(7_777, 7_777, 500), 1_000_000);
+        assert_eq!(
+            annual_emission_activity_factor(1_000, 1_000, 1_000),
+            1_000_000
+        );
+        assert_eq!(
+            annual_emission_activity_factor(7_777, 7_777, 500),
+            1_000_000
+        );
     }
 
     #[test]
     fn annual_emission_activity_factor_clamps_to_cap() {
         // current 远低于 target → 上调被 cap 截断（10%）。
-        assert_eq!(annual_emission_activity_factor(100_000, 100, 1_000), 1_100_000);
+        assert_eq!(
+            annual_emission_activity_factor(100_000, 100, 1_000),
+            1_100_000
+        );
         // current 远高于 target → 下调被 cap 截断。
-        assert_eq!(annual_emission_activity_factor(100, 100_000, 1_000), 900_000);
+        assert_eq!(
+            annual_emission_activity_factor(100, 100_000, 1_000),
+            900_000
+        );
         // cap = 0 → 恒 1.0。
         assert_eq!(annual_emission_activity_factor(100_000, 100, 0), 1_000_000);
     }
@@ -392,9 +405,15 @@ mod tests {
     #[test]
     fn annual_emission_matches_integer_sqrt_reference() {
         // current = target/4 → factor = sqrt(4e12) = 2_000_000，clamp 1_100_000。
-        assert_eq!(annual_emission_activity_factor(4_000, 1_000, 10_000), 2_000_000);
+        assert_eq!(
+            annual_emission_activity_factor(4_000, 1_000, 10_000),
+            2_000_000
+        );
         // current = target → factor 1.0。
-        assert_eq!(annual_emission_activity_factor(4_000, 4_000, 10_000), 1_000_000);
+        assert_eq!(
+            annual_emission_activity_factor(4_000, 4_000, 10_000),
+            1_000_000
+        );
     }
 
     /// Cross-language fixtures shared with

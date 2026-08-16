@@ -305,7 +305,8 @@ fn init_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("node_id={}", config.node_id_hex);
     println!("data_dir={}", config.runtime.data_dir);
     println!("capabilities={}", format_capabilities(&config));
-    println!("next_step={}",
+    println!(
+        "next_step={}",
         command_hint("status", config_path.to_string_lossy().as_ref())
     );
     println!(
@@ -1406,8 +1407,10 @@ fn collect_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(foreground) = detect_foreground_process_name() {
         if should_capture_foreground_process(&foreground) {
             let game_process = canonical_process_name(&foreground);
-            let merged =
-                merge_process_names(&config.runtime.game_process_names, std::slice::from_ref(&game_process));
+            let merged = merge_process_names(
+                &config.runtime.game_process_names,
+                std::slice::from_ref(&game_process),
+            );
             if !merged.is_empty() && merged != config.runtime.game_process_names {
                 configure_game_process_awareness(&mut config);
                 config.runtime.game_process_names = merged;

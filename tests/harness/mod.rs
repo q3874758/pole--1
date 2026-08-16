@@ -23,18 +23,16 @@ use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 use tokio::time::sleep;
 
-use pole_protocol_draft::cosmos::{
-    address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
-};
 use pole_protocol_draft::cosmos::wire_types::{
     AggregateRecordWire, BatchCommitWire, EpochCommitWire, MerkleCommitmentWire,
     NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
 };
-use pole_protocol_draft::records::{Challenge, ChallengeEvidenceRef};
-use pole_protocol_draft::{
-    decode_hex32, ChallengeKind, ChallengeState, Hash32, NodeId,
+use pole_protocol_draft::cosmos::{
+    address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
 };
+use pole_protocol_draft::records::{Challenge, ChallengeEvidenceRef};
 use pole_protocol_draft::wallet::KeyPair;
+use pole_protocol_draft::{decode_hex32, ChallengeKind, ChallengeState, Hash32, NodeId};
 
 pub const DEFAULT_CHAIN_ID: &str = "pole-test";
 pub const DEFAULT_RPC_URL: &str = "http://127.0.0.1:26657";
@@ -167,7 +165,10 @@ impl IntegrationHarnessBuilder {
         let validator_key = KeyPair::from_seed(&[42u8; 32]);
         let account = address::cosmos_account_from_pubkey(&validator_key.public).to_vec();
         let validator_bech32 = address::encode_bech32(&prefix, &account)?;
-        let validator_address = CosmosAddress { account, bech32: validator_bech32.clone() };
+        let validator_address = CosmosAddress {
+            account,
+            bech32: validator_bech32.clone(),
+        };
 
         // 1. `poled init` to lay down config/
         let status = Command::new(&poled_bin)
@@ -455,10 +456,7 @@ impl IntegrationHarness {
 
     /// `MsgUpsertAggregateRecord` (verify capability). Refreshes the
     /// epoch's aggregates commitment so `FinalizeEpoch` can validate.
-    pub async fn upsert_aggregate_record(
-        &self,
-        epoch_id: u64,
-    ) -> Result<String, HarnessError> {
+    pub async fn upsert_aggregate_record(&self, epoch_id: u64) -> Result<String, HarnessError> {
         let aggregate = AggregateRecordWire {
             epoch_id,
             app_id: 730,
@@ -574,8 +572,8 @@ impl IntegrationHarness {
         deadline_height: u64,
         challenge_id: Hash32,
     ) -> Result<String, HarnessError> {
-        let target: NodeId =
-            decode_hex32(target_hex, "target_hex").map_err(|e| HarnessError::Parse(e.to_string()))?;
+        let target: NodeId = decode_hex32(target_hex, "target_hex")
+            .map_err(|e| HarnessError::Parse(e.to_string()))?;
         let challenge = Challenge {
             challenge_id,
             kind: ChallengeKind::BadBatch,
@@ -669,16 +667,36 @@ fn bootstrap_validator(
     chain_home: &Path,
     chain_id: &str,
 ) -> Result<(), HarnessError> {
-    poled_run(poled_bin, chain_home, &["keys", "add", "test-validator", "--keyring-backend", "test"])?;
     poled_run(
         poled_bin,
         chain_home,
-        &["genesis", "add-genesis-account", "test-validator", "1000000000stake", "--keyring-backend", "test"],
+        &["keys", "add", "test-validator", "--keyring-backend", "test"],
     )?;
     poled_run(
         poled_bin,
         chain_home,
-        &["genesis", "gentx", "test-validator", "1000000stake", "--chain-id", chain_id, "--keyring-backend", "test"],
+        &[
+            "genesis",
+            "add-genesis-account",
+            "test-validator",
+            "1000000000stake",
+            "--keyring-backend",
+            "test",
+        ],
+    )?;
+    poled_run(
+        poled_bin,
+        chain_home,
+        &[
+            "genesis",
+            "gentx",
+            "test-validator",
+            "1000000stake",
+            "--chain-id",
+            chain_id,
+            "--keyring-backend",
+            "test",
+        ],
     )?;
     poled_run(poled_bin, chain_home, &["genesis", "collect-gentxs"])?;
     Ok(())

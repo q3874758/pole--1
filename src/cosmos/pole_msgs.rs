@@ -1,4 +1,4 @@
-﻿//! Hand-rolled protobuf encoders for the PoLE `Msg*` types.
+//! Hand-rolled protobuf encoders for the PoLE `Msg*` types.
 //!
 //! The `pole.chain.pole.v1` package types live in
 //! `chain/proto/pole/chain/pole/v1/tx.proto`. They aren't shipped in
@@ -200,11 +200,7 @@ fn encode_challenge_inner(challenge: &Challenge, challenger_bech32: &str) -> Vec
 fn encode_evidence_inner(ev: &ChallengeEvidenceRef) -> Vec<u8> {
     let mut buf = Vec::with_capacity(128);
     // Field1: batch_root_hex (string; empty when None).
-    let batch_root = ev
-        .batch_root
-        .as_ref()
-        .map(hex::encode)
-        .unwrap_or_default();
+    let batch_root = ev.batch_root.as_ref().map(hex::encode).unwrap_or_default();
     encode_string(1, &batch_root, &mut buf);
     // Field2: aggregate_root_hex (string; empty when None).
     let aggregate_root = ev
@@ -214,11 +210,7 @@ fn encode_evidence_inner(ev: &ChallengeEvidenceRef) -> Vec<u8> {
         .unwrap_or_default();
     encode_string(2, &aggregate_root, &mut buf);
     // Field3: reward_root_hex (string; empty when None).
-    let reward_root = ev
-        .reward_root
-        .as_ref()
-        .map(hex::encode)
-        .unwrap_or_default();
+    let reward_root = ev.reward_root.as_ref().map(hex::encode).unwrap_or_default();
     encode_string(3, &reward_root, &mut buf);
     // Field4: payload_cid (string; empty when None).
     let payload_cid = ev.payload_cid.clone().unwrap_or_default();
@@ -657,7 +649,7 @@ mod tests {
     use super::*;
     use crate::primitives::ChallengeState;
     use crate::records::ChallengeEvidenceRef;
-    
+
     fn sample_challenge(
         kind: ChallengeKind,
         state: ChallengeState,

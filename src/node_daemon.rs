@@ -140,14 +140,18 @@ pub fn verification_credential_path(config: &NodeConfig, epoch_id: u64) -> PathB
 /// "player" verifier).
 pub fn player_activity_blocks_for_epoch(config: &NodeConfig, epoch_id: u64) -> usize {
     let batches_dir = Path::new(&config.runtime.data_dir).join("batches");
-    let Ok(entries) = fs::read_dir(&batches_dir) else { return 0 };
+    let Ok(entries) = fs::read_dir(&batches_dir) else {
+        return 0;
+    };
     let mut total = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
             continue;
         }
-        let Ok(artifact) = CollectTickArtifact::load_json(&path) else { continue };
+        let Ok(artifact) = CollectTickArtifact::load_json(&path) else {
+            continue;
+        };
         if artifact.epoch_id == epoch_id {
             total += artifact.player_reward_block_count;
         }
@@ -171,8 +175,7 @@ pub fn build_verification_credentials(
     epoch_id: u64,
     identity: &crate::wallet::KeyPair,
 ) -> Result<Vec<VerificationCredential>, NodeDaemonError> {
-    let report = verify_local_epoch(config, epoch_id)
-        .map_err(NodeDaemonError::Verification)?;
+    let report = verify_local_epoch(config, epoch_id).map_err(NodeDaemonError::Verification)?;
     let is_player = is_player_verifier(config, epoch_id);
     let verifier_hex = config.node_id_hex.clone();
     // On-chain address of the verifier identity (sha256(pubkey)[..20]).
@@ -191,7 +194,9 @@ pub fn build_verification_credentials(
             .collect::<Vec<_>>();
         paths.sort();
         for path in paths {
-            let Ok(artifact) = CollectTickArtifact::load_json(&path) else { continue };
+            let Ok(artifact) = CollectTickArtifact::load_json(&path) else {
+                continue;
+            };
             if artifact.epoch_id != epoch_id {
                 continue;
             }
@@ -224,8 +229,7 @@ pub fn build_verification_credentials(
                 verified_at_millis: verified_at,
                 signature_hex: String::new(),
             };
-            credential.signature_hex =
-                hex::encode(identity.sign(&credential.signing_payload()));
+            credential.signature_hex = hex::encode(identity.sign(&credential.signing_payload()));
             credentials.push(credential);
         }
     }
@@ -1636,7 +1640,10 @@ impl ActivitySourceHealthState {
     }
 
     pub fn record_failure(&mut self, key: &str) {
-        let count = self.consecutive_failures.entry(key.to_string()).or_insert(0);
+        let count = self
+            .consecutive_failures
+            .entry(key.to_string())
+            .or_insert(0);
         *count += 1;
         if *count >= Self::DEGRADE_THRESHOLD {
             self.degraded.insert(key.to_string());
@@ -1671,9 +1678,9 @@ pub fn activity_source_health_path(config: &NodeConfig) -> PathBuf {
 pub fn load_activity_source_health(
     config: &NodeConfig,
 ) -> Result<ActivitySourceHealthState, NodeDaemonError> {
-    load_json_or_default::<ActivitySourceHealthState, NodeDaemonError>(
-        activity_source_health_path(config),
-    )
+    load_json_or_default::<ActivitySourceHealthState, NodeDaemonError>(activity_source_health_path(
+        config,
+    ))
 }
 
 pub fn save_activity_source_health(
@@ -1715,7 +1722,11 @@ fn collect_activity_samples(
                 }
                 Err(err) => {
                     health.record_failure(&key);
-                    let degraded = if health.is_degraded(&key) { " (degraded)" } else { "" };
+                    let degraded = if health.is_degraded(&key) {
+                        " (degraded)"
+                    } else {
+                        ""
+                    };
                     failed_sources.push(format!("app_id={app_id} steam: {err}{degraded}"));
                 }
             }
@@ -1727,7 +1738,9 @@ fn collect_activity_samples(
             // Steam sources without an explicit endpoint fall back to the
             // official Steam Web API for the app id.
             let endpoint_url = match (&source.endpoint_url, source.source_kind) {
-                (Some(template), _) => Some(template.replace("{app_id}", &source.app_id.to_string())),
+                (Some(template), _) => {
+                    Some(template.replace("{app_id}", &source.app_id.to_string()))
+                }
                 (None, ActivitySourceKind::Steam) => Some(current_players_url(source.app_id)),
                 (None, _) => None,
             };
@@ -1747,7 +1760,11 @@ fn collect_activity_samples(
                 }
                 Err(err) => {
                     health.record_failure(&key);
-                    let degraded = if health.is_degraded(&key) { " (degraded)" } else { "" };
+                    let degraded = if health.is_degraded(&key) {
+                        " (degraded)"
+                    } else {
+                        ""
+                    };
                     failed_sources.push(format!(
                         "app_id={} kind={:?}: {err}{degraded}",
                         source.app_id, source.source_kind
@@ -3346,7 +3363,10 @@ mod tests {
         }
 
         fn ok(mut self, url: impl Into<String>, body: impl Into<String>) -> Self {
-            self.bodies.get_mut().unwrap().insert(url.into(), body.into());
+            self.bodies
+                .get_mut()
+                .unwrap()
+                .insert(url.into(), body.into());
             self
         }
 
@@ -3403,7 +3423,10 @@ mod tests {
         };
         let config = config_with_sources(vec![steam, epic]);
         let client = ScriptedHttpClient::new()
-            .ok(steam_url(730), r#"{"response":{"player_count":500000,"result":1}}"#)
+            .ok(
+                steam_url(730),
+                r#"{"response":{"player_count":500000,"result":1}}"#,
+            )
             .fail("https://example.invalid/epic/730", 5);
 
         let mut health = ActivitySourceHealthState::default();
@@ -3427,7 +3450,10 @@ mod tests {
         // First two attempts fail, the third succeeds -> with retries=2
         // the tick must still yield a sample.
         let client = ScriptedHttpClient::new()
-            .ok(steam_url(730), r#"{"response":{"player_count":123,"result":1}}"#)
+            .ok(
+                steam_url(730),
+                r#"{"response":{"player_count":123,"result":1}}"#,
+            )
             .fail(steam_url(730), 2);
 
         let mut health = ActivitySourceHealthState::default();
@@ -3474,7 +3500,10 @@ mod tests {
         assert!(!health.is_degraded(key));
         health.record_failure(key);
         assert!(health.is_degraded(key));
-        assert!(health.summarize().iter().any(|line| line.contains("degraded")));
+        assert!(health
+            .summarize()
+            .iter()
+            .any(|line| line.contains("degraded")));
 
         // A success clears the failure streak and recovers the source.
         health.record_success(key);
@@ -3563,4 +3592,3 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
-

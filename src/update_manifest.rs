@@ -67,8 +67,7 @@ fn fetch_release_manifest_from_github(
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
-    let base =
-        format!("https://github.com/{RELEASE_REPO}/releases/latest/download/{channel}.json");
+    let base = format!("https://github.com/{RELEASE_REPO}/releases/latest/download/{channel}.json");
 
     let response = client.get(&base).send()?;
     if !response.status().is_success() {

@@ -1684,8 +1684,7 @@ mod tests {
     #[test]
     fn socket_caps_unconfigured_learned_peers() {
         let sink_id = fixed32(1);
-        let sink =
-            SocketP2pNetwork::bind(sink_id, "127.0.0.1:0".parse().unwrap(), vec![]).unwrap();
+        let sink = SocketP2pNetwork::bind(sink_id, "127.0.0.1:0".parse().unwrap(), vec![]).unwrap();
         let extra = 16usize;
         for i in 0..(SocketP2pNetwork::MAX_REMOTE_PEERS + extra) {
             let mut id = [0u8; 32];
@@ -1702,4 +1701,3 @@ mod tests {
         assert_eq!(stats.dropped_peer_cap_count, extra as u64);
     }
 }
-

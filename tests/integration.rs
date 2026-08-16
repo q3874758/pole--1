@@ -37,7 +37,10 @@ mod integration_scenarios {
         caps: RegisteredNodeCapabilities,
     ) -> harness::RegisteredNode {
         h.register_node(caps).await.unwrap_or_else(|e| {
-            panic!("register_node should succeed: {e}\n--- poled log ---\n{}", h.poled_log_text())
+            panic!(
+                "register_node should succeed: {e}\n--- poled log ---\n{}",
+                h.poled_log_text()
+            )
         })
     }
 
@@ -100,26 +103,37 @@ mod integration_scenarios {
         let tx = h
             .submit_batch(serde_json::json!({"epoch_id": 2}))
             .await
-            .unwrap_or_else(|e| panic!("submit_batch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "submit_batch(2): {e}\n--- poled log ---\n{}",
+                    h.poled_log_text()
+                )
+            });
         assert!(!tx.is_empty());
 
-        let tx = h
-            .commit_epoch(2, 0)
-            .await
-            .unwrap_or_else(|e| panic!("commit_epoch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        let tx = h.commit_epoch(2, 0).await.unwrap_or_else(|e| {
+            panic!(
+                "commit_epoch(2): {e}\n--- poled log ---\n{}",
+                h.poled_log_text()
+            )
+        });
         assert!(!tx.is_empty());
 
-        let tx = h
-            .upsert_aggregate_record(2)
-            .await
-            .unwrap_or_else(|e| panic!("upsert_aggregate(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        let tx = h.upsert_aggregate_record(2).await.unwrap_or_else(|e| {
+            panic!(
+                "upsert_aggregate(2): {e}\n--- poled log ---\n{}",
+                h.poled_log_text()
+            )
+        });
         assert!(!tx.is_empty());
 
         // Wait for the challenge window to elapse, then finalize.
-        let tx = h
-            .finalize_epoch(2, 3)
-            .await
-            .unwrap_or_else(|e| panic!("finalize_epoch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        let tx = h.finalize_epoch(2, 3).await.unwrap_or_else(|e| {
+            panic!(
+                "finalize_epoch(2): {e}\n--- poled log ---\n{}",
+                h.poled_log_text()
+            )
+        });
         assert!(!tx.is_empty());
     }
 
@@ -143,7 +157,12 @@ mod integration_scenarios {
         let tx = h
             .open_challenge(1, &node.node_id_hex, 1_000_000, [0xE5; 32])
             .await
-            .unwrap_or_else(|e| panic!("open_challenge: {e}\n--- poled log ---\n{}", h.poled_log_text()));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "open_challenge: {e}\n--- poled log ---\n{}",
+                    h.poled_log_text()
+                )
+            });
         assert!(!tx.is_empty());
     }
 }
