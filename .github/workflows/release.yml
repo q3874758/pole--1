@@ -80,6 +80,7 @@ jobs:
 
       - name: Create portable zip
         run: |
+          New-Item -ItemType Directory -Force -Path dist/packages | Out-Null
           Compress-Archive -Path target/release/pole-client.exe,target/release/pole-node.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums

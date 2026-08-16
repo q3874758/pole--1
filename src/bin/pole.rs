@@ -55,11 +55,16 @@ fn main() {
 }
 
 fn run_forward(binary_dir: &Path, exe_name: &str, args: &[String]) -> i32 {
-    let result = Command::new(binary_dir.join(exe_name))
-        .args(&args[1..])
-        .creation_flags(0x08000000)
-        .spawn();
-    match result {
+    let mut command = Command::new(binary_dir.join(exe_name));
+    command.args(&args[1..]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: keep the forwarded binary from popping a
+        // console window when pole.exe is launched from a GUI context.
+        command.creation_flags(0x08000000);
+    }
+    match command.spawn() {
         Ok(mut c) => c.wait().map(|s| s.code().unwrap_or(1)).unwrap_or(1),
         Err(e) => {
             eprintln!("Failed to run {}: {}", exe_name, e);
