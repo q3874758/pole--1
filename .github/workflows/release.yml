@@ -42,6 +42,7 @@ jobs:
           cp target/release/pole-node dist/packages/deb-build/opt/pole/
           cp target/release/pole-client dist/packages/deb-build/opt/pole/
           cp packaging/linux/deb/pole-node.service dist/packages/deb-build/etc/systemd/system/
+          cp packaging/linux/deb/node.json dist/packages/deb-build/etc/pole/node.json
           cp packaging/linux/deb/control dist/packages/deb-build/DEBIAN/
           cp packaging/linux/deb/conffiles dist/packages/deb-build/DEBIAN/
           cp packaging/linux/deb/postinst dist/packages/deb-build/DEBIAN/postinst
@@ -64,8 +65,8 @@ jobs:
         with:
           name: linux-artifacts
           path: |
-            dist/packages/pole-node_${VERSION}_amd64.deb
-            dist/packages/pole-node_${VERSION}_amd64.deb.sha256
+            dist/packages/pole-node_${VERSION#v}_amd64.deb
+            dist/packages/pole-node_${VERSION#v}_amd64.deb.sha256
 
   release-windows:
     runs-on: windows-latest

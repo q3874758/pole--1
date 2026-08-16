@@ -1,0 +1,27 @@
+{
+  "chain_id": "pole-local",
+  "node_id_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "reward_address_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+  "capabilities": {
+    "collect": true,
+    "store": false,
+    "verify": false,
+    "propose": false,
+    "archive": false
+  },
+  "collect": {
+    "enabled": true,
+    "default_epoch_id": 1,
+    "default_slot_id": 1
+  },
+  "runtime": {
+    "data_dir": "/var/lib/pole",
+    "poll_interval_secs": 60,
+    "slots_per_epoch": 12,
+    "target_app_ids": [730]
+  },
+  "storage": {
+    "quota_gb": 10,
+    "retention_epochs": 2
+  }
+}

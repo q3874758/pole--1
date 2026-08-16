@@ -26,6 +26,7 @@ cp "$RELEASE_DIR/pole-client" "$DEB_DIR/opt/pole/" 2>/dev/null || true
 
 echo "[2/3] Copying systemd unit..."
 cp "$ROOT_DIR/packaging/linux/deb/pole-node.service" "$DEB_DIR/etc/systemd/system/"
+cp "$ROOT_DIR/packaging/linux/deb/node.json" "$DEB_DIR/etc/pole/node.json"
 
 echo "[3/3] Building DEB package..."
 cp "$ROOT_DIR/packaging/linux/deb/control" "$DEB_DIR/DEBIAN/"
