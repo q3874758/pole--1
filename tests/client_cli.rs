@@ -218,7 +218,12 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PoLE player mode started"));
     assert!(stdout.contains("captured_game_process=Some(\"BlackMythWukong.exe\")"));
+    // Startup-folder autostart is a Windows-only capability; on other
+    // platforms the player-start flow reports it as disabled.
+    #[cfg(windows)]
     assert!(stdout.contains("autostart_enabled=true"));
+    #[cfg(not(windows))]
+    assert!(stdout.contains("autostart_enabled=false"));
     assert!(stdout.contains("background_mode=watch"));
     assert!(stdout.contains("background_start_skipped=true"));
 
