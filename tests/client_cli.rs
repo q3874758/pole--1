@@ -188,13 +188,19 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
     std::fs::create_dir_all(&root).unwrap();
 
     let config_path = root.join("client.json");
+    #[cfg(windows)]
     let app_data = root.join("appdata");
+    #[cfg(windows)]
     let startup_dir = app_data
         .join("Microsoft")
         .join("Windows")
         .join("Start Menu")
         .join("Programs")
         .join("Startup");
+    #[cfg(not(windows))]
+    let app_data = PathBuf::new();
+    #[cfg(not(windows))]
+    let startup_dir = PathBuf::new();
     let binary = env!("CARGO_BIN_EXE_pole-client");
     let output = Command::new(binary)
         .env("APPDATA", &app_data)
@@ -252,15 +258,18 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
         config["runtime"]["activity_sources"][0]["source_kind"],
         "Steam"
     );
-    let launcher_paths = std::fs::read_dir(&startup_dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("vbs"))
-        .collect::<Vec<_>>();
-    assert_eq!(launcher_paths.len(), 1);
-    let launcher_content = std::fs::read_to_string(&launcher_paths[0]).unwrap();
-    assert!(launcher_content.contains("player-autostart"));
-    assert!(launcher_content.contains(config_path.to_string_lossy().as_ref()));
+    #[cfg(windows)]
+    {
+        let launcher_paths = std::fs::read_dir(&startup_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("vbs"))
+            .collect::<Vec<_>>();
+        assert_eq!(launcher_paths.len(), 1);
+        let launcher_content = std::fs::read_to_string(&launcher_paths[0]).unwrap();
+        assert!(launcher_content.contains("player-autostart"));
+        assert!(launcher_content.contains(config_path.to_string_lossy().as_ref()));
+    }
 
     std::fs::remove_dir_all(root).unwrap();
 }
