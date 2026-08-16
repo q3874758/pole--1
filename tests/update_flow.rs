@@ -19,6 +19,40 @@ fn temp_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pole-update-flow-{name}-{}", std::process::id()))
 }
 
+// Platform-aware test artifact: the updater selects artifacts matching the
+// current platform, so tests must not hardcode the Windows-only variant.
+#[cfg(windows)]
+fn test_artifact() -> ReleaseArtifact {
+    ReleaseArtifact {
+        platform: "windows".into(),
+        kind: "msi".into(),
+        path: "PoLE-0.2.0-x64.msi".into(),
+        sha256: "abc".into(),
+        size_bytes: 42,
+    }
+}
+
+#[cfg(not(windows))]
+fn test_artifact() -> ReleaseArtifact {
+    ReleaseArtifact {
+        platform: "linux".into(),
+        kind: "deb".into(),
+        path: "pole-node_0.2.0_amd64.deb".into(),
+        sha256: "abc".into(),
+        size_bytes: 42,
+    }
+}
+
+#[cfg(windows)]
+const TEST_ARTIFACT_KIND: &str = "msi";
+#[cfg(not(windows))]
+const TEST_ARTIFACT_KIND: &str = "deb";
+
+#[cfg(windows)]
+const TEST_ARTIFACT_PATH: &str = "PoLE-0.2.0-x64.msi";
+#[cfg(not(windows))]
+const TEST_ARTIFACT_PATH: &str = "pole-node_0.2.0_amd64.deb";
+
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -54,13 +88,7 @@ fn development_manifest_signature_verifies_against_payload() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -85,13 +113,7 @@ fn update_overview_reads_manifest_and_signature_status() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -126,13 +148,7 @@ fn stage_update_writes_pending_and_rollback_metadata() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -142,7 +158,7 @@ fn stage_update_writes_pending_and_rollback_metadata() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     let result = stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     assert_eq!(result.status, "staged");
@@ -159,11 +175,11 @@ fn stage_update_writes_pending_and_rollback_metadata() {
                 .to_string_lossy()
                 .into_owned(),
             artifact_count: 1,
-            artifact_kind: "msi".into(),
-            artifact_path: "PoLE-0.2.0-x64.msi".into(),
+            artifact_kind: TEST_ARTIFACT_KIND.into(),
+            artifact_path: TEST_ARTIFACT_PATH.into(),
             staged_artifact_path: update_dir
                 .join("staged")
-                .join("PoLE-0.2.0-x64.msi")
+                .join(TEST_ARTIFACT_PATH)
                 .to_string_lossy()
                 .into_owned(),
             staged_at_millis: pending.staged_at_millis,
@@ -175,10 +191,13 @@ fn stage_update_writes_pending_and_rollback_metadata() {
 
     let overview = collect_update_overview("0.1.0", "stable", &update_dir, &manifest_dir);
     assert_eq!(overview.pending_target_version.as_deref(), Some("0.2.0"));
-    assert_eq!(overview.selected_artifact_kind.as_deref(), Some("msi"));
+    assert_eq!(
+        overview.selected_artifact_kind.as_deref(),
+        Some(TEST_ARTIFACT_KIND)
+    );
     assert_eq!(
         overview.selected_artifact_path.as_deref(),
-        Some("PoLE-0.2.0-x64.msi")
+        Some(TEST_ARTIFACT_PATH)
     );
     assert_eq!(overview.rollback_status, "available");
 
@@ -198,13 +217,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -214,7 +227,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     let result = apply_update(&update_dir).unwrap();
@@ -234,11 +247,11 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
                 .to_string_lossy()
                 .into_owned(),
             artifact_kind: if cfg!(windows) {
-                "msi".into()
+                TEST_ARTIFACT_KIND.into()
             } else {
                 "deb".into()
             },
-            artifact_path: "PoLE-0.2.0-x64.msi".into(),
+            artifact_path: TEST_ARTIFACT_PATH.into(),
             applied_at_millis: applied.applied_at_millis,
         }
     );
@@ -308,7 +321,7 @@ fn apply_update_requires_service_window_when_daemon_pid_is_running() {
                 "linux".into()
             },
             kind: if cfg!(windows) {
-                "msi".into()
+                TEST_ARTIFACT_KIND.into()
             } else {
                 "deb".into()
             },
@@ -362,7 +375,7 @@ fn update_overview_uses_managed_service_status_for_window_check() {
                 "linux".into()
             },
             kind: if cfg!(windows) {
-                "msi".into()
+                TEST_ARTIFACT_KIND.into()
             } else {
                 "deb".into()
             },
@@ -408,13 +421,7 @@ fn execute_install_action_copies_into_override_root() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -424,7 +431,7 @@ fn execute_install_action_copies_into_override_root() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     apply_update(&update_dir).unwrap();
@@ -456,7 +463,7 @@ fn execute_install_action_copies_into_override_root() {
             ),
             staged_artifact_path: update_dir
                 .join("current")
-                .join("PoLE-0.2.0-x64.msi")
+                .join(TEST_ARTIFACT_PATH)
                 .to_string_lossy()
                 .into_owned(),
             executed_at_millis: execution.executed_at_millis,
@@ -496,13 +503,7 @@ fn execute_install_action_supports_installed_layout_strategy() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -512,7 +513,7 @@ fn execute_install_action_supports_installed_layout_strategy() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     apply_update(&update_dir).unwrap();
@@ -543,13 +544,7 @@ fn execute_install_action_supports_installed_layout_root_override() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -559,7 +554,7 @@ fn execute_install_action_supports_installed_layout_root_override() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     apply_update(&update_dir).unwrap();
@@ -608,13 +603,7 @@ fn execute_install_action_supports_system_install_write_with_env_override() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -624,7 +613,7 @@ fn execute_install_action_supports_system_install_write_with_env_override() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     std::env::set_var("POLE_INSTALLED_LAYOUT_ROOT_OVERRIDE", &installed_root);
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
@@ -678,13 +667,7 @@ fn rollback_update_restores_committed_install_target_from_backup() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -694,7 +677,7 @@ fn rollback_update_restores_committed_install_target_from_backup() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     apply_update(&update_dir).unwrap();
@@ -731,13 +714,7 @@ fn rollback_update_clears_applied_and_rollback_state() {
     let mut manifest = ReleaseManifest {
         channel: "stable".into(),
         version: "0.2.0".into(),
-        artifacts: vec![ReleaseArtifact {
-            platform: "windows".into(),
-            kind: "msi".into(),
-            path: "PoLE-0.2.0-x64.msi".into(),
-            sha256: "abc".into(),
-            size_bytes: 42,
-        }],
+        artifacts: vec![test_artifact()],
         signature: String::new(),
         signing: None,
     };
@@ -747,7 +724,7 @@ fn rollback_update_clears_applied_and_rollback_state() {
         serde_json::to_string_pretty(&manifest).unwrap(),
     )
     .unwrap();
-    std::fs::write(manifest_dir.join("PoLE-0.2.0-x64.msi"), b"artifact-bytes").unwrap();
+    std::fs::write(manifest_dir.join(TEST_ARTIFACT_PATH), b"artifact-bytes").unwrap();
 
     stage_update("0.1.0", "stable", &update_dir, &manifest_dir).unwrap();
     apply_update(&update_dir).unwrap();
@@ -796,7 +773,7 @@ fn update_overview_rejects_invalid_manifest_signature() {
   "channel": "stable",
   "version": "0.2.0",
   "artifacts": [
-    {"platform":"windows","kind":"msi","path":"PoLE-0.2.0-x64.msi","sha256":"abc","size_bytes":42}
+    {"platform":"windows","kind":"msi","path":"artifact.bin","sha256":"abc","size_bytes":42}
   ],
   "signature": "tampered-signature"
 }"#,
