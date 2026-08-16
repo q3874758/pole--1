@@ -179,7 +179,10 @@ impl ServiceManager for SystemdServiceManager {
             .to_ascii_lowercase();
         let state = if !stdout.is_empty() { stdout } else { stderr };
 
-        if state.contains("active") {
+        // `systemctl is-active` prints "inactive"/"unknown" for services
+        // that are not running — "inactive" contains the substring
+        // "active", so the positive check must exclude it.
+        if state.contains("active") && !state.contains("inactive") {
             Ok(ManagedServiceStatus::Running { pid: None })
         } else if state.contains("activating") {
             Ok(ManagedServiceStatus::Starting { pid: None })
