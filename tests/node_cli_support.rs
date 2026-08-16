@@ -765,20 +765,29 @@ fn pole_node_service_commands_are_exposed() {
     #[cfg(windows)]
     let service_root = root.join("windows-service");
     #[cfg(not(windows))]
-    let control_binary = root.join("systemctl.cmd");
+    let control_binary = root.join("systemctl");
     #[cfg(windows)]
     let control_binary = root.join("sc.cmd");
     let control_log = root.join("control.log");
 
     #[cfg(not(windows))]
-    std::fs::write(
-        &control_binary,
-        format!(
-            "@echo off\r\necho %*>>\"{}\"\r\nexit /b 0\r\n",
-            control_log.display()
-        ),
-    )
-    .unwrap();
+    {
+        std::fs::write(
+            &control_binary,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n",
+                control_log.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&control_binary).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&control_binary, perms).unwrap();
+        }
+    }
     #[cfg(windows)]
     std::fs::write(
         &control_binary,
