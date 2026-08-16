@@ -703,12 +703,16 @@ fn rollback_update_restores_committed_install_target_from_backup() {
     .unwrap();
 
     assert_eq!(std::fs::read(&target_path).unwrap(), b"artifact-bytes");
-    assert!(install_root.join("pole-node.exe.bak").exists());
+    assert!(install_root
+        .join(format!("{}.bak", target_binary_name()))
+        .exists());
 
     rollback_update(&update_dir).unwrap();
 
     assert_eq!(std::fs::read(&target_path).unwrap(), b"old-version");
-    assert!(!install_root.join("pole-node.exe.bak").exists());
+    assert!(!install_root
+        .join(format!("{}.bak", target_binary_name()))
+        .exists());
 
     std::fs::remove_dir_all(&root).unwrap();
 }
