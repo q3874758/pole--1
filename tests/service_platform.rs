@@ -264,7 +264,7 @@ fn windows_manager_install_and_uninstall_track_registration_file() {
         std::fs::write(
             &sc_binary,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"query\" ]; then echo 'STATE              : 1  STOPPED'; fi\necho \"$@\" >> \"{}\"\nexit 0\n",
+                "#!/bin/sh\necho 'STATE              : 1  STOPPED'\necho \"$@\" >> \"{}\"\nexit 0\n",
                 log_path.display()
             ),
         )
@@ -393,11 +393,7 @@ fn systemd_manager_status_uses_binary_output() {
     .unwrap();
     #[cfg(not(windows))]
     {
-        std::fs::write(
-            &command_binary,
-            "#!/bin/sh\nif [ \"$1\" = \"is-active\" ]; then echo active; fi\nexit 0\n",
-        )
-        .unwrap();
+        std::fs::write(&command_binary, "#!/bin/sh\necho 'active'\nexit 0\n").unwrap();
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&command_binary).unwrap().permissions();
         perms.set_mode(0o755);
@@ -443,9 +439,12 @@ fn windows_manager_status_uses_binary_output() {
     .unwrap();
     #[cfg(not(windows))]
     {
+        // Unconditional output: `sc query` must always report the service
+        // as running regardless of argument quoting differences between
+        // shells (dash vs bash) across runners.
         std::fs::write(
             &command_binary,
-            "#!/bin/sh\nif [ \"$1\" = \"query\" ]; then echo 'STATE              : 4  RUNNING'; fi\nexit 0\n",
+            "#!/bin/sh\necho 'STATE              : 4  RUNNING'\nexit 0\n",
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
