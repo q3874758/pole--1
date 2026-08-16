@@ -53,9 +53,9 @@
   - 修复：`annual_emission(year, target, current, cap)` = `annual_emission_amount(year) × annual_emission_activity_factor`；因子 = `sqrt(target/current)`（整数开方）clamp 到 `[1−cap, 1+cap]` ppm，权重缺失时返回 1.0；`integer_sqrt` 提为 `tokenomics::integer_sqrt`（node_rewards 复用）；`ANNUAL_EMISSION_ADJUSTMENT_CAP_BPS = 1000`（10%）。
   - 验证：`tokenomics::tests` 6 个方案 A 单测（0 权重/相等/上下 cap/跨年 tail/整数 sqrt 参考）+ 跨语言 fixtures。
 - [x] **3.2 链上执行层**：`chain/x/pole` BeginBlock 年度发行铸币（按新公式入奖励池）；接通 `ComputeAdjustedHourlyReward` 调用点（当前零调用）。 ✅ 本轮完成
-  - 修复：`keeper/emission.go` 新增 `annualEmissionState`（collections.Item[[]byte]，JSON 序列化，无 proto 重新生成）+ `BeginBlockAnnualEmission`：按 365 天协议年推进、从最近 finalized epoch 取 `TotalNetworkWeightUnits` 作活跃度、`types.AnnualAdjustedEmission`（内部调用 `AdjustedHourlyReward`——接通零调用点）计算年度预算、按区块时间份额铸币入 module 账户（年度硬上限）；`module.go BeginBlock` 接入；`InitGenesis` 初始化状态。
-  - `PayoutClaimedReward` 改为从年度发行池支付（`SendCoinsFromModuleToAccount`，不再按需铸币），池子耗尽则 claim 失败（年度预算约束）。
-  - 验证：`TestBeginBlockAnnualEmissionMintsBudgetIntoPool`（200M 基准 / 220M cap / 逐区块份额）、`TestClaimRewardMintsTransfersAndMarksClaimed`（池子支付路径）；`go test ./x/pole/... ./app/...` 全绿。
+  - 修复：`keeper/emission.go` 新增 `annualEmissionState`（collections.Item[[]byte]，JSON 序列化，无 proto 重新生成）+ `BeginBlockAnnualEmission`：年度预算按 12 个**月度期**（30 天/期，协议年 = 360 天）均分，月度配额 = 年度预算 ÷ 12，每区块按时间份额铸币入 module 账户（月度硬上限，次月重置）；活跃度 = 最近 finalized epoch 的 `TotalNetworkWeightUnits`；`types.AnnualAdjustedEmission`（内部调用 `AdjustedHourlyReward`——接通零调用点）计算年度预算；`module.go BeginBlock` 接入；`InitGenesis` 初始化状态。
+  - `PayoutClaimedReward` 改为从发行池支付（`SendCoinsFromModuleToAccount`，不再按需铸币），池子耗尽则 claim 失败（预算约束）。
+  - 验证：`TestBeginBlockAnnualEmissionMintsBudgetIntoPool`（月度配额 16,666,666 基准 / 18,333,333 cap / 逐区块份额）、`TestClaimRewardMintsTransfersAndMarksClaimed`（池子支付路径）；`go test ./x/pole/... ./app/...` 全绿。
 - [x] **3.3 销毁闭环**：补治理可用的 burn 通道（兑现白皮书 `Net Supply = Emission - Burn`；当前只有单向增发）。 ✅ 本轮完成
   - 修复：`PayoutClaimedReward` 中超过 `RewardBurnThreshold` 的申领超额部分按 `RewardBurnBps`（治理参数）`BurnCoins` 销毁；bankKeeper 接口补 `BurnCoins`（module 已有 Burner 权限）。
   - 验证：`TestClaimRewardBurnsExcessAboveThreshold`（50_000 申领 → 4_000 销毁 + 46_000 支付，池子扣减 50_000）。
@@ -63,7 +63,7 @@
   - 修复：`chain/x/pole/types/emission_cross_language_test.go` 与 `src/tokenomics.rs::annual_emission_matches_chain_go_fixtures` 双侧内嵌同一 8 行 fixtures（year/target/current/cap→期望发行），任一侧公式漂移双侧同时红。
   - 验证：Rust 16 个 tokenomics 测试绿 + Go `go test ./x/pole/types` 绿。
 - [x] **3.5 文档对齐**：白皮书 §4.4 更新公式（含 cap 10%、锚点定义），消除"文档写目标、代码不执行"。 ✅ 本轮完成
-  - 修复：`docs_PoLE_Whitepaper.md` §4.4.5「活跃度挂钩发行（方案 A）」：公式、锚点=TargetNetworkWeightUnits、cap 10% 常量、链上执行（BeginBlock 铸币入池/年度硬上限/池子支付/超额销毁/365 天协议年）与代码口径一致。
+  - 修复：`docs_PoLE_Whitepaper.md` §4.4.5「活跃度挂钩发行（方案 A）」：公式、锚点=TargetNetworkWeightUnits、cap 10% 常量、链上执行（月度期铸币入池/预算硬上限/池子支付/超额销毁/360 天协议年 = 12 × 30 天）与代码口径一致。
 
 ## 4. 🟠 测试与 CI
 

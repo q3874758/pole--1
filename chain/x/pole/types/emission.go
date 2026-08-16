@@ -21,8 +21,13 @@ const (
 	TailStartYear uint32 = 4
 	// TailEmissionRateBps is the long-term tail rate (2%).
 	TailEmissionRateBps uint16 = 200
-	// SecondsPerYear for protocol-year arithmetic (365 days).
-	SecondsPerYear int64 = 365 * 24 * 3600
+	// SecondsPerMonth is the scheme-A budget settlement period (30 days).
+	SecondsPerMonth int64 = 30 * 24 * 3600
+	// PeriodsPerYear is the number of monthly periods per protocol year.
+	PeriodsPerYear uint64 = 12
+	// SecondsPerYear is a 360-day protocol year (12 × 30-day periods), the
+	// year the nominal emission curve is indexed on.
+	SecondsPerYear int64 = SecondsPerMonth * int64(PeriodsPerYear)
 	// AnnualEmissionCapBps is the scheme-A yearly issuance adjustment cap
 	// (10%), a protocol constant per the confirmed parameters — anchored on
 	// the existing TargetNetworkWeightUnits governance parameter only.

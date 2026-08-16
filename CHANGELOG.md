@@ -89,10 +89,11 @@ changing protocol behaviour. Every change is backward compatible.
     (mirror of the Rust curve) and `AnnualAdjustedEmission`, which calls
     `AdjustedHourlyReward` (its first real call site).
   - `keeper/emission.go` — `annualEmissionState` (collections.Item[[]byte],
-    no proto regeneration) and `BeginBlockAnnualEmission`: 365-day
-    protocol years from genesis, activity = latest finalized epoch's
-    `TotalNetworkWeightUnits`, time-proportional minting of the yearly
-    budget into the module reward pool with a hard yearly cap.
+    no proto regeneration) and `BeginBlockAnnualEmission`: the yearly
+    budget is split into 12 monthly quotas (30-day periods, 360-day
+    protocol year), activity = latest finalized epoch's
+    `TotalNetworkWeightUnits`, time-proportional minting of the monthly
+    quota into the module reward pool with a hard per-month cap.
   - `PayoutClaimedReward` now pays from the scheme-A pool (rewards no
     longer mint on demand) and burns the excess above
     `RewardBurnThreshold` at `RewardBurnBps` (Net Supply = Emission −

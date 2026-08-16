@@ -158,18 +158,20 @@ func TestBeginBlockAnnualEmissionMintsBudgetIntoPool(t *testing.T) {
 	}
 	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
 
-	// No finalized epoch yet -> neutral adjustment -> year-1 base budget.
-	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerYear) * time.Second))
+	// No finalized epoch yet -> neutral adjustment -> year-1 base budget,
+	// split into 12 monthly quotas (200M / 12 = 16,666,666).
+	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerMonth) * time.Second))
 	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
 		t.Fatalf("begin block: %v", err)
 	}
 	balance := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
-	if !balance.Amount.Equal(sdkmath.NewInt(200_000_000)) {
-		t.Fatalf("expected pool 200_000_000, got %s", balance.Amount.String())
+	if !balance.Amount.Equal(sdkmath.NewInt(16_666_666)) {
+		t.Fatalf("expected pool 16_666_666, got %s", balance.Amount.String())
 	}
 
 	// A finalized epoch far below target raises the budget to the +10% cap
-	// (year 2 base is also 200M -> 220M). One second later mints ~6.
+	// (year 1 base 200M -> 220M; monthly quota 220M/12 = 18,333,333). One
+	// second into the new month mints ~7.
 	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
 		EpochId:                 1,
 		Finalized:               true,
@@ -177,13 +179,13 @@ func TestBeginBlockAnnualEmissionMintsBudgetIntoPool(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set epoch commit: %v", err)
 	}
-	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerYear)*time.Second + time.Second))
+	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerMonth)*time.Second + time.Second))
 	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
 		t.Fatalf("begin block: %v", err)
 	}
 	balance = app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
-	if !balance.Amount.Equal(sdkmath.NewInt(200_000_006)) {
-		t.Fatalf("expected pool 200_000_006, got %s", balance.Amount.String())
+	if !balance.Amount.Equal(sdkmath.NewInt(16_666_673)) {
+		t.Fatalf("expected pool 16_666_673, got %s", balance.Amount.String())
 	}
 }
 
@@ -220,14 +222,14 @@ func TestClaimRewardBurnsExcessAboveThreshold(t *testing.T) {
 		t.Fatalf("set reward record: %v", err)
 	}
 
-	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerYear) * time.Second))
+	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerMonth) * time.Second))
 	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
 		t.Fatalf("begin block: %v", err)
 	}
 	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
 	poolBefore := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
-	if !poolBefore.Amount.Equal(sdkmath.NewInt(220_000_000)) {
-		t.Fatalf("expected pool 220_000_000 before claim, got %s", poolBefore.Amount.String())
+	if !poolBefore.Amount.Equal(sdkmath.NewInt(18_333_333)) {
+		t.Fatalf("expected pool 18_333_333 before claim, got %s", poolBefore.Amount.String())
 	}
 
 	msgServer := app.MsgServiceRouter().Handler(&types.MsgClaimReward{})
@@ -241,7 +243,7 @@ func TestClaimRewardBurnsExcessAboveThreshold(t *testing.T) {
 		t.Fatalf("expected payout 46_000, got %s", balance.Amount.String())
 	}
 	poolAfter := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
-	wantPool := sdkmath.NewInt(220_000_000 - 50_000)
+	wantPool := sdkmath.NewInt(18_333_333 - 50_000)
 	if !poolAfter.Amount.Equal(wantPool) {
 		t.Fatalf("expected pool %s after claim, got %s", wantPool.String(), poolAfter.Amount.String())
 	}
