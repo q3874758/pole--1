@@ -1289,3 +1289,1155 @@ fn resolution_amounts(resolution: ChallengeResolution) -> (Amount, Amount) {
         ChallengeResolution::Rejected => (0, 0),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::{
+        Capability, ChallengeKind, ChallengeState, MerkleCommitment, NodeStatus, VoteChoice,
+    };
+    use crate::records::{BatchCommit, Challenge, ChallengeEvidenceRef, EpochCommit, RewardRecord};
+    use crate::state::ReputationSnapshot;
+    use crate::wallet::KeyPair;
+
+    fn keypair(byte: u8) -> KeyPair {
+        KeyPair::from_seed(&[byte; 32])
+    }
+
+    fn node_id(kp: &KeyPair) -> NodeId {
+        crate::stable_hash32(&kp.public)
+    }
+
+    fn account_of(kp: &KeyPair, balance: Amount) -> AccountState {
+        AccountState {
+            address: node_id(kp),
+            balance,
+            staked: 0,
+            locked: 0,
+            nonce: 0,
+        }
+    }
+
+    fn default_node(kp: &KeyPair, caps: &[Capability], bond: Amount) -> NodeRegistry {
+        NodeRegistry {
+            node_id: node_id(kp),
+            pubkey: kp.public.to_vec(),
+            reward_address: node_id(kp),
+            bond,
+            status: NodeStatus::Active,
+            enabled_capabilities: caps.to_vec(),
+            reputation: ReputationSnapshot {
+                score_ppm: 1_000_000,
+                successful_challenges: 0,
+                failed_challenges: 0,
+                challengeable_faults: 0,
+                collection_successes: 0,
+                collection_failures: 0,
+                storage_proofs_passed: 0,
+                storage_proofs_failed: 0,
+                last_updated_epoch: 0,
+            },
+            joined_at_height: 0,
+        }
+    }
+
+    fn state() -> ProtocolState<InMemoryStore> {
+        ProtocolState::new(ProtocolParams::default(), 0, 1)
+    }
+
+    fn setup_full_node(st: &mut ProtocolState<InMemoryStore>, kp: &KeyPair, bond: Amount) {
+        st.upsert_account(account_of(kp, bond * 10));
+        st.upsert_node(default_node(
+            kp,
+            &[
+                Capability::Collect,
+                Capability::Store,
+                Capability::Verify,
+                Capability::Propose,
+            ],
+            bond,
+        ));
+    }
+
+    fn signed_submit_batch(kp: &KeyPair, epoch_id: EpochId) -> SubmitBatchTx {
+        let batch = BatchCommit {
+            epoch_id,
+            collector_id: node_id(kp),
+            slot_start: 1,
+            slot_end: 1,
+            batch: MerkleCommitment {
+                root: [0x42u8; 32],
+                leaf_count: 1,
+            },
+            payload_cid: "cid://batch".to_string(),
+            obs_count: 1,
+            submitted_at_height: 0,
+        };
+        let mut tx = SubmitBatchTx {
+            batch_commit: batch,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        tx
+    }
+
+    fn commit_epoch_tx(kp: &KeyPair, epoch_id: EpochId, deadline: Height) -> CommitEpochTx {
+        let commit = EpochCommit {
+            epoch_id,
+            accepted_batches: MerkleCommitment {
+                root: [0x11u8; 32],
+                leaf_count: 1,
+            },
+            observations: MerkleCommitment {
+                root: [0x22u8; 32],
+                leaf_count: 1,
+            },
+            aggregates: MerkleCommitment {
+                root: [0x33u8; 32],
+                leaf_count: 1,
+            },
+            rewards: MerkleCommitment {
+                root: [0x44u8; 32],
+                leaf_count: 1,
+            },
+            availability: MerkleCommitment {
+                root: [0x55u8; 32],
+                leaf_count: 1,
+            },
+            randomness_seed: [0x66u8; 32],
+            proposer_id: node_id(kp),
+            challenge_open_height: 0,
+            challenge_deadline_height: deadline,
+        };
+        let mut tx = CommitEpochTx {
+            epoch_commit: commit,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        tx
+    }
+
+    /// Registers a collector+proposer node with a bond and submits a batch
+    /// and an epoch commit for `epoch_id`, so challenge tests have the
+    /// prerequisite state.
+    fn setup_committed_epoch(
+        st: &mut ProtocolState<InMemoryStore>,
+        kp: &KeyPair,
+        epoch_id: EpochId,
+    ) -> Height {
+        setup_full_node(st, kp, 100_000);
+        st.apply_submit_batch(signed_submit_batch(kp, epoch_id))
+            .expect("submit batch");
+        let deadline = st.height + 10;
+        st.apply_commit_epoch(commit_epoch_tx(kp, epoch_id, deadline))
+            .expect("commit epoch");
+        deadline
+    }
+
+    fn open_challenge_tx(
+        kp: &KeyPair,
+        challenge_id: Hash32,
+        epoch_id: EpochId,
+        target: NodeId,
+        bond: Amount,
+        deadline: Height,
+    ) -> OpenChallengeTx {
+        let challenge = Challenge {
+            challenge_id,
+            kind: ChallengeKind::BadBatch,
+            epoch_id,
+            target_node: Some(target),
+            challenger: node_id(kp),
+            bond,
+            opened_at_height: 0,
+            deadline_height: deadline,
+            state: ChallengeState::Open,
+            evidence: ChallengeEvidenceRef {
+                batch_root: Some([0x77u8; 32]),
+                aggregate_root: None,
+                reward_root: None,
+                payload_cid: None,
+                merkle_proof: Vec::new(),
+            },
+        };
+        let mut tx = OpenChallengeTx {
+            challenge,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        tx
+    }
+
+    // ------------------------------------------------------------------
+    // apply_submit_batch
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn submit_batch_accepts_signed_batch_from_collector() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        let effect = st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        assert!(matches!(effect, TransitionEffect::BatchAccepted { .. }));
+        assert_eq!(st.store.batch(&(1, node_id(&kp), [0x42u8; 32])).unwrap().submitted_at_height, 0);
+    }
+
+    #[test]
+    fn submit_batch_rejects_wrong_signer_key() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        let mut tx = signed_submit_batch(&kp, 1);
+        // Present a different key that does not hash to the collector id.
+        tx.pubkey = keypair(2).public;
+        assert!(matches!(
+            st.apply_submit_batch(tx),
+            Err(TransitionError::InvalidSigner)
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_bad_signature() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        let mut tx = signed_submit_batch(&kp, 1);
+        tx.signature[0] ^= 0xFF;
+        assert!(matches!(
+            st.apply_submit_batch(tx),
+            Err(TransitionError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_missing_collect_capability() {
+        let mut st = state();
+        let kp = keypair(1);
+        st.upsert_account(account_of(&kp, 100_000));
+        // Node without the collect capability.
+        st.upsert_node(default_node(&kp, &[Capability::Store], 100_000));
+        assert!(matches!(
+            st.apply_submit_batch(signed_submit_batch(&kp, 1)),
+            Err(TransitionError::MissingCapability { .. })
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_inactive_node() {
+        let mut st = state();
+        let kp = keypair(1);
+        let mut node = default_node(&kp, &[Capability::Collect], 100_000);
+        node.status = NodeStatus::Jailed;
+        st.upsert_account(account_of(&kp, 100_000));
+        st.upsert_node(node);
+        assert!(matches!(
+            st.apply_submit_batch(signed_submit_batch(&kp, 1)),
+            Err(TransitionError::NodeNotActive(_))
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_stale_epoch() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.current_epoch = 5;
+        assert!(matches!(
+            st.apply_submit_batch(signed_submit_batch(&kp, 3)),
+            Err(TransitionError::StaleEpoch { .. })
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_empty_payload_and_zero_obs_and_inverted_slots() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        let mut tx = signed_submit_batch(&kp, 1);
+        tx.batch_commit.payload_cid.clear();
+        tx.signature = kp.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_submit_batch(tx),
+            Err(TransitionError::EmptyPayloadCid)
+        ));
+
+        let mut tx = signed_submit_batch(&kp, 1);
+        tx.batch_commit.obs_count = 0;
+        tx.signature = kp.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_submit_batch(tx),
+            Err(TransitionError::EmptyBatch)
+        ));
+
+        let mut tx = signed_submit_batch(&kp, 1);
+        tx.batch_commit.slot_start = 5;
+        tx.batch_commit.slot_end = 2;
+        tx.signature = kp.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_submit_batch(tx),
+            Err(TransitionError::InvalidSlotRange)
+        ));
+    }
+
+    #[test]
+    fn submit_batch_rejects_duplicate_batch() {
+        let mut st = state();
+        let kp = keypair(1);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        assert!(matches!(
+            st.apply_submit_batch(signed_submit_batch(&kp, 1)),
+            Err(TransitionError::DuplicateBatch(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_commit_epoch
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn commit_epoch_accepts_with_batch_and_valid_window() {
+        let mut st = state();
+        let kp = keypair(2);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        let effect = st
+            .apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10))
+            .unwrap();
+        assert!(matches!(effect, TransitionEffect::EpochCommitted { .. }));
+    }
+
+    #[test]
+    fn commit_epoch_rejects_without_batch_for_epoch() {
+        let mut st = state();
+        let kp = keypair(2);
+        setup_full_node(&mut st, &kp, 100_000);
+        assert!(matches!(
+            st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10)),
+            Err(TransitionError::MissingBatchForEpoch(_))
+        ));
+    }
+
+    #[test]
+    fn commit_epoch_rejects_window_out_of_range() {
+        let mut st = state();
+        let kp = keypair(2);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        // Deadline must be strictly above the open height and within the window.
+        assert!(matches!(
+            st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height)),
+            Err(TransitionError::ChallengeWindowInvalid { .. })
+        ));
+        assert!(matches!(
+            st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 100)),
+            Err(TransitionError::ChallengeWindowInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn commit_epoch_rejects_insufficient_propose_bond() {
+        let mut st = state();
+        let kp = keypair(2);
+        st.upsert_account(account_of(&kp, 100_000));
+        st.upsert_node(default_node(&kp, &[Capability::Collect, Capability::Propose], 100));
+        st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        assert!(matches!(
+            st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10)),
+            Err(TransitionError::InsufficientBond { .. })
+        ));
+    }
+
+    #[test]
+    fn commit_epoch_rejects_duplicate() {
+        let mut st = state();
+        let kp = keypair(2);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.apply_submit_batch(signed_submit_batch(&kp, 1)).unwrap();
+        st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10))
+            .unwrap();
+        assert!(matches!(
+            st.apply_commit_epoch(commit_epoch_tx(&kp, 1, st.height + 10)),
+            Err(TransitionError::DuplicateEpochCommit(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_open_challenge
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn open_challenge_locks_bond_and_opens() {
+        let mut st = state();
+        let kp = keypair(3);
+        setup_full_node(&mut st, &kp, 100_000);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        let before = st.store.account(&node_id(&challenger)).unwrap().clone();
+
+        let effect = st
+            .apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                1,
+                node_id(&kp),
+                1_000,
+                deadline,
+            ))
+            .unwrap();
+        assert!(matches!(effect, TransitionEffect::ChallengeOpened { .. }));
+
+        let after = st.store.account(&node_id(&challenger)).unwrap();
+        assert_eq!(before.balance, after.balance + 1_000);
+        assert_eq!(after.locked, 1_000);
+    }
+
+    #[test]
+    fn open_challenge_rejects_zero_bond() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        assert!(matches!(
+            st.apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                1,
+                node_id(&kp),
+                0,
+                deadline,
+            )),
+            Err(TransitionError::InvalidChallengeBond)
+        ));
+    }
+
+    #[test]
+    fn open_challenge_rejects_missing_epoch_commit() {
+        let mut st = state();
+        let kp = keypair(3);
+        setup_full_node(&mut st, &kp, 100_000);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        assert!(matches!(
+            st.apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                9,
+                node_id(&kp),
+                1_000,
+                100,
+            )),
+            Err(TransitionError::EpochCommitNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn open_challenge_rejects_insufficient_balance() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 500));
+        assert!(matches!(
+            st.apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                1,
+                node_id(&kp),
+                1_000,
+                deadline,
+            )),
+            Err(TransitionError::InsufficientBalance { .. })
+        ));
+    }
+
+    #[test]
+    fn open_challenge_rejects_deadline_outside_window() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        assert!(matches!(
+            st.apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                1,
+                node_id(&kp),
+                1_000,
+                deadline + 100,
+            )),
+            Err(TransitionError::ChallengeWindowInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn open_challenge_rejects_duplicate_id() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        st.apply_open_challenge(open_challenge_tx(
+            &challenger,
+            [0xABu8; 32],
+            1,
+            node_id(&kp),
+            1_000,
+            deadline,
+        ))
+        .unwrap();
+        assert!(matches!(
+            st.apply_open_challenge(open_challenge_tx(
+                &challenger,
+                [0xABu8; 32],
+                1,
+                node_id(&kp),
+                1_000,
+                deadline,
+            )),
+            Err(TransitionError::ChallengeAlreadyExists(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_claim_reward
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn claim_reward_pays_finalized_reward_to_reward_address() {
+        let mut st = state();
+        let kp = keypair(5);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.store.mark_epoch_finalized(1);
+        st.store.insert_reward_record(
+            (1, node_id(&kp)),
+            RewardRecord {
+                epoch_id: 1,
+                node_id: node_id(&kp),
+                player_reward: 0,
+                collect_reward: 0,
+                store_reward: 0,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 5_000,
+            },
+        );
+        let before = st.store.account(&node_id(&kp)).unwrap().balance;
+        let mut tx = ClaimRewardTx {
+            claimer: node_id(&kp),
+            epoch_id: 1,
+            node_id: node_id(&kp),
+            amount: 5_000,
+            merkle_proof: Vec::new(),
+            nonce: 0,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        let effect = st.apply_claim_reward(tx).unwrap();
+        assert!(matches!(effect, TransitionEffect::RewardClaimed { .. }));
+        assert_eq!(st.store.account(&node_id(&kp)).unwrap().balance, before + 5_000);
+    }
+
+    #[test]
+    fn claim_reward_rejects_unfinalized_epoch() {
+        let mut st = state();
+        let kp = keypair(5);
+        setup_full_node(&mut st, &kp, 100_000);
+        let mut tx = ClaimRewardTx {
+            claimer: node_id(&kp),
+            epoch_id: 1,
+            node_id: node_id(&kp),
+            amount: 1,
+            merkle_proof: Vec::new(),
+            nonce: 0,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_claim_reward(tx),
+            Err(TransitionError::EpochNotFinalized(_))
+        ));
+    }
+
+    #[test]
+    fn claim_reward_rejects_double_claim_and_mismatch() {
+        let mut st = state();
+        let kp = keypair(5);
+        setup_full_node(&mut st, &kp, 100_000);
+        st.store.mark_epoch_finalized(1);
+        st.store.insert_reward_record(
+            (1, node_id(&kp)),
+            RewardRecord {
+                epoch_id: 1,
+                node_id: node_id(&kp),
+                player_reward: 0,
+                collect_reward: 0,
+                store_reward: 0,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 5_000,
+            },
+        );
+        let mut claim = |amount: Amount| {
+            let mut tx = ClaimRewardTx {
+                claimer: node_id(&kp),
+                epoch_id: 1,
+                node_id: node_id(&kp),
+                amount,
+                merkle_proof: Vec::new(),
+                nonce: 0,
+                pubkey: kp.public,
+                signature: Vec::new(),
+            };
+            tx.signature = kp.sign(&tx.signing_payload());
+            st.apply_claim_reward(tx)
+        };
+        // Wrong amount first.
+        assert!(matches!(
+            claim(4_999),
+            Err(TransitionError::ClaimAmountMismatch { .. })
+        ));
+        // Correct claim succeeds, then double claim is rejected.
+        claim(5_000).unwrap();
+        assert!(matches!(
+            claim(5_000),
+            Err(TransitionError::RewardAlreadyClaimed(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_transfer
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn transfer_moves_funds_with_fee_and_nonce() {
+        let mut st = state();
+        let from = keypair(6);
+        let to = keypair(7);
+        st.upsert_account(account_of(&from, 10_000));
+        st.upsert_account(account_of(&to, 0));
+        let mut tx = TransferTx {
+            from: node_id(&from),
+            to: node_id(&to),
+            amount: 4_000,
+            fee: 100,
+            nonce: 0,
+            pubkey: from.public,
+            signature: Vec::new(),
+        };
+        tx.signature = from.sign(&tx.signing_payload());
+        st.apply_transfer(tx).unwrap();
+        assert_eq!(st.store.account(&node_id(&from)).unwrap().balance, 5_900);
+        assert_eq!(st.store.account(&node_id(&to)).unwrap().balance, 4_000);
+        assert_eq!(st.store.account(&node_id(&from)).unwrap().nonce, 1);
+    }
+
+    #[test]
+    fn transfer_rejects_insufficient_balance() {
+        let mut st = state();
+        let from = keypair(6);
+        let to = keypair(7);
+        st.upsert_account(account_of(&from, 100));
+        st.upsert_account(account_of(&to, 0));
+        let mut tx = TransferTx {
+            from: node_id(&from),
+            to: node_id(&to),
+            amount: 4_000,
+            fee: 100,
+            nonce: 0,
+            pubkey: from.public,
+            signature: Vec::new(),
+        };
+        tx.signature = from.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_transfer(tx),
+            Err(TransitionError::InsufficientBalance { .. })
+        ));
+    }
+
+    #[test]
+    fn transfer_rejects_nonce_mismatch() {
+        let mut st = state();
+        let from = keypair(6);
+        let to = keypair(7);
+        st.upsert_account(account_of(&from, 10_000));
+        st.upsert_account(account_of(&to, 0));
+        let mut tx = TransferTx {
+            from: node_id(&from),
+            to: node_id(&to),
+            amount: 100,
+            fee: 0,
+            nonce: 7,
+            pubkey: from.public,
+            signature: Vec::new(),
+        };
+        tx.signature = from.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_transfer(tx),
+            Err(TransitionError::NonceMismatch { .. })
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_stake / apply_unbond / process_mature_unbonds
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn stake_moves_balance_to_staked_and_increases_node_bond() {
+        let mut st = state();
+        let delegator = keypair(8);
+        let operator = keypair(9);
+        st.upsert_account(account_of(&delegator, 20_000));
+        st.upsert_node(default_node(&operator, &[Capability::Collect], 5_000));
+        let mut tx = StakeTx {
+            delegator: node_id(&delegator),
+            operator: node_id(&operator),
+            amount: 8_000,
+            nonce: 0,
+            pubkey: delegator.public,
+            signature: Vec::new(),
+        };
+        tx.signature = delegator.sign(&tx.signing_payload());
+        st.apply_stake(tx).unwrap();
+        let account = st.store.account(&node_id(&delegator)).unwrap();
+        assert_eq!(account.balance, 12_000);
+        assert_eq!(account.staked, 8_000);
+        assert_eq!(st.store.node(&node_id(&operator)).unwrap().bond, 13_000);
+        assert_eq!(
+            st.store
+                .delegation(&(node_id(&delegator), node_id(&operator)))
+                .unwrap()
+                .amount,
+            8_000
+        );
+    }
+
+    #[test]
+    fn stake_rejects_insufficient_balance_and_unknown_operator() {
+        let mut st = state();
+        let delegator = keypair(8);
+        st.upsert_account(account_of(&delegator, 100));
+        let mut tx = StakeTx {
+            delegator: node_id(&delegator),
+            operator: [0xEEu8; 32],
+            amount: 8_000,
+            nonce: 0,
+            pubkey: delegator.public,
+            signature: Vec::new(),
+        };
+        tx.signature = delegator.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_stake(tx),
+            Err(TransitionError::UnknownNode(_))
+        ));
+    }
+
+    #[test]
+    fn unbond_queues_locked_funds_and_matures_at_unlock_height() {
+        let mut st = state();
+        let delegator = keypair(8);
+        let operator = keypair(9);
+        st.upsert_account(account_of(&delegator, 20_000));
+        st.upsert_node(default_node(&operator, &[Capability::Collect], 5_000));
+        let mut stake = StakeTx {
+            delegator: node_id(&delegator),
+            operator: node_id(&operator),
+            amount: 8_000,
+            nonce: 0,
+            pubkey: delegator.public,
+            signature: Vec::new(),
+        };
+        stake.signature = delegator.sign(&stake.signing_payload());
+        st.apply_stake(stake).unwrap();
+
+        let mut unbond = UnbondTx {
+            delegator: node_id(&delegator),
+            operator: node_id(&operator),
+            amount: 3_000,
+            nonce: 1,
+            pubkey: delegator.public,
+            signature: Vec::new(),
+        };
+        unbond.signature = delegator.sign(&unbond.signing_payload());
+        let effect = st.apply_unbond(unbond).unwrap();
+        let TransitionEffect::UnbondQueued { unlock_height, .. } = effect else {
+            panic!("expected UnbondQueued");
+        };
+        assert_eq!(st.store.account(&node_id(&delegator)).unwrap().staked, 5_000);
+        assert_eq!(st.store.account(&node_id(&delegator)).unwrap().locked, 3_000);
+        assert_eq!(st.store.delegation(&(node_id(&delegator), node_id(&operator))).unwrap().amount, 5_000);
+
+        // Not yet matured.
+        st.height = unlock_height - 1;
+        assert!(st.process_mature_unbonds().unwrap().is_empty());
+        // Matured: locked funds return to balance.
+        st.height = unlock_height;
+        let effects = st.process_mature_unbonds().unwrap();
+        assert_eq!(effects.len(), 1);
+        let account = st.store.account(&node_id(&delegator)).unwrap();
+        assert_eq!(account.locked, 0);
+        assert_eq!(account.balance, 15_000);
+    }
+
+    #[test]
+    fn unbond_rejects_amount_above_delegation() {
+        let mut st = state();
+        let delegator = keypair(8);
+        let operator = keypair(9);
+        st.upsert_account(account_of(&delegator, 20_000));
+        st.upsert_node(default_node(&operator, &[Capability::Collect], 5_000));
+        let mut tx = UnbondTx {
+            delegator: node_id(&delegator),
+            operator: node_id(&operator),
+            amount: 1_000,
+            nonce: 0,
+            pubkey: delegator.public,
+            signature: Vec::new(),
+        };
+        tx.signature = delegator.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_unbond(tx),
+            Err(TransitionError::DelegationNotFound(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_vote / governance quorum
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn vote_records_with_power_and_rejects_duplicate_and_insufficient_power() {
+        let mut st = state();
+        let voter = keypair(10);
+        st.upsert_account(account_of(&voter, 5_000));
+        let proposal = [0xC1u8; 32];
+        let mut tx = VoteTx {
+            proposal_id: proposal,
+            voter: node_id(&voter),
+            choice: VoteChoice::Yes,
+            voting_power: 1_000,
+            nonce: 0,
+            pubkey: voter.public,
+            signature: Vec::new(),
+        };
+        tx.signature = voter.sign(&tx.signing_payload());
+        st.apply_vote(tx).unwrap();
+
+        // Duplicate vote.
+        let mut dup = VoteTx {
+            proposal_id: proposal,
+            voter: node_id(&voter),
+            choice: VoteChoice::Yes,
+            voting_power: 1_000,
+            nonce: 1,
+            pubkey: voter.public,
+            signature: Vec::new(),
+        };
+        dup.signature = voter.sign(&dup.signing_payload());
+        assert!(matches!(
+            st.apply_vote(dup),
+            Err(TransitionError::DuplicateVote(_))
+        ));
+
+        // Voting power above balance + staked + locked.
+        let voter2 = keypair(11);
+        st.upsert_account(account_of(&voter2, 500));
+        let mut over = VoteTx {
+            proposal_id: proposal,
+            voter: node_id(&voter2),
+            choice: VoteChoice::Yes,
+            voting_power: 600,
+            nonce: 0,
+            pubkey: voter2.public,
+            signature: Vec::new(),
+        };
+        over.signature = voter2.sign(&over.signing_payload());
+        assert!(matches!(
+            st.apply_vote(over),
+            Err(TransitionError::InsufficientVotingPower { .. })
+        ));
+    }
+
+    #[test]
+    fn governance_quorum_schedules_params_update_after_approval_votes() {
+        let mut st = state();
+        // Two accounts with 30_000 each; proposer holds only its 10_000
+        // bond. Quorum 25% (2_500 bps) needs >= 17_500 participating
+        // (total voting power = 10_000 locked + 30_000 + 30_000), approval
+        // 60% of decisive — 60_000 yes of 70_000 passes both.
+        let proposer = keypair(12);
+        let voter_a = keypair(13);
+        let voter_b = keypair(14);
+        st.upsert_account(account_of(&proposer, 10_000));
+        st.upsert_account(account_of(&voter_a, 30_000));
+        st.upsert_account(account_of(&voter_b, 30_000));
+
+        let proposal = [0xD2u8; 32];
+        let mut propose = ProposeProtocolParamsUpdateTx {
+            proposal_id: proposal,
+            proposer: node_id(&proposer),
+            effective_epoch: 3,
+            params: ProtocolParams::default(),
+            nonce: 0,
+            pubkey: proposer.public,
+            signature: Vec::new(),
+        };
+        propose.signature = proposer.sign(&propose.signing_payload());
+        st.apply_propose_protocol_params_update(propose).unwrap();
+
+        // Fast params default bond is 10_000; proposer had it locked.
+        assert_eq!(
+            st.store.account(&node_id(&proposer)).unwrap().locked,
+            st.params.governance.params_update_bond
+        );
+
+        let mut vote = |kp: &KeyPair, nonce: u64, power: Amount| {
+            let mut tx = VoteTx {
+                proposal_id: proposal,
+                voter: node_id(kp),
+                choice: VoteChoice::Yes,
+                voting_power: power,
+                nonce,
+                pubkey: kp.public,
+                signature: Vec::new(),
+            };
+            tx.signature = kp.sign(&tx.signing_payload());
+            st.apply_vote(tx).unwrap();
+        };
+        // 30_000 yes + 30_000 yes of 70_000 total -> quorum ~86% >= 25%,
+        // approval 100% >= 60%.
+        vote(&voter_a, 0, 30_000);
+        vote(&voter_b, 0, 30_000);
+
+        let record = st
+            .store
+            .params_update_proposal(&proposal)
+            .unwrap()
+            .clone();
+        assert_eq!(record.state, GovernanceProposalState::Scheduled);
+        // Proposer bond returned on scheduling.
+        assert_eq!(st.store.account(&node_id(&proposer)).unwrap().locked, 0);
+        assert!(st.store.scheduled_protocol_params(&3).is_some());
+    }
+
+    #[test]
+    fn propose_params_update_rejects_duplicate_and_insufficient_bond() {
+        let mut st = state();
+        let proposer = keypair(12);
+        st.upsert_account(account_of(&proposer, 5_000)); // below 10_000 bond
+        let proposal = [0xD3u8; 32];
+        let mut tx = ProposeProtocolParamsUpdateTx {
+            proposal_id: proposal,
+            proposer: node_id(&proposer),
+            effective_epoch: 3,
+            params: ProtocolParams::default(),
+            nonce: 0,
+            pubkey: proposer.public,
+            signature: Vec::new(),
+        };
+        tx.signature = proposer.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_propose_protocol_params_update(tx),
+            Err(TransitionError::InsufficientBalance { .. })
+        ));
+
+        // Duplicate proposal id.
+        st.upsert_account(account_of(&proposer, 100_000));
+        let mut ok = ProposeProtocolParamsUpdateTx {
+            proposal_id: proposal,
+            proposer: node_id(&proposer),
+            effective_epoch: 3,
+            params: ProtocolParams::default(),
+            nonce: 0,
+            pubkey: proposer.public,
+            signature: Vec::new(),
+        };
+        ok.signature = proposer.sign(&ok.signing_payload());
+        st.apply_propose_protocol_params_update(ok).unwrap();
+        let mut dup = ProposeProtocolParamsUpdateTx {
+            proposal_id: proposal,
+            proposer: node_id(&proposer),
+            effective_epoch: 4,
+            params: ProtocolParams::default(),
+            nonce: 1,
+            pubkey: proposer.public,
+            signature: Vec::new(),
+        };
+        dup.signature = proposer.sign(&dup.signing_payload());
+        assert!(matches!(
+            st.apply_propose_protocol_params_update(dup),
+            Err(TransitionError::DuplicateParamsUpdateProposal(_))
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // apply_challenge_response
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn challenge_response_records_response_within_window() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        st.apply_open_challenge(open_challenge_tx(
+            &challenger,
+            [0xABu8; 32],
+            1,
+            node_id(&kp),
+            1_000,
+            deadline,
+        ))
+        .unwrap();
+
+        let mut tx = ChallengeResponseTx {
+            challenge_id: [0xABu8; 32],
+            responder: node_id(&kp),
+            response_payload_cid: Some("cid://response".to_string()),
+            response_hash: None,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        let effect = st.apply_challenge_response(tx).unwrap();
+        assert!(matches!(effect, TransitionEffect::ChallengeResponded { .. }));
+        assert!(st.store.challenge_response(&[0xABu8; 32]).is_some());
+    }
+
+    #[test]
+    fn challenge_response_rejects_empty_and_unknown_and_wrong_responder() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        st.apply_open_challenge(open_challenge_tx(
+            &challenger,
+            [0xABu8; 32],
+            1,
+            node_id(&kp),
+            1_000,
+            deadline,
+        ))
+        .unwrap();
+
+        // Empty response payload and hash.
+        let mut empty = ChallengeResponseTx {
+            challenge_id: [0xABu8; 32],
+            responder: node_id(&kp),
+            response_payload_cid: None,
+            response_hash: None,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        empty.signature = kp.sign(&empty.signing_payload());
+        assert!(matches!(
+            st.apply_challenge_response(empty),
+            Err(TransitionError::EmptyChallengeResponse)
+        ));
+
+        // Unknown challenge id.
+        let mut unknown = ChallengeResponseTx {
+            challenge_id: [0xCDu8; 32],
+            responder: node_id(&kp),
+            response_payload_cid: Some("cid://x".to_string()),
+            response_hash: None,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        unknown.signature = kp.sign(&unknown.signing_payload());
+        assert!(matches!(
+            st.apply_challenge_response(unknown),
+            Err(TransitionError::ChallengeNotFound(_))
+        ));
+
+        // Wrong responder (not the target node).
+        let intruder = keypair(5);
+        st.upsert_account(account_of(&intruder, 100_000));
+        let mut wrong = ChallengeResponseTx {
+            challenge_id: [0xABu8; 32],
+            responder: node_id(&intruder),
+            response_payload_cid: Some("cid://x".to_string()),
+            response_hash: None,
+            pubkey: intruder.public,
+            signature: Vec::new(),
+        };
+        wrong.signature = intruder.sign(&wrong.signing_payload());
+        assert!(matches!(
+            st.apply_challenge_response(wrong),
+            Err(TransitionError::InvalidChallengeResponder { .. })
+        ));
+    }
+
+    #[test]
+    fn challenge_response_rejects_after_deadline() {
+        let mut st = state();
+        let kp = keypair(3);
+        let deadline = setup_committed_epoch(&mut st, &kp, 1);
+        let challenger = keypair(4);
+        st.upsert_account(account_of(&challenger, 50_000));
+        st.apply_open_challenge(open_challenge_tx(
+            &challenger,
+            [0xABu8; 32],
+            1,
+            node_id(&kp),
+            1_000,
+            deadline,
+        ))
+        .unwrap();
+
+        st.height = deadline + 1;
+        let mut tx = ChallengeResponseTx {
+            challenge_id: [0xABu8; 32],
+            responder: node_id(&kp),
+            response_payload_cid: Some("cid://late".to_string()),
+            response_hash: None,
+            pubkey: kp.public,
+            signature: Vec::new(),
+        };
+        tx.signature = kp.sign(&tx.signing_payload());
+        assert!(matches!(
+            st.apply_challenge_response(tx),
+            Err(TransitionError::ChallengeResponseWindowElapsed { .. })
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Signature helpers across tx kinds
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn every_account_tx_rejects_forged_signer() {
+        // Transfer signed by a different key must fail with InvalidSigner.
+        let mut st = state();
+        let from = keypair(6);
+        let to = keypair(7);
+        let forger = keypair(99);
+        st.upsert_account(account_of(&from, 10_000));
+        st.upsert_account(account_of(&to, 0));
+        let tx = TransferTx {
+            from: node_id(&from),
+            to: node_id(&to),
+            amount: 100,
+            fee: 0,
+            nonce: 0,
+            pubkey: forger.public,
+            signature: forger.sign(b"whatever"),
+        };
+        assert!(matches!(
+            st.apply_transfer(tx),
+            Err(TransitionError::InvalidSigner)
+        ));
+    }
+}

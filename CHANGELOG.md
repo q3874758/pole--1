@@ -77,6 +77,25 @@ changing protocol behaviour. Every change is backward compatible.
 - `LICENSE-MIT` and `LICENSE-APACHE` — dual-license texts at the
   repo root.
 
+### Testing & CI
+- `src/transitions.rs` — 36 unit tests covering all ten `apply_*`
+  transitions plus boundary/error paths (signer binding, signatures,
+  capabilities, stale epochs, duplicates, windows, bonds, balances,
+  nonces, voting power, governance quorum scheduling, challenge
+  response window/responder), and `process_mature_unbonds`. New
+  `ProtocolParams::default()`.
+- `tests/harness/mod.rs` — real `MsgCommitEpoch` / `MsgFinalizeEpoch` /
+  `MsgOpenChallenge` / `MsgUpsertAggregateRecord` helpers replace the
+  `Unsupported`/`Unimplemented` stubs; `finalize_epoch` polls and retries
+  until the chain accepts.
+- `tests/integration.rs` — new real-chain scenarios (serially, one
+  `poled` per test): full epoch lifecycle
+  (register → submit → commit → aggregate → finalize) and challenge
+  opening against a committed epoch.
+- `.github/workflows/ci.yml` — new `chain` job: setup-go 1.26,
+  `go vet` + `go test ./...`, builds `poled`, then runs
+  `cargo test --features integration`.
+
 ### Scheme A — activity-linked annual emission
 - `src/tokenomics.rs` — `annual_emission(year, target, current, cap)` and
   `annual_emission_activity_factor`: nominal annual issuance scaled by

@@ -82,6 +82,72 @@ pub struct ProtocolParams {
     pub slashing: SlashingParams,
 }
 
+impl Default for ProtocolParams {
+    /// Whitepaper-aligned reference parameters (kept in sync with the
+    /// test helper `valid_params` below and the Rust config defaults).
+    fn default() -> Self {
+        Self {
+            slot_seconds: 300,
+            epoch_slots: 12,
+            committee_size: 21,
+            unbonding_blocks: 5,
+            min_verify_bond: 100,
+            min_propose_bond: 10_000,
+            challenge_window_blocks: 20,
+            max_emergency_brake_blocks: 100,
+            min_retention_epochs: 2,
+            fee: FeeParams {
+                base_gas_price_nano: 100,
+                max_gas_price_nano: 1_000,
+                gas_adjustment_ppm: 1_150_000,
+                congestion_threshold_ppm: 500_000,
+                fee_burn_bps: 2_500,
+            },
+            rewards: RewardParams {
+                reward_source_is_tokenomics: true,
+                emission_year: 1,
+                reward_block_secs: 3_600,
+                initial_emission_rate_bps: 2_000,
+                tail_emission_start_year: 4,
+                tail_emission_rate_bps: 200,
+                player_reward_allocation_bps: 8_000,
+                service_reward_allocation_bps: 1_000,
+                collect_reward_bps: 5_000,
+                store_reward_bps: 2_500,
+                verify_reward_bps: 1_500,
+                propose_reward_bps: 1_000,
+                configured_player_block_reward: 1_000,
+                effective_player_block_reward: 18_264,
+                target_network_weight_units: 150_000_000_000_000,
+                reward_adjustment_cap_bps: 2_000,
+                tier1_weight_ppm: 1_000_000,
+                tier2_weight_min_ppm: 300_000,
+                tier2_weight_max_ppm: 600_000,
+                tier3_weight_min_ppm: 50_000,
+                tier3_weight_max_ppm: 150_000,
+                app_weight_overrides: Vec::new(),
+                reward_burn_threshold: 10_000,
+                reward_burn_bps: 1_000,
+                governance_burn_bps: 100,
+            },
+            governance: GovernanceParams {
+                params_update_bond: 10_000,
+                params_update_quorum_bps: 2_500,
+                params_update_approval_bps: 6_000,
+                slow_params_update_bond: 20_000,
+                slow_params_update_quorum_bps: 3_300,
+                slow_params_update_approval_bps: 7_500,
+            },
+            slashing: SlashingParams {
+                double_sign_bps: 5_000,
+                offline_bps: 100,
+                medium_deviation_bps: 500,
+                severe_deviation_bps: 2_000,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolParamsError {
     ZeroSlotSeconds,

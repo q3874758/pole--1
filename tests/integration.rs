@@ -18,28 +18,47 @@ fn harness_types_are_constructible() {
 
 #[cfg(feature = "integration")]
 mod integration_scenarios {
-    use super::harness::{IntegrationHarnessBuilder, RegisteredNodeCapabilities};
+    use super::harness::{self, IntegrationHarnessBuilder, RegisteredNodeCapabilities};
+
+    /// Each scenario boots its own `poled` on the default ports
+    /// (26657/1317), so scenarios must run serially.
+    static BOOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    async fn boot(chain_id: &str) -> harness::IntegrationHarness {
+        IntegrationHarnessBuilder::new()
+            .chain_id(chain_id)
+            .boot()
+            .await
+            .unwrap_or_else(|e| panic!("harness should boot: {e}"))
+    }
+
+    async fn register(
+        h: &harness::IntegrationHarness,
+        caps: RegisteredNodeCapabilities,
+    ) -> harness::RegisteredNode {
+        h.register_node(caps).await.unwrap_or_else(|e| {
+            panic!("register_node should succeed: {e}\n--- poled log ---\n{}", h.poled_log_text())
+        })
+    }
 
     /// Scenario 1: register a node, submit a batch, claim a reward.
     /// Skipped unless `--features integration` is enabled and a
     /// `poled` binary is on $PATH.
     #[tokio::test]
     async fn register_submit_claim_happy_path() {
-        let h = IntegrationHarnessBuilder::new()
-            .chain_id("pole-it-1")
-            .boot()
-            .await
-            .expect("harness should boot");
+        let _guard = BOOT_LOCK.lock().unwrap();
+        let h = boot("pole-it-1").await;
 
         // `collect` capability is required for `MsgSubmitBatch` to pass
         // `requireNodeCapability(..., "collect")`.
-        let node = h
-            .register_node(RegisteredNodeCapabilities {
+        let node = register(
+            &h,
+            RegisteredNodeCapabilities {
                 collect: true,
                 ..Default::default()
-            })
-            .await
-            .unwrap_or_else(|e| panic!("register_node should succeed: {e}\n--- poled log ---\n{}", h.poled_log_text()));
+            },
+        )
+        .await;
         assert!(node.capabilities.collect);
 
         let tx = h
@@ -55,5 +74,76 @@ mod integration_scenarios {
         assert!(!tx.is_empty());
 
         // Drop kills the chain process.
+    }
+
+    /// Scenario 2: full epoch lifecycle for a fresh epoch — register,
+    /// submit a batch, commit the epoch, upsert an aggregate (which
+    /// refreshes the aggregates commitment), wait out the challenge
+    /// window and finalize.
+    #[tokio::test]
+    async fn epoch_lifecycle_submit_commit_aggregate_finalize() {
+        let _guard = BOOT_LOCK.lock().unwrap();
+        let h = boot("pole-it-2").await;
+
+        register(
+            &h,
+            RegisteredNodeCapabilities {
+                collect: true,
+                store: true,
+                verify: true,
+                propose: true,
+                ..Default::default()
+            },
+        )
+        .await;
+
+        let tx = h
+            .submit_batch(serde_json::json!({"epoch_id": 2}))
+            .await
+            .unwrap_or_else(|e| panic!("submit_batch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(!tx.is_empty());
+
+        let tx = h
+            .commit_epoch(2, 0)
+            .await
+            .unwrap_or_else(|e| panic!("commit_epoch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(!tx.is_empty());
+
+        let tx = h
+            .upsert_aggregate_record(2)
+            .await
+            .unwrap_or_else(|e| panic!("upsert_aggregate(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(!tx.is_empty());
+
+        // Wait for the challenge window to elapse, then finalize.
+        let tx = h
+            .finalize_epoch(2, 3)
+            .await
+            .unwrap_or_else(|e| panic!("finalize_epoch(2): {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(!tx.is_empty());
+    }
+
+    /// Scenario 3: open a challenge against the genesis-seeded epoch-1
+    /// commit. Requires the verify capability and a committed epoch.
+    #[tokio::test]
+    async fn open_challenge_for_committed_epoch() {
+        let _guard = BOOT_LOCK.lock().unwrap();
+        let h = boot("pole-it-3").await;
+
+        let node = register(
+            &h,
+            RegisteredNodeCapabilities {
+                collect: true,
+                verify: true,
+                ..Default::default()
+            },
+        )
+        .await;
+
+        let tx = h
+            .open_challenge(1, &node.node_id_hex, 1_000_000, [0xE5; 32])
+            .await
+            .unwrap_or_else(|e| panic!("open_challenge: {e}\n--- poled log ---\n{}", h.poled_log_text()));
+        assert!(!tx.is_empty());
     }
 }

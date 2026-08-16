@@ -27,7 +27,12 @@ use pole_protocol_draft::cosmos::{
     address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
 };
 use pole_protocol_draft::cosmos::wire_types::{
-    BatchCommitWire, MerkleCommitmentWire, NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
+    AggregateRecordWire, BatchCommitWire, EpochCommitWire, MerkleCommitmentWire,
+    NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
+};
+use pole_protocol_draft::records::{Challenge, ChallengeEvidenceRef};
+use pole_protocol_draft::{
+    decode_hex32, ChallengeKind, ChallengeState, Hash32, NodeId,
 };
 use pole_protocol_draft::wallet::KeyPair;
 
@@ -56,6 +61,9 @@ pub enum HarnessError {
 
     #[error("expected field missing: {0}")]
     Missing(&'static str),
+
+    #[error("parse: {0}")]
+    Parse(String),
 
     #[error("not implemented in skeleton: {0}")]
     Unimplemented(&'static str),
@@ -380,16 +388,52 @@ impl IntegrationHarness {
         Ok(resp.tx_hash)
     }
 
-    /// `MsgCommitEpoch` placeholder. Skeleton: reuses `UpsertNode` as
-    /// a stand-in so the test scaffolding can compile.
+    /// `MsgCommitEpoch` for the validator's proposer account. A zero
+    /// `deadline_height` falls back to `latest height + 3` so the epoch
+    /// enters its challenge window and `finalize_epoch` can run a few
+    /// blocks later.
     pub async fn commit_epoch(
         &self,
-        _epoch_id: u64,
-        epoch_json: serde_json::Value,
+        epoch_id: u64,
+        deadline_height: i64,
     ) -> Result<String, HarnessError> {
-        let msg = BridgeMessage::Unsupported {
-            type_url: "/pole.epoch.v1.MsgCommitEpoch".into(),
-            note: epoch_json.to_string(),
+        let deadline = if deadline_height > 0 {
+            deadline_height
+        } else {
+            self.client.rpc.latest_height().await? as i64 + 3
+        };
+        let commit = EpochCommitWire {
+            epoch_id,
+            accepted_batches: MerkleCommitmentWire {
+                root: "11".repeat(32),
+                leaf_count: 1,
+            },
+            observations: MerkleCommitmentWire {
+                root: "22".repeat(32),
+                leaf_count: 1,
+            },
+            aggregates: MerkleCommitmentWire {
+                root: "00".repeat(32),
+                leaf_count: 0,
+            },
+            rewards: MerkleCommitmentWire {
+                root: "44".repeat(32),
+                leaf_count: 1,
+            },
+            availability: MerkleCommitmentWire {
+                root: "55".repeat(32),
+                leaf_count: 1,
+            },
+            randomness_seed_hex: "66".repeat(32),
+            proposer_address: self.validator_address.bech32.clone(),
+            challenge_open_height: 0,
+            challenge_deadline_height: deadline,
+            finalized: false,
+            total_network_weight_units: 0,
+        };
+        let msg = BridgeMessage::CommitEpoch {
+            proposer: self.validator_address.clone(),
+            epoch_commit: commit,
         };
         let resp = self
             .client
@@ -407,6 +451,92 @@ impl IntegrationHarness {
             });
         }
         Ok(resp.tx_hash)
+    }
+
+    /// `MsgUpsertAggregateRecord` (verify capability). Refreshes the
+    /// epoch's aggregates commitment so `FinalizeEpoch` can validate.
+    pub async fn upsert_aggregate_record(
+        &self,
+        epoch_id: u64,
+    ) -> Result<String, HarnessError> {
+        let aggregate = AggregateRecordWire {
+            epoch_id,
+            app_id: 730,
+            total_weight_units: 1_000,
+            player_count: 1,
+        };
+        let msg = BridgeMessage::UpsertAggregateRecord {
+            operator: self.validator_address.clone(),
+            aggregate_record: aggregate,
+        };
+        let resp = self
+            .client
+            .submit(
+                &msg,
+                &self.validator_address,
+                &self.validator_key,
+                &Default::default(),
+            )
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// `MsgFinalizeEpoch`. Polls the chain until the height passes
+    /// `after_height`, then broadcasts; if the chain still rejects it
+    /// (challenge window not yet elapsed) it retries until accepted.
+    /// A `msg` that is permanently rejected (root mismatch etc.) will
+    /// surface as a `ChainRejected` on the last attempt before timeout.
+    pub async fn finalize_epoch(
+        &self,
+        epoch_id: u64,
+        after_height: i64,
+    ) -> Result<String, HarnessError> {
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut last_rejected: Option<HarnessError> = None;
+        loop {
+            if let Ok(h) = self.client.rpc.latest_height().await {
+                if h as i64 > after_height {
+                    let msg = BridgeMessage::FinalizeEpoch {
+                        finalizer: self.validator_address.clone(),
+                        epoch_id,
+                    };
+                    match self
+                        .client
+                        .submit(
+                            &msg,
+                            &self.validator_address,
+                            &self.validator_key,
+                            &Default::default(),
+                        )
+                        .await
+                    {
+                        Ok(resp) if resp.is_ok() => return Ok(resp.tx_hash),
+                        Ok(resp) => {
+                            last_rejected = Some(HarnessError::ChainRejected {
+                                code: resp.code,
+                                log: resp.log,
+                            });
+                        }
+                        Err(err) => {
+                            last_rejected = Some(HarnessError::Cosmos(err));
+                        }
+                    }
+                }
+            }
+            if Instant::now() > deadline {
+                return Err(last_rejected.unwrap_or(HarnessError::ChainNotReady {
+                    url: self.rpc_url.clone(),
+                    secs: 90,
+                }));
+            }
+            sleep(Duration::from_millis(750)).await;
+        }
     }
 
     /// `MsgClaimReward` for the validator's reward address.
@@ -434,10 +564,56 @@ impl IntegrationHarness {
         Ok(resp.tx_hash)
     }
 
-    /// Stub: open a challenge. Returns `Unimplemented` until the
-    /// challenge JSON projection lands.
-    pub async fn open_challenge(&self, _epoch_id: u64) -> Result<String, HarnessError> {
-        Err(HarnessError::Unimplemented("open_challenge"))
+    /// `MsgOpenChallenge` (verify capability) against `target_hex`
+    /// (lowercase hex of the target `NodeId`). Requires a committed
+    /// epoch; the genesis seed provides epoch 1, or use `commit_epoch`.
+    pub async fn open_challenge(
+        &self,
+        epoch_id: u64,
+        target_hex: &str,
+        deadline_height: u64,
+        challenge_id: Hash32,
+    ) -> Result<String, HarnessError> {
+        let target: NodeId =
+            decode_hex32(target_hex, "target_hex").map_err(|e| HarnessError::Parse(e.to_string()))?;
+        let challenge = Challenge {
+            challenge_id,
+            kind: ChallengeKind::BadBatch,
+            epoch_id,
+            target_node: Some(target),
+            challenger: [0u8; 32],
+            bond: 1_000,
+            opened_at_height: 0,
+            deadline_height,
+            state: ChallengeState::Open,
+            evidence: ChallengeEvidenceRef {
+                batch_root: Some([0x77u8; 32]),
+                aggregate_root: None,
+                reward_root: None,
+                payload_cid: None,
+                merkle_proof: Vec::new(),
+            },
+        };
+        let msg = BridgeMessage::OpenChallenge {
+            challenger: self.validator_address.clone(),
+            challenge,
+        };
+        let resp = self
+            .client
+            .submit(
+                &msg,
+                &self.validator_address,
+                &self.validator_key,
+                &Default::default(),
+            )
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
     }
 
     /// Read the captured `poled` stderr log. Useful for diagnosing
@@ -540,6 +716,12 @@ fn patch_genesis_balances(
 /// claim an epoch-1 reward: a finalized `EpochCommit` plus a non-zero
 /// `RewardRecord` for `recipient`. Without these the chain rejects
 /// `MsgClaimReward` (epoch not finalized / no reward record).
+///
+/// The verification-coverage gates (`min_verification_count`,
+/// `min_player_verifier_share_bps`) are also zeroed for the test
+/// environment — they are governance-tunable parameters, and the harness
+/// runs a single validator that cannot broadcast three independent
+/// `MsgVerifyBatch` attestations.
 fn patch_pole_genesis(chain_home: &std::path::Path, recipient: &str) -> Result<(), HarnessError> {
     let genesis_path = chain_home.join("config/genesis.json");
     let raw = std::fs::read_to_string(&genesis_path)?;
@@ -567,6 +749,11 @@ fn patch_pole_genesis(chain_home: &std::path::Path, recipient: &str) -> Result<(
         "slash_debit": 0,
         "net_reward": 1000,
     }]);
+
+    if let Some(params) = pole.get_mut("params") {
+        params["min_verification_count"] = serde_json::json!(0);
+        params["min_player_verifier_share_bps"] = serde_json::json!(0);
+    }
 
     std::fs::write(&genesis_path, serde_json::to_string_pretty(&genesis)?)?;
     Ok(())

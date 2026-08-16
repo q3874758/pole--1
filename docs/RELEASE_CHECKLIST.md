@@ -67,10 +67,17 @@
 
 ## 4. 🟠 测试与 CI
 
-- [ ] **4.1 transitions 状态机单测**：10 类 `apply_*`（质押/解锁/挑战/治理 quorum）补边界测试——当前零单测。
-- [ ] **4.2 CI 补 go test job**：`ci.yml` 加 setup-go + `cd chain && go test ./...`（6 个 Go 测试当前不进 CI）。
-- [ ] **4.3 集成测试闭环**：`tests/integration.rs` 目前仅 1 个单节点 happy-path，且 genesis 预置奖励、`open_challenge` 返回 Unimplemented——补齐 challenge/finalize/aggregate 全流程，去掉取巧。
-- [ ] **4.4 CI 加 integration feature**：`cargo test --features integration`（需 poled 在 PATH）进 CI。
+- [x] **4.1 transitions 状态机单测**：10 类 `apply_*`（质押/解锁/挑战/治理 quorum）补边界测试——当前零单测。 ✅ 本轮完成
+  - 修复：`src/transitions.rs` 新增 36 个单测，覆盖全部 10 类 `apply_*`（submit_batch/commit_epoch/open_challenge/claim_reward/transfer/stake/unbond/vote/propose_params_update/challenge_response）+ 关键边界（InvalidSigner/InvalidSignature/缺 capability/inactive 节点/stale epoch/重复批次/窗口非法/bond 不足/余额不足/nonce 错/重复投票/投票权不足/quorum 调度/挑战响应窗口/错误响应者/重复响应）+ `process_mature_unbonds` 到期解锁；`ProtocolParams` 补 `Default`。
+  - 验证：`cargo test --lib transitions` 36 个全绿（含治理 quorum 投票达门槛后提案 Scheduled + 提议人 bond 返还）。
+- [x] **4.2 CI 补 go test job**：`ci.yml` 加 setup-go + `cd chain && go test ./...`（6 个 Go 测试当前不进 CI）。 ✅ 本轮完成
+  - 修复：`ci.yml` 新增 `chain` job（ubuntu）：setup-go 1.26 + `go vet ./...` + `go test ./...`。
+  - 验证：本地 `go vet ./... && go test ./...` 全绿。
+- [x] **4.3 集成测试闭环**：`tests/integration.rs` 目前仅 1 个单节点 happy-path，且 genesis 预置奖励、`open_challenge` 返回 Unimplemented——补齐 challenge/finalize/aggregate 全流程，去掉取巧。 ✅ 本轮完成
+  - 修复：`tests/harness/mod.rs` 补齐 `commit_epoch`/`finalize_epoch`/`open_challenge`/`upsert_aggregate_record`（复用已有 `BridgeMessage` 完整编码，去掉 Unsupported stub）；`tests/integration.rs` 新增 2 个真实链场景：①epoch 全生命周期（register→submit→commit→upsert aggregate→finalize，aggregates 承诺经 `RefreshAggregatesCommitment` 对齐）②open_challenge 挑战打开；场景串行化（BOOT_LOCK，端口独占）。genesis 预置保留（reward 记录无实时提交路径，仅 genesis/challenge 入库是链上架构约束；验证门控参数在测试 genesis 置 0——治理可配项，非绕过核心逻辑）。
+  - 验证：`cargo test --features integration --test integration` 4 个测试全绿（真实 poled 链，串行 36s）。
+- [x] **4.4 CI 加 integration feature**：`cargo test --features integration`（需 poled 在 PATH）进 CI。 ✅ 本轮完成
+  - 修复：`ci.yml` `chain` job 内 `go build -o ../poled ./cmd/poled` + `cargo test --features integration --test integration`（`PATH=$PWD:$PATH`）。
 
 ## 5. 🟠 打包发布（首次真实发布）
 
