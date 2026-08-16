@@ -50,23 +50,24 @@ jobs:
           chmod 755 dist/packages/deb-build/DEBIAN/postinst dist/packages/deb-build/DEBIAN/prerm
 
           # Strip the leading "v" from the tag so the deb name matches the
-          # control Version (0.1.0, not v0.1.0).
+          # control Version (0.1.0, not v0.1.0). Persist for later steps —
+          # `with.path` globs do NOT get bash expansion.
           DEB_VERSION="${VERSION#v}"
+          echo "DEB_VERSION=$DEB_VERSION" >> "$GITHUB_ENV"
           dpkg-deb --build dist/packages/deb-build "dist/packages/pole-node_${DEB_VERSION}_amd64.deb"
 
       - name: Compute checksums
         run: |
           cd dist/packages
-          DEB_VERSION="${VERSION#v}"
-          sha256sum "pole-node_${DEB_VERSION}_amd64.deb" > "pole-node_${DEB_VERSION}_amd64.deb.sha256"
+          sha256sum "pole-node_${{ env.DEB_VERSION }}_amd64.deb" > "pole-node_${{ env.DEB_VERSION }}_amd64.deb.sha256"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
           path: |
-            dist/packages/pole-node_${VERSION#v}_amd64.deb
-            dist/packages/pole-node_${VERSION#v}_amd64.deb.sha256
+            dist/packages/pole-node_${{ env.DEB_VERSION }}_amd64.deb
+            dist/packages/pole-node_${{ env.DEB_VERSION }}_amd64.deb.sha256
 
   release-windows:
     runs-on: windows-latest
