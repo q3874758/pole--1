@@ -53,6 +53,18 @@ const TEST_ARTIFACT_PATH: &str = "PoLE-0.2.0-x64.msi";
 #[cfg(not(windows))]
 const TEST_ARTIFACT_PATH: &str = "pole-node_0.2.0_amd64.deb";
 
+// Install-target binary name per platform: msi installs to
+// pole-node.exe, deb to pole-node.
+#[cfg(windows)]
+fn target_binary_name() -> &'static str {
+    "pole-node.exe"
+}
+
+#[cfg(not(windows))]
+fn target_binary_name() -> &'static str {
+    "pole-node"
+}
+
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -454,12 +466,12 @@ fn execute_install_action_copies_into_override_root() {
             target_version: "0.2.0".into(),
             target_mode: "override_root".into(),
             target_install_path: install_root
-                .join("pole-node.exe")
+                .join(target_binary_name())
                 .to_string_lossy()
                 .into_owned(),
             backup_path: format!(
                 "{}.bak",
-                install_root.join("pole-node.exe").to_string_lossy()
+                install_root.join(target_binary_name()).to_string_lossy()
             ),
             staged_artifact_path: update_dir
                 .join("current")
@@ -469,14 +481,14 @@ fn execute_install_action_copies_into_override_root() {
             executed_at_millis: execution.executed_at_millis,
         }
     );
-    assert!(install_root.join("pole-node.exe").exists());
+    assert!(install_root.join(target_binary_name()).exists());
 
     let overview = collect_update_overview("0.1.0", "stable", &update_dir, &manifest_dir);
     assert_eq!(
         overview.executed_install_path.as_deref(),
         Some(
             install_root
-                .join("pole-node.exe")
+                .join(target_binary_name())
                 .to_string_lossy()
                 .as_ref()
         )
@@ -567,14 +579,14 @@ fn execute_install_action_supports_installed_layout_root_override() {
     )
     .unwrap();
     assert_eq!(result.status, "install_executed");
-    assert!(installed_root.join("pole-node.exe").exists());
+    assert!(installed_root.join(target_binary_name()).exists());
 
     let overview = collect_update_overview("0.1.0", "stable", &update_dir, &manifest_dir);
     assert_eq!(
         overview.executed_install_path.as_deref(),
         Some(
             installed_root
-                .join("pole-node.exe")
+                .join(target_binary_name())
                 .to_string_lossy()
                 .as_ref()
         )
@@ -629,7 +641,7 @@ fn execute_install_action_supports_system_install_write_with_env_override() {
     std::env::remove_var("POLE_INSTALLED_LAYOUT_ROOT_OVERRIDE");
 
     assert_eq!(result.status, "install_executed");
-    assert!(installed_root.join("pole-node.exe").exists());
+    assert!(installed_root.join(target_binary_name()).exists());
 
     let overview = collect_update_overview("0.1.0", "stable", &update_dir, &manifest_dir);
     assert_eq!(
@@ -640,7 +652,7 @@ fn execute_install_action_supports_system_install_write_with_env_override() {
         overview.executed_install_path.as_deref(),
         Some(
             installed_root
-                .join("pole-node.exe")
+                .join(target_binary_name())
                 .to_string_lossy()
                 .as_ref()
         )
@@ -661,7 +673,7 @@ fn rollback_update_restores_committed_install_target_from_backup() {
     std::fs::create_dir_all(&manifest_dir).unwrap();
     std::fs::create_dir_all(&update_dir).unwrap();
     std::fs::create_dir_all(&install_root).unwrap();
-    let target_path = install_root.join("pole-node.exe");
+    let target_path = install_root.join(target_binary_name());
     std::fs::write(&target_path, b"old-version").unwrap();
 
     let mut manifest = ReleaseManifest {
