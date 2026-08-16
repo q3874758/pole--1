@@ -210,24 +210,24 @@ jobs:
             dist/release/stable.json
 
       - name: Generate release notes
-        # Unquoted heredoc: ${VERSION} is expanded by bash (a quoted
-        # `<< 'EOF'` would leave the literal placeholder in the notes).
+        # Unquoted heredoc so ${VERSION} expands; backticks are escaped
+        # (\`) so bash does not run command substitution on them.
         run: |
           cat > dist/release/RELEASE_NOTES.md << EOF
           # PoLE ${VERSION} Release Notes
 
           ## Downloads
-          - **Windows Portable**: `PoLE-${VERSION}-x64-portable.zip` - No installation required
-          - **Linux DEB**: `pole-node_${VERSION#v}_amd64.deb` - For Debian/Ubuntu systems
+          - **Windows Portable**: \`PoLE-${VERSION}-x64-portable.zip\` - No installation required
+          - **Linux DEB**: \`pole-node_${VERSION#v}_amd64.deb\` - For Debian/Ubuntu systems
 
           ## Software Bill of Materials (SBOM)
-          - `sbom.cyclonedx.json` — CycloneDX 1.5, signed with [cosign](https://docs.sigstore.dev/)
-          - `sbom.spdx.json` — SPDX 2.3, signed with cosign
-          - Each `.sig` / `.pem` pair proves the SBOM was produced by
-            this repository's CI at tag `${VERSION}`.
+          - \`sbom.cyclonedx.json\` — CycloneDX 1.5, signed with [cosign](https://docs.sigstore.dev/)
+          - \`sbom.spdx.json\` — SPDX 2.3, signed with cosign
+          - Each \`.sig\` / \`.pem\` pair proves the SBOM was produced by
+            this repository's CI at tag \`${VERSION}\`.
 
           ## Verifying SBOM signatures
-          ```bash
+          \`\`\`bash
           # Requires cosign >= 2.0
           cosign verify-blob \
             --signature sbom.cyclonedx.json.sig \
@@ -235,7 +235,7 @@ jobs:
             --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
             --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
             sbom.cyclonedx.json
-          ```
+          \`\`\`
 
           ## What's New
           - Full PoLE protocol implementation with hour-based reward blocks
@@ -246,20 +246,20 @@ jobs:
           - Challenge and dispute resolution system
 
           ## Windows Installation
-          1. Download `PoLE-${VERSION}-x64-portable.zip`
+          1. Download \`PoLE-${VERSION}-x64-portable.zip\`
           2. Extract to any folder
-          3. Run `pole-node.exe` (daemon) and `pole-client.exe` (CLI)
+          3. Run \`pole-node.exe\` (daemon) and \`pole-client.exe\` (CLI)
 
           ## Linux Installation
-          ```bash
+          \`\`\`bash
           sudo dpkg -i pole-node_${VERSION#v}_amd64.deb
           sudo systemctl enable pole-node
           sudo systemctl start pole-node
-          ```
+          \`\`\`
 
           ## Verification
-          Checksums are provided in `.sha256` files alongside each artifact.
-          SBOM signatures are provided as `.sig` / `.pem` pairs.
+          Checksums are provided in \`.sha256\` files alongside each artifact.
+          SBOM signatures are provided as \`.sig\` / \`.pem\` pairs.
           EOF
 
       - name: Create GitHub Release
