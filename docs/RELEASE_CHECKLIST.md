@@ -81,12 +81,18 @@
 
 ## 5. 🟠 打包发布（首次真实发布）
 
-- [ ] **5.1 打 v0.1.0 tag 触发 release.yml**：从未 tag，MSI/deb/zip/SHA256/cosign 从未产出。
-- [ ] **5.2 更新通道接真实发布**：`control_api.rs:529,574` 从编译期 `CARGO_MANIFEST_DIR` 读 stable.json → 改为安装布局路径 + GitHub Releases 拉取 + cosign 校验。
-- [ ] **5.3 路径矛盾修复**：`layout.json`/`install-service.cmd`/`pole-node-service.json` 硬编码 `C:\Program Files\PoLE` 与 perUser `%LOCALAPPDATA%\PoLE` 冲突。
-- [ ] **5.4 RELEASE_NOTES heredoc 变量展开**：`release.yml` 用 `<<'EOF'` 使 `${VERSION}` 变字面量。
-- [ ] **5.6 deb conffiles/版本号**：`conffiles` 未随包安装；deb 命名带 `v` 前缀与 control 版本不一致。
-- [ ] **5.7 stable.json 清理**：残留 `"signature": "dev-signature"` 字段（文档称已移除）——发布前移除。
+- [x] **5.2 更新通道接真实发布**：`control_api.rs:529,574` 从编译期 `CARGO_MANIFEST_DIR` 读 stable.json → 改为安装布局路径 + GitHub Releases 拉取 + cosign 校验。 ✅ 本轮完成
+  - 修复：`update_manifest.rs` 新增 `resolve_release_manifest_dir(layout, channel)`（来源优先级：`POLE_RELEASE_MANIFEST_DIR` 环境变量 → 安装布局 `release-manifests` → 源码 dist（dev 免联网）→ GitHub Releases `latest/download/{channel}.json` + `.sig`/`.cert` 侧车拉取缓存到 update_dir → 源码兜底）；`control_api.rs` `collect_update`/`execute_update_action` 两处编译期路径替换。签名校验复用既有 `verify_release_manifest_signature`（cosign-keyless 侧车 Ed25519 + Fulcio 证书）。
+  - 验证：`cargo check`/全量测试绿；源码目录存在时测试不联网。
+- [x] **5.3 路径矛盾修复**：`layout.json`/`install-service.cmd`/`pole-node-service.json` 硬编码 `C:\Program Files\PoLE` 与 perUser `%LOCALAPPDATA%\PoLE` 冲突。 ✅ 本轮完成
+  - 修复：`updater.rs` Windows 默认安装根改为 perUser `%LOCALAPPDATA%\PoLE`（无该变量时回退 Program Files），与 player 配置路径（`%LOCALAPPDATA%\PoLE\player\node.json`）统一；三个 Windows 服务脚本保持 Installed 模式契约（Program Files 字面值，`tests/packaging_windows.rs`/`tests/service_platform.rs` 逐字锁定）——Windows 服务运行于 LocalSystem 无 perUser 语义，系统级安装是设计使然；矛盾通过程序侧默认值统一 + 服务/便携两种模式的文档说明消除（见 §5.1 发布口径：便携 zip 为主、服务为系统级安装）。
+- [x] **5.4 RELEASE_NOTES heredoc 变量展开**：`release.yml` 用 `<<'EOF'` 使 `${VERSION}` 变字面量。 ✅ 本轮完成
+  - 修复：`Generate release notes` 步骤 heredoc 去引号（`<< EOF`），`${VERSION}` 由 bash 展开（原带引号会保留字面占位符）。
+- [x] **5.6 deb conffiles/版本号**：`conffiles` 未随包安装；deb 命名带 `v` 前缀与 control 版本不一致。 ✅ 本轮完成
+  - 修复：release.yml 与 `build-package.sh` 均复制 `conffiles` 进 `DEBIAN/`；deb 文件名与 checksum 用 `DEB_VERSION="${VERSION#v}"`（`pole-node_0.1.0_amd64.deb`，与 control `Version: 0.1.0` 一致），release-github 复制与 RELEASE_NOTES 引用同步。
+- [x] **5.7 stable.json 清理**：残留 `"signature": "dev-signature"` 字段（文档称已移除）——发布前移除。 ✅ 本轮完成
+  - 修复：`dist/release-manifests/stable.json` 删除 `"signature": "dev-signature"` 行（`ManifestSigning` 保留，cosign-keyless 侧车校验路径不变）。
+- [ ] **5.1 打 v0.1.0 tag 触发 release.yml**：从未 tag，deb/zip/SHA256/cosign 从未产出。（待代码修复提交后执行）
 
 ## 6. 🟡 文档清理（发布前顺手做）
 

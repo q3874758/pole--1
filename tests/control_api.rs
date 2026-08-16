@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use pole_protocol_draft::{
@@ -10,6 +10,37 @@ use pole_protocol_draft::{
 
 fn temp_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pole-control-api-{name}-{}", std::process::id()))
+}
+
+/// Writes a dev-signed `stable.json` into `root/release-manifests` so the
+/// update flow sees a verifiable manifest (debug builds accept the
+/// dev-signature placeholder). The layout resolver prefers
+/// `root/release-manifests` over the in-tree dist directory, so each test
+/// stays isolated without touching the repo's manifest.
+fn seed_test_release_manifest(root: &Path, version: &str) {
+    let dir = root.join("release-manifests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = serde_json::json!({
+        "channel": "stable",
+        "version": version,
+        "artifacts": [
+            {"platform": "windows", "kind": "exe", "path": "pole-node.exe", "sha256": "00".repeat(64), "size_bytes": 1},
+            {"platform": "windows", "kind": "exe", "path": "pole-client.exe", "sha256": "00".repeat(64), "size_bytes": 1}
+        ],
+        "signature": "dev-signature",
+        "signing": {
+            "scheme": "cosign-keyless",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "identity_regexp": "https://github.com/q3874758/pole--1",
+            "signature_file": "stable.json.sig",
+            "certificate_file": "stable.json.cert"
+        }
+    });
+    std::fs::write(
+        dir.join("stable.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -198,6 +229,7 @@ fn collect_update_reports_update_contract_defaults() {
     let mut config = NodeConfig::default();
     config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
+    seed_test_release_manifest(&root, env!("CARGO_PKG_VERSION"));
 
     let response = collect_control_api_update(&config_path).unwrap();
     assert_eq!(response.update.current_version, env!("CARGO_PKG_VERSION"));
@@ -246,6 +278,7 @@ fn execute_update_action_stages_local_update_plan() {
     let mut config = NodeConfig::default();
     config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
+    seed_test_release_manifest(&root, env!("CARGO_PKG_VERSION"));
     std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
 
     let response =
@@ -283,6 +316,7 @@ fn execute_update_action_applies_and_rolls_back_update_state() {
     let mut config = NodeConfig::default();
     config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
+    seed_test_release_manifest(&root, env!("CARGO_PKG_VERSION"));
     std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
 
     let stage =
@@ -455,6 +489,7 @@ fn control_api_serves_update_endpoint() {
     let mut config = NodeConfig::default();
     config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
+    seed_test_release_manifest(&root, env!("CARGO_PKG_VERSION"));
     std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -489,6 +524,7 @@ fn control_api_serves_update_stage_endpoint() {
     let mut config = NodeConfig::default();
     config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
+    seed_test_release_manifest(&root, env!("CARGO_PKG_VERSION"));
     std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -572,7 +572,7 @@ pub fn apply_update_with_status(
         target_version: pending.target_version.clone(),
         artifact_kind: pending.artifact_kind.clone(),
         artifact_path: pending.artifact_path.clone(),
-        target_install_root: install_root_for_current_platform().to_string(),
+        target_install_root: install_root_for_current_platform().display().to_string(),
         service_window_status: service_window_status(&update_dir, managed_status),
         planned_at_millis: current_unix_millis()?,
     };
@@ -1009,13 +1009,19 @@ fn preferred_kind_for_current_platform() -> &'static str {
     }
 }
 
-fn install_root_for_current_platform() -> &'static str {
+fn install_root_for_current_platform() -> PathBuf {
     if cfg!(windows) {
-        "C:/Program Files/PoLE"
+        // Per-user layout is the V1 portable default (matches the player
+        // config path %LOCALAPPDATA%\PoLE\player\node.json). Fall back to
+        // the system-wide location only when LOCALAPPDATA is unavailable.
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data).join("PoLE");
+        }
+        PathBuf::from("C:/Program Files/PoLE")
     } else if cfg!(target_os = "macos") {
-        "/Applications/PoLE.app"
+        PathBuf::from("/Applications/PoLE.app")
     } else {
-        "/opt/pole"
+        PathBuf::from("/opt/pole")
     }
 }
 
@@ -1025,7 +1031,7 @@ fn default_install_root_path() -> PathBuf {
             return PathBuf::from(override_root);
         }
     }
-    PathBuf::from(install_root_for_current_platform())
+    install_root_for_current_platform()
 }
 
 fn service_window_status(

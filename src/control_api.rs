@@ -522,13 +522,13 @@ pub fn collect_update(
     let layout = crate::runtime_layout_for_config(&config_path, &config.runtime.data_dir);
     let managed_status =
         build_managed_service_status(&config_path, &config, &ServiceActionRequest::default()).ok();
+    let channel = "stable";
+    let release_manifest_dir = crate::resolve_release_manifest_dir(&layout, channel)?;
     let overview = crate::collect_update_overview_with_status(
         env!("CARGO_PKG_VERSION"),
-        "stable",
+        channel,
         &layout.update_dir,
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("dist")
-            .join("release-manifests"),
+        release_manifest_dir,
         managed_status,
     );
 
@@ -571,9 +571,7 @@ pub fn execute_update_action(
         .channel
         .clone()
         .unwrap_or_else(|| "stable".to_string());
-    let release_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("dist")
-        .join("release-manifests");
+    let release_manifest_dir = crate::resolve_release_manifest_dir(&layout, &channel)?;
     let service_request = service_request_from_update_action(&request);
     let managed_status = build_managed_service_status(&config_path, &config, &service_request).ok();
 

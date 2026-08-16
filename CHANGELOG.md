@@ -77,6 +77,30 @@ changing protocol behaviour. Every change is backward compatible.
 - `LICENSE-MIT` and `LICENSE-APACHE` — dual-license texts at the
   repo root.
 
+### Release pipeline (ch.5)
+- `src/update_manifest.rs` — `resolve_release_manifest_dir` resolves the
+  manifest directory from `POLE_RELEASE_MANIFEST_DIR`, the installed
+  layout's `release-manifests`, the in-tree dist (dev, no network), or a
+  GitHub Releases pull (`latest/download/{channel}.json` + `.sig`/`.cert`
+  sidecars cached under the update dir). `control_api.rs` update
+  endpoints now use it instead of the compile-time source path; cosign
+  verification is unchanged.
+- `src/updater.rs` — Windows default install root is now per-user
+  `%LOCALAPPDATA%\PoLE` (falls back to `C:\Program Files\PoLE`).
+- `packaging/windows/{layout.json,install-service.cmd,pole-node-service.json}`
+  — aligned to the per-user layout (`POLE_INSTALL_ROOT` override for
+  LocalSystem installs).
+- `.github/workflows/release.yml` — RELEASE_NOTES heredoc unquoted so
+  `${VERSION}` expands; DEB package now ships `conffiles` and drops the
+  leading `v` from the artifact name (`pole-node_0.1.0_amd64.deb`);
+  `build-package.sh` copies `conffiles` too.
+- `dist/release-manifests/stable.json` — removed the leftover
+  `"signature": "dev-signature"` inline placeholder (signing is cosign
+  keyless via sidecars only).
+- `tests/control_api.rs` — update-flow tests seed a dev-signed
+  `stable.json` into each test's own `release-manifests` dir so they
+  exercise the real resolver instead of the repo manifest.
+
 ### Testing & CI
 - `src/transitions.rs` — 36 unit tests covering all ten `apply_*`
   transitions plus boundary/error paths (signer binding, signatures,

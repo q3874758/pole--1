@@ -29,6 +29,7 @@ cp "$ROOT_DIR/packaging/linux/deb/pole-node.service" "$DEB_DIR/etc/systemd/syste
 
 echo "[3/3] Building DEB package..."
 cp "$ROOT_DIR/packaging/linux/deb/control" "$DEB_DIR/DEBIAN/"
+cp "$ROOT_DIR/packaging/linux/deb/conffiles" "$DEB_DIR/DEBIAN/"
 cp "$ROOT_DIR/packaging/linux/deb/postinst" "$DEB_DIR/DEBIAN/postinst"
 cp "$ROOT_DIR/packaging/linux/deb/prerm" "$DEB_DIR/DEBIAN/prerm"
 chmod 755 "$DEB_DIR/DEBIAN/postinst" "$DEB_DIR/DEBIAN/prerm"

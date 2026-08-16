@@ -17,7 +17,6 @@
       "size_bytes": 6731776
     }
   ],
-  "signature": "dev-signature",
   "signing": {
     "scheme": "cosign-keyless",
     "issuer": "https://token.actions.githubusercontent.com",
