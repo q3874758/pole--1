@@ -92,7 +92,10 @@
   - 修复：release.yml 与 `build-package.sh` 均复制 `conffiles` 进 `DEBIAN/`；deb 文件名与 checksum 用 `DEB_VERSION="${VERSION#v}"`（`pole-node_0.1.0_amd64.deb`，与 control `Version: 0.1.0` 一致），release-github 复制与 RELEASE_NOTES 引用同步。
 - [x] **5.7 stable.json 清理**：残留 `"signature": "dev-signature"` 字段（文档称已移除）——发布前移除。 ✅ 本轮完成
   - 修复：`dist/release-manifests/stable.json` 删除 `"signature": "dev-signature"` 行（`ManifestSigning` 保留，cosign-keyless 侧车校验路径不变）。
-- [ ] **5.1 打 v0.1.0 tag 触发 release.yml**：从未 tag，deb/zip/SHA256/cosign 从未产出。（待代码修复提交后执行）
+- [x] **5.1 打 v0.1.0 tag 触发 release.yml**：从未 tag，deb/zip/SHA256/cosign 从未产出。（待代码修复提交后执行） ✅ 已完成
+  - tag `v0.1.0` 于 `e2f66f0`（CI 首次全绿：rust ubuntu/windows + chain go/integration + license gate + emit sbom 五 job 全过）；首次 tag 在 `5351cef`，因后续 systemd/CI 修复，按用户确认删除并重打至 `e2f66f0`。
+  - release.yml 三 job（release-linux / release-windows / release-github）全部 success；产出 14 资产：`pole-node_0.1.0_amd64.deb` + sha256、`PoLE-v0.1.0-x64-portable.zip` + sha256、`RELEASE_NOTES.md`、cyclonedx/spdx SBOM + cosign 签名（.sig/.pem）、`stable.json` + `.sig`/`.cert`。
+  - 2026-08-17 正式发布（draft=false）：https://github.com/q3874758/pole--1/releases/tag/v0.1.0
 
 ## 6. 🟡 文档清理（发布前顺手做）
 
@@ -115,9 +118,9 @@
 
 ## 验收定义
 
-- [ ] `cargo test` 全绿（lib 158+ 集成全部）
-- [ ] `cd chain && go test ./...` 全绿
-- [ ] `cargo test --features integration` 全绿（poled 在 PATH）
-- [ ] CI 三 job + go test job 全绿
-- [ ] 一次真实 `v0.1.0` 发布：zip + deb + SHA256 + cosign 签名 + stable.json 可被 `pole-client` 更新通道验证
-- [ ] Rust↔Go 奖励/发行/Merkle 对账 fixtures 全部通过
+- [x] `cargo test` 全绿（lib 158+ 集成全部）
+- [x] `cd chain && go test ./...` 全绿
+- [x] `cargo test --features integration` 全绿（poled 在 PATH）
+- [x] CI 五 job（rust ubuntu/windows、chain go+integration、license gate、emit sbom）+ release.yml 三 job 全绿（`e2f66f0`）
+- [x] 一次真实 `v0.1.0` 发布：zip + deb + SHA256 + cosign 签名 + stable.json 可被 `pole-client` 更新通道验证 ✅ 2026-08-17 发布 https://github.com/q3874758/pole--1/releases/tag/v0.1.0
+- [x] Rust↔Go 奖励/发行/Merkle 对账 fixtures 全部通过
