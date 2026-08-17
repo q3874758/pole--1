@@ -59,7 +59,6 @@ fn run_forward(binary_dir: &Path, exe_name: &str, args: &[String]) -> i32 {
     command.args(&args[1..]);
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW: keep the forwarded binary from popping a
         // console window when pole.exe is launched from a GUI context.
         command.creation_flags(0x08000000);

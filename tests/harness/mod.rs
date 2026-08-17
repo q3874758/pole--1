@@ -14,6 +14,7 @@
 //!   should be guarded with `#[cfg(feature = "integration")]`.
 //! - All async ops time out after 30s. Recovery from a crashed `poled`
 //!   is not supported yet.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};

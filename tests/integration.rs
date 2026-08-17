@@ -17,6 +17,7 @@ fn harness_types_are_constructible() {
 }
 
 #[cfg(feature = "integration")]
+#[allow(clippy::await_holding_lock)]
 mod integration_scenarios {
     use super::harness::{self, IntegrationHarnessBuilder, RegisteredNodeCapabilities};
 
@@ -95,7 +96,6 @@ mod integration_scenarios {
                 store: true,
                 verify: true,
                 propose: true,
-                ..Default::default()
             },
         )
         .await;

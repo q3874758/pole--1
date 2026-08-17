@@ -71,7 +71,9 @@ fn packaged_systemd_unit_matches_default_rendering() {
         "/etc/pole/node.json",
         "/var/lib/pole",
     );
-    let packaged = include_str!("../packaging/linux/deb/pole-node.service");
+    // Normalize CRLF: Windows CI checkouts convert the LF-committed file
+    // to CRLF, while the renderer always emits LF.
+    let packaged = include_str!("../packaging/linux/deb/pole-node.service").replace("\r\n", "\n");
 
     assert_eq!(packaged, definition.render());
 }

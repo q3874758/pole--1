@@ -35,7 +35,9 @@ jobs:
         run: cargo test --all-targets
 
       - name: cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        # --features integration compiles the harness in full so its
+        # boot helpers are not flagged as dead code.
+        run: cargo clippy --all-targets --features integration -- -D warnings
 
   chain:
     name: chain (go + integration)
