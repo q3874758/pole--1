@@ -100,20 +100,6 @@ fn terminate_process(pid: u32) {
     );
 }
 
-#[cfg(not(windows))]
-fn terminate_process(pid: u32) {
-    let output = Command::new("sh")
-        .args(["-c", &format!("kill -9 {pid}")])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 struct FixedHttpClient;
 
 impl HttpTextClient for FixedHttpClient {
@@ -199,8 +185,6 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
         .join("Startup");
     #[cfg(not(windows))]
     let app_data = PathBuf::new();
-    #[cfg(not(windows))]
-    let startup_dir = PathBuf::new();
     let binary = env!("CARGO_BIN_EXE_pole-client");
     let output = Command::new(binary)
         .env("APPDATA", &app_data)
