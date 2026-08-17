@@ -3,3 +3,8 @@
 # committed LF bytes, so Windows checkouts must NOT convert line
 # endings. The rest of the tree follows the default autocrlf policy.
 vendor/core2/** -text
+
+# Release-manifest signature fixtures are byte-exact: the cosign
+# signature and certificate cover the exact committed bytes, so
+# Windows checkouts must NOT convert their line endings.
+tests/fixtures/** -text
