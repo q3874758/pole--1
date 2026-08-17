@@ -434,11 +434,13 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("background_mode={}", background_mode.subcommand());
     match autostart_outcome {
+        #[cfg(windows)]
         AutostartRegistrationOutcome::Registered { launcher_path } => {
             println!("autostart_enabled=true");
             println!("autostart_registered=true");
             println!("autostart_launcher={}", launcher_path.to_string_lossy());
         }
+        #[cfg(windows)]
         AutostartRegistrationOutcome::AlreadyRegistered { launcher_path } => {
             println!("autostart_enabled=true");
             println!("autostart_registered=true");
@@ -3434,12 +3436,10 @@ enum BackgroundStartOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AutostartRegistrationOutcome {
-    Registered {
-        launcher_path: PathBuf,
-    },
-    AlreadyRegistered {
-        launcher_path: PathBuf,
-    },
+    #[cfg(windows)]
+    Registered { launcher_path: PathBuf },
+    #[cfg(windows)]
+    AlreadyRegistered { launcher_path: PathBuf },
     #[cfg(not(windows))]
     Unsupported,
 }
@@ -3647,6 +3647,7 @@ fn player_startup_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .join("Startup"))
 }
 
+#[cfg(windows)]
 fn player_launcher_filename(config_path: &Path) -> String {
     let normalized = config_path.to_string_lossy().replace('\\', "/");
     format!(
@@ -3668,6 +3669,7 @@ fn render_windows_startup_launcher(exe_path: &Path, config_path: &Path) -> Strin
     )
 }
 
+#[cfg(windows)]
 fn stable_hash64(input: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for byte in input {
