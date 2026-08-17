@@ -70,13 +70,15 @@ sudo systemctl start pole-node
 
 PoLE 验证更新的签名。如果签名无效，更新将被拒绝。
 
-V1 起，发布清单（`stable.json`）改为 **cosign keyless 签名**（Sigstore OIDC + Rekor 透明日志），不再使用 PGP/GPG。`stable.json` 本身不再内联签名字段；真实的 Ed25519-SHA256 签名与 Fulcio 证书作为 sidecar 文件随 GitHub Release 一起分发：
+V1 起，发布清单（`stable.json`）改为 **cosign keyless 签名**（Sigstore OIDC + Rekor 透明日志），不再使用 PGP/GPG。`stable.json` 本身不再内联签名字段；真实的签名与 Fulcio 证书作为 sidecar 文件随 GitHub Release 一起分发：
 
 | 文件 | 用途 |
 | --- | --- |
 | `stable.json` | 待签名的发布清单（SHA256、artifact 列表、版本号） |
-| `stable.json.sig` | cosign 签名（base64 编码的 Ed25519-SHA256 signature） |
-| `stable.json.cert` | Fulcio 颁发的 short-lived 证书（含 OIDC subject / issuer） |
+| `stable.json.sig` | cosign 签名（base64 编码；`cosign sign-blob` 默认产 ECDSA P-256 ASN.1 DER 签名） |
+| `stable.json.cert` | Fulcio 颁发的 short-lived 证书（含 OIDC subject / issuer；文件为 base64 编码的 PEM） |
+
+> **签名算法**：`cosign sign-blob` keyless 流程默认使用临时 ECDSA P-256 密钥（Fulcio 证书为 P-256）。PoLE 客户端 `verify_release_manifest_signature` 同时支持 ECDSA P-256 与 Ed25519 两种证书（按 SPKI 算法 OID 自动选择），`.sig` 为 DER ASN.1 时走 ECDSA 校验，为裸 64 字节时走 Ed25519 校验。
 
 签名由 `.github/workflows/release.yml` 的 `Sign stable.json (cosign keyless OIDC + Rekor)` 步骤在 tag 推送时生成，OIDC token 来自 GitHub Actions，签名记录写入 Rekor 透明日志（公开可审计）。
 

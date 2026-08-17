@@ -3,10 +3,17 @@ use std::path::Path;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature as Ed25519Signature, Verifier as Ed25519Verifier, VerifyingKey};
 use serde::Serialize;
 
 use crate::{hex_32, stable_hash32, ManifestSigning, ReleaseArtifact, ReleaseManifest};
+
+/// Public key extracted from a Fulcio certificate, tagged by algorithm so the
+/// matching verifier is used for the sidecar signature.
+enum CertificatePublicKey {
+    Ed25519(VerifyingKey),
+    P256(p256::ecdsa::VerifyingKey),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct ReleaseManifestPayload<'a> {
@@ -57,9 +64,25 @@ pub fn development_manifest_signature(
     ))
 }
 
-/// Extracts the 32-byte Ed25519 public key from a PEM-encoded X.509 certificate
-/// (the Fulcio certificate emitted by `cosign sign-blob`).
-fn extract_ed25519_public_key(pem: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+/// Decodes the certificate sidecar into PEM text. `cosign sign-blob
+/// --output-certificate` writes the PEM block base64-encoded (the same
+/// encoding Rekor stores), so accept both base64(PEM) and plain PEM.
+fn decode_cert_pem(cert_content: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let trimmed = cert_content.trim();
+    if trimmed.starts_with("-----BEGIN") {
+        return Ok(trimmed.to_string());
+    }
+    let pem_bytes = BASE64.decode(trimmed.as_bytes())?;
+    Ok(String::from_utf8(pem_bytes)?)
+}
+
+/// Extracts the public key from a PEM-encoded X.509 certificate (the Fulcio
+/// certificate emitted by `cosign sign-blob`). Supports Ed25519 (OID
+/// 1.3.101.112) and ECDSA P-256 (OID 1.2.840.10045.3.1.7); the algorithm is
+/// selected from the SPKI algorithm OID.
+fn extract_certificate_public_key(
+    pem: &str,
+) -> Result<CertificatePublicKey, Box<dyn std::error::Error>> {
     let base64_content: String = pem
         .lines()
         .filter(|line| !line.starts_with("-----"))
@@ -68,18 +91,37 @@ fn extract_ed25519_public_key(pem: &str) -> Result<[u8; 32], Box<dyn std::error:
     let (_, cert) = x509_parser::parse_x509_certificate(&der)
         .map_err(|err| format!("parse x509 certificate: {err:?}"))?;
     let spki = cert.public_key();
-    let key: [u8; 32] = spki
-        .subject_public_key
-        .data
-        .as_ref()
-        .try_into()
-        .map_err(|_| "ed25519 public key is not 32 bytes")?;
-    Ok(key)
+    let algorithm_oid = spki.algorithm.algorithm.to_string();
+    match algorithm_oid.as_str() {
+        // Ed25519 (RFC 8410): 32 raw bytes.
+        "1.3.101.112" => {
+            let key: [u8; 32] = spki
+                .subject_public_key
+                .data
+                .as_ref()
+                .try_into()
+                .map_err(|_| "ed25519 public key is not 32 bytes")?;
+            Ok(CertificatePublicKey::Ed25519(VerifyingKey::from_bytes(
+                &key,
+            )?))
+        }
+        // id-ecPublicKey: SEC1 point (0x04 || X || Y, 65 bytes). The named
+        // curve lives in the SPKI parameters (prime256v1 = 1.2.840.10045.3.1.7);
+        // p256's from_sec1_bytes enforces the P-256 curve itself.
+        "1.2.840.10045.2.1" => {
+            let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&spki.subject_public_key.data)
+                .map_err(|err| format!("parse p256 public key: {err}"))?;
+            Ok(CertificatePublicKey::P256(key))
+        }
+        other => Err(format!("unsupported certificate public key algorithm OID: {other}").into()),
+    }
 }
 
-/// Verifies a cosign keyless signature: the raw manifest bytes are checked against
-/// the Ed25519 signature in the `.sig` sidecar, using the public key embedded in
-/// the Fulcio certificate sidecar (`.cert`).
+/// Verifies a cosign keyless signature: the raw manifest bytes are checked
+/// against the sidecar signature (`.sig`), using the public key embedded in
+/// the Fulcio certificate sidecar (`.cert`). `cosign sign-blob` signs the
+/// raw blob bytes with either ECDSA P-256 (DER ASN.1 signature) or Ed25519
+/// (raw 64-byte signature); the algorithm is inferred from the certificate.
 fn verify_cosign_keyless(
     manifest_bytes: &[u8],
     signing: &ManifestSigning,
@@ -104,26 +146,43 @@ fn verify_cosign_keyless(
     }
 
     let sig_b64 = fs::read_to_string(&sig_path)?;
-    let sig_bytes: [u8; 64] = BASE64
-        .decode(sig_b64.trim().as_bytes())?
-        .try_into()
-        .map_err(|_| "ed25519 signature is not 64 bytes")?;
-    let cert_pem = fs::read_to_string(&cert_path)
+    let sig_bytes = BASE64.decode(sig_b64.trim().as_bytes())?;
+    let cert_content = fs::read_to_string(&cert_path)
         .map_err(|_| format!("missing certificate sidecar {}", cert_path.display()))?;
-    let public_key = extract_ed25519_public_key(&cert_pem)?;
-    let verifying_key = VerifyingKey::from_bytes(&public_key)?;
-    let signature = Signature::from_bytes(&sig_bytes);
-    if verifying_key.verify(manifest_bytes, &signature).is_ok() {
-        Ok(ManifestSignatureVerification::Verified)
+    let cert_pem = decode_cert_pem(&cert_content)?;
+    let public_key = extract_certificate_public_key(&cert_pem)?;
+
+    let verified = match public_key {
+        CertificatePublicKey::Ed25519(verifying_key) => {
+            let sig: [u8; 64] = sig_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "ed25519 signature is not 64 bytes")?;
+            verifying_key
+                .verify(manifest_bytes, &Ed25519Signature::from_bytes(&sig))
+                .is_ok()
+        }
+        CertificatePublicKey::P256(verifying_key) => {
+            // cosign emits the ECDSA P-256 signature as DER ASN.1 (SEQUENCE of
+            // two INTEGERs); p256's Signature::from_der parses it into r||s.
+            let der_sig = p256::ecdsa::Signature::from_der(&sig_bytes)
+                .map_err(|err| format!("parse ecdsa signature: {err}"))?;
+            verifying_key.verify(manifest_bytes, &der_sig).is_ok()
+        }
+    };
+
+    Ok(if verified {
+        ManifestSignatureVerification::Verified
     } else {
-        Ok(ManifestSignatureVerification::Invalid)
-    }
+        ManifestSignatureVerification::Invalid
+    })
 }
 
 /// Verifies the release manifest signature. When the manifest carries a
-/// `cosign-keyless` signing block, the signature is verified with real Ed25519
-/// against the sidecar files; otherwise the legacy inline signature is checked
-/// (dev-hash is accepted only in debug builds).
+/// `cosign-keyless` signing block, the signature is verified against the
+/// sidecar files (ECDSA P-256 or Ed25519, per the Fulcio certificate);
+/// otherwise the legacy inline signature is checked (dev-hash is accepted
+/// only in debug builds).
 pub fn verify_release_manifest_signature(
     manifest: &ReleaseManifest,
     manifest_path: &Path,

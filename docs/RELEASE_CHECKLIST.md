@@ -82,7 +82,7 @@
 ## 5. 🟠 打包发布（首次真实发布）
 
 - [x] **5.2 更新通道接真实发布**：`control_api.rs:529,574` 从编译期 `CARGO_MANIFEST_DIR` 读 stable.json → 改为安装布局路径 + GitHub Releases 拉取 + cosign 校验。 ✅ 本轮完成
-  - 修复：`update_manifest.rs` 新增 `resolve_release_manifest_dir(layout, channel)`（来源优先级：`POLE_RELEASE_MANIFEST_DIR` 环境变量 → 安装布局 `release-manifests` → 源码 dist（dev 免联网）→ GitHub Releases `latest/download/{channel}.json` + `.sig`/`.cert` 侧车拉取缓存到 update_dir → 源码兜底）；`control_api.rs` `collect_update`/`execute_update_action` 两处编译期路径替换。签名校验复用既有 `verify_release_manifest_signature`（cosign-keyless 侧车 Ed25519 + Fulcio 证书）。
+  - 修复：`update_manifest.rs` 新增 `resolve_release_manifest_dir(layout, channel)`（来源优先级：`POLE_RELEASE_MANIFEST_DIR` 环境变量 → 安装布局 `release-manifests` → 源码 dist（dev 免联网）→ GitHub Releases `latest/download/{channel}.json` + `.sig`/`.cert` 侧车拉取缓存到 update_dir → 源码兜底）；`control_api.rs` `collect_update`/`execute_update_action` 两处编译期路径替换。签名校验复用既有 `verify_release_manifest_signature`（cosign-keyless 侧车，ECDSA P-256 / Ed25519 按证书 SPKI OID 自动选择 + Fulcio 证书）。
   - 验证：`cargo check`/全量测试绿；源码目录存在时测试不联网。
 - [x] **5.3 路径矛盾修复**：`layout.json`/`install-service.cmd`/`pole-node-service.json` 硬编码 `C:\Program Files\PoLE` 与 perUser `%LOCALAPPDATA%\PoLE` 冲突。 ✅ 本轮完成
   - 修复：`updater.rs` Windows 默认安装根改为 perUser `%LOCALAPPDATA%\PoLE`（无该变量时回退 Program Files），与 player 配置路径（`%LOCALAPPDATA%\PoLE\player\node.json`）统一；三个 Windows 服务脚本保持 Installed 模式契约（Program Files 字面值，`tests/packaging_windows.rs`/`tests/service_platform.rs` 逐字锁定）——Windows 服务运行于 LocalSystem 无 perUser 语义，系统级安装是设计使然；矛盾通过程序侧默认值统一 + 服务/便携两种模式的文档说明消除（见 §5.1 发布口径：便携 zip 为主、服务为系统级安装）。

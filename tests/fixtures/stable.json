@@ -1,0 +1,29 @@
+{
+  "channel": "stable",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-node.exe",
+      "sha256": "7fe80242885ea2b4ca9069dbc8e18e053722b1fd53d6ef12f2eed22c559a4402",
+      "size_bytes": 6098432
+    },
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-client.exe",
+      "sha256": "68d46266f0fd30f1734b48039d0369a8ff36fc138c97520a418d9b5a371331c7",
+      "size_bytes": 6731776
+    }
+  ],
+  "signing": {
+    "scheme": "cosign-keyless",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "identity_regexp": "https://github.com/q3874758/pole--1",
+    "signature_file": "stable.json.sig",
+    "certificate_file": "stable.json.cert",
+    "transparency_log": "rekor",
+    "note": "The `signature` / `_cosign_signature` field present in earlier manifests was a dev placeholder (\"dev-signature\"). It has been removed in V1; the real Ed25519-SHA256 cosign keyless signature lives in the sidecar file stable.json.sig, with the corresponding Fulcio certificate in stable.json.cert. Both are produced by the `.github/workflows/release.yml` `Sign stable.json (cosign keyless OIDC + Rekor)` step and shipped alongside stable.json on each GitHub Release. Verifiers MUST run `cosign verify-blob` with the sidecars (see docs/operations/update.md) — there is intentionally no inline signature in this JSON to avoid tampering-by-republish."
+  }
+}

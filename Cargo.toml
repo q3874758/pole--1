@@ -39,6 +39,8 @@ hex = "0.4"
 rand = "0.9"
 scrypt = "0.11"
 sha2 = "0.10"
+p256 = { version = "0.13", features = ["ecdsa"] }
+ecdsa = { version = "0.16", features = ["der"] }
 x509-parser = "0.17"
 thiserror = "2"
 zeroize = "1.8"
