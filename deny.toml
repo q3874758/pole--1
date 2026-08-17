@@ -35,20 +35,11 @@ allow = [
     "MPL-2.0",
     "OpenSSL",
     "BSL-1.0",
-    "Unicode-2.0",
-    "Zlib-acknowledgement",
 ]
-# Hard denials — these will fail CI.
-deny = [
-    "GPL-1.0",
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-1.0",
-    "AGPL-3.0",
-    "SSPL-1.0",
-    "Commons-Clause",
-    "Elastic-2.0",
-]
+# NOTE: cargo-deny >= 0.16 (version=2 semantics) removed the `deny`
+# list: any license not in `allow` (or an exception) is denied by
+# default. GPL/AGPL/SSPL are therefore already hard-denied because
+# they are absent from `allow` above.
 confidence-threshold = 0.8
 
 # Crates whose license expression is not on the SPDX allow/deny
@@ -71,12 +62,11 @@ license-files = [
 [[licenses.clarify]]
 crate = "core2"
 expression = "MIT"
-# Note: Cargo 1.94 does not support `checksum` on `[patch.crates-io]`
-# path deps — emits "unused manifest key" warning, so we cannot
-# pin the path dep contents here. If we later migrate to
-# `[source.crates-io] replace-with = "vendored-sources"`, cargo
-# will verify integrity via `vendor/core2/.cargo-checksum.json`
-# automatically.
+# Vendored path dep (see Cargo.toml [patch.crates-io]); the vendored
+# tree ships no LICENSE file, so the expression is declared without a
+# file-level fingerprint. cargo-deny 0.20 requires the `license-files`
+# key to be present.
+license-files = []
 
 [bans]
 # Multiple versions of the same crate are common in Rust
@@ -87,7 +77,6 @@ wildcards = "allow"
 highlight = "all"
 # Skip workspace-internal duplicates that are intentional
 # (e.g. a feature-gated re-export of an internal crate).
-exclude = []
 
 [sources]
 # Only allow crates.io and the vendored path override declared in
