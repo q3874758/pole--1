@@ -29,7 +29,7 @@ use pole_protocol_draft::cosmos::wire_types::{
     NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
 };
 use pole_protocol_draft::cosmos::{
-    address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
+    address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint, CosmosError,
 };
 use pole_protocol_draft::records::{Challenge, ChallengeEvidenceRef};
 use pole_protocol_draft::wallet::KeyPair;
@@ -246,6 +246,7 @@ impl IntegrationHarnessBuilder {
             client,
         };
         harness.wait_for_rpc().await?;
+        harness.wait_for_rest_ready().await?;
         Ok(harness)
     }
 }
@@ -281,6 +282,36 @@ impl IntegrationHarness {
         }
         Err(HarnessError::ChainNotReady {
             url,
+            secs: DEFAULT_OP_TIMEOUT.as_secs(),
+        })
+    }
+
+    /// Wait until the REST gRPC-gateway actually serves account
+    /// queries. The RPC `/status` port can report a positive height a
+    /// few hundred ms before the REST gateway is ready; on slow CI
+    /// runners a query issued in that window fails with
+    /// `500 invalid height: ... not ready; please wait for first
+    /// block`. Poll an account lookup until the gateway answers.
+    pub async fn wait_for_rest_ready(&self) -> Result<(), HarnessError> {
+        let deadline = Instant::now() + DEFAULT_OP_TIMEOUT;
+        while Instant::now() < deadline {
+            match self.client.account(&self.validator_address.bech32).await {
+                // Gateway is serving; account exists (it is funded in
+                // genesis) or is simply not found yet.
+                Ok(_) => return Ok(()),
+                Err(CosmosError::MissingField(_)) => return Ok(()),
+                Err(CosmosError::Rest { status, body }) => {
+                    if status == 500 && body.contains("not ready") {
+                        sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                    return Err(CosmosError::Rest { status, body }.into());
+                }
+                Err(other) => return Err(other.into()),
+            }
+        }
+        Err(HarnessError::ChainNotReady {
+            url: self.rest_url.clone(),
             secs: DEFAULT_OP_TIMEOUT.as_secs(),
         })
     }
