@@ -4,6 +4,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
