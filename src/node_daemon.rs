@@ -2887,26 +2887,24 @@ fn current_unix_millis() -> Result<u64, NodeDaemonError> {
 }
 
 fn apply_background_runtime_hints(config: &NodeConfig) {
-    if !config.runtime.os_background_priority {
-        return;
-    }
-
-    #[cfg(windows)]
-    {
-        let script = format!(
-            "$p = Get-Process -Id {}; $p.PriorityClass = 'Idle'",
-            std::process::id()
-        );
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .status();
+    if config.runtime.os_background_priority {
+        #[cfg(windows)]
+        {
+            let script = format!(
+                "$p = Get-Process -Id {}; $p.PriorityClass = 'Idle'",
+                std::process::id()
+            );
+            let _ = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    &script,
+                ])
+                .status();
+        }
     }
 }
 
@@ -3011,6 +3009,7 @@ fn normalize_process_names(process_names: &[String]) -> Vec<String> {
     normalized
 }
 
+#[cfg(windows)]
 fn match_configured_process_names(configured: &[String], running: &[String]) -> Vec<String> {
     let running_set = normalize_process_names(running)
         .into_iter()
@@ -3043,6 +3042,7 @@ fn display_process_name(input: &str) -> Option<String> {
     Some(format!("{base}.exe"))
 }
 
+#[cfg(windows)]
 fn run_powershell_script(script: &str) -> Option<String> {
     let output = Command::new("powershell")
         .args([
