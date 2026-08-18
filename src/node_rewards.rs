@@ -1158,6 +1158,67 @@ mod tests {
         id
     }
 
+    /// Shared player-mode `NodeConfig` for reward fixtures. Tests that need
+    /// specific reward/runtime values override fields via `..` after this.
+    fn fixture_config(data_dir: &std::path::Path) -> NodeConfig {
+        NodeConfig {
+            chain_id: "pole-local".into(),
+            node_id_hex: crate::hex_32([0x31; 32]),
+            reward_address_hex: crate::hex_32([0x41; 32]),
+            capabilities: CapabilityConfig {
+                collect: true,
+                store: false,
+                verify: false,
+                propose: false,
+                archive: false,
+            },
+            collect: CollectConfig {
+                enabled: true,
+                default_epoch_id: 1,
+                default_slot_id: 1,
+            },
+            runtime: RuntimeConfig {
+                data_dir: data_dir.to_string_lossy().into_owned(),
+                poll_interval_secs: 300,
+                slots_per_epoch: 24,
+                challenge_window_blocks: 20,
+                low_impact_mode: true,
+                os_background_priority: false,
+                game_active_poll_interval_secs: 60,
+                game_process_names: vec!["fixture_game.exe".into()],
+                target_app_ids: vec![730],
+                p2p_simulation: crate::node_config::P2pSimulationConfig::default(),
+                p2p_socket: crate::node_config::P2pSocketConfig::default(),
+                p2p_libp2p: crate::node_config::P2pLibp2pConfig::default(),
+                activity_sources: Vec::new(),
+            },
+            storage: StorageConfig {
+                quota_gb: 1,
+                retention_epochs: 2,
+            },
+            reward: RewardConfig {
+                reward_source: crate::node_config::RewardSourceMode::Static,
+                emission_year: 1,
+                reward_block_secs: 3_600,
+                player_block_reward: 1_000,
+                reward_adjustment_period_blocks: 288,
+                target_network_weight_units: 1,
+                reward_adjustment_cap_bps: 2_000,
+                collect_reward_bps: 5_000,
+                store_reward_bps: 2_500,
+                verify_reward_bps: 1_500,
+                propose_reward_bps: 1_000,
+                tail_emission_start_year: 4,
+                tail_emission_rate_bps: 200,
+                game_mappings: vec![RewardGameMapping {
+                    process_name: "fixture_game.exe".into(),
+                    app_id: 730,
+                    game_coefficient_ppm: 1_000_000,
+                }],
+            },
+        }
+    }
+
     #[test]
     fn allocate_proportional_returns_empty_for_zero_pool_or_empty_weights() {
         assert!(allocate_proportional(&BTreeMap::new(), 100).is_empty());
@@ -1376,62 +1437,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&data_dir);
         }
 
-        let config = NodeConfig {
-            chain_id: "pole-local".into(),
-            node_id_hex: crate::hex_32([0x31; 32]),
-            reward_address_hex: crate::hex_32([0x41; 32]),
-            capabilities: CapabilityConfig {
-                collect: true,
-                store: false,
-                verify: false,
-                propose: false,
-                archive: false,
-            },
-            collect: CollectConfig {
-                enabled: true,
-                default_epoch_id: 1,
-                default_slot_id: 1,
-            },
-            runtime: RuntimeConfig {
-                data_dir: data_dir.to_string_lossy().into_owned(),
-                poll_interval_secs: 300,
-                slots_per_epoch: 24,
-                challenge_window_blocks: 20,
-                low_impact_mode: true,
-                os_background_priority: false,
-                game_active_poll_interval_secs: 60,
-                game_process_names: vec!["fixture_game.exe".into()],
-                target_app_ids: vec![730],
-                p2p_simulation: crate::node_config::P2pSimulationConfig::default(),
-                p2p_socket: crate::node_config::P2pSocketConfig::default(),
-                p2p_libp2p: crate::node_config::P2pLibp2pConfig::default(),
-                activity_sources: Vec::new(),
-            },
-            storage: StorageConfig {
-                quota_gb: 1,
-                retention_epochs: 2,
-            },
-            reward: RewardConfig {
-                reward_source: crate::node_config::RewardSourceMode::Static,
-                emission_year: 1,
-                reward_block_secs: 3_600,
-                player_block_reward: 1_000,
-                reward_adjustment_period_blocks: 288,
-                target_network_weight_units: 1,
-                reward_adjustment_cap_bps: 2_000,
-                collect_reward_bps: 5_000,
-                store_reward_bps: 2_500,
-                verify_reward_bps: 1_500,
-                propose_reward_bps: 1_000,
-                tail_emission_start_year: 4,
-                tail_emission_rate_bps: 200,
-                game_mappings: vec![RewardGameMapping {
-                    process_name: "fixture_game.exe".into(),
-                    app_id: 730,
-                    game_coefficient_ppm: 1_000_000,
-                }],
-            },
-        };
+        let config = fixture_config(&data_dir);
 
         let store_path = PathBuf::from(&config.runtime.data_dir)
             .join("local-chain")
@@ -1531,62 +1537,9 @@ mod tests {
             let _ = std::fs::remove_dir_all(&data_dir);
         }
 
-        let config = NodeConfig {
-            chain_id: "pole-local".into(),
-            node_id_hex: crate::hex_32([0x31; 32]),
-            reward_address_hex: crate::hex_32([0x41; 32]),
-            capabilities: CapabilityConfig {
-                collect: true,
-                store: false,
-                verify: false,
-                propose: false,
-                archive: false,
-            },
-            collect: CollectConfig {
-                enabled: true,
-                default_epoch_id: 1,
-                default_slot_id: 1,
-            },
-            runtime: RuntimeConfig {
-                data_dir: data_dir.to_string_lossy().into_owned(),
-                poll_interval_secs: 300,
-                slots_per_epoch: 24,
-                challenge_window_blocks: 20,
-                low_impact_mode: true,
-                os_background_priority: false,
-                game_active_poll_interval_secs: 60,
-                game_process_names: Vec::new(),
-                target_app_ids: vec![730],
-                p2p_simulation: crate::node_config::P2pSimulationConfig::default(),
-                p2p_socket: crate::node_config::P2pSocketConfig::default(),
-                p2p_libp2p: crate::node_config::P2pLibp2pConfig::default(),
-                activity_sources: Vec::new(),
-            },
-            storage: StorageConfig {
-                quota_gb: 1,
-                retention_epochs: 2,
-            },
-            reward: RewardConfig {
-                reward_source: crate::node_config::RewardSourceMode::Static,
-                emission_year: 1,
-                reward_block_secs: 3_600,
-                player_block_reward: 10_000,
-                reward_adjustment_period_blocks: 288,
-                target_network_weight_units: 1,
-                reward_adjustment_cap_bps: 2_000,
-                collect_reward_bps: 5_000,
-                store_reward_bps: 2_500,
-                verify_reward_bps: 1_500,
-                propose_reward_bps: 1_000,
-                tail_emission_start_year: 4,
-                tail_emission_rate_bps: 200,
-                game_mappings: vec![RewardGameMapping {
-                    process_name: "fixture_game.exe".into(),
-                    app_id: 730,
-                    game_coefficient_ppm: 1_000_000,
-                }],
-            },
-        };
+        let mut config = fixture_config(&data_dir);
+        config.runtime.game_process_names = Vec::new();
+        config.reward.player_block_reward = 10_000;
 
         let context = RewardTickContext {
             epoch_id: 1,
@@ -1640,62 +1593,15 @@ mod tests {
             let _ = std::fs::remove_dir_all(&data_dir);
         }
 
-        let config = NodeConfig {
-            chain_id: "pole-local".into(),
-            node_id_hex: crate::hex_32([0x31; 32]),
-            reward_address_hex: crate::hex_32([0x41; 32]),
-            capabilities: CapabilityConfig {
-                collect: true,
-                store: false,
-                verify: false,
-                propose: false,
-                archive: false,
-            },
-            collect: CollectConfig {
-                enabled: true,
-                default_epoch_id: 1,
-                default_slot_id: 1,
-            },
-            runtime: RuntimeConfig {
-                data_dir: data_dir.to_string_lossy().into_owned(),
-                poll_interval_secs: 300,
-                slots_per_epoch: 24,
-                challenge_window_blocks: 20,
-                low_impact_mode: true,
-                os_background_priority: false,
-                game_active_poll_interval_secs: 60,
-                game_process_names: Vec::new(),
-                target_app_ids: vec![730],
-                p2p_simulation: crate::node_config::P2pSimulationConfig::default(),
-                p2p_socket: crate::node_config::P2pSocketConfig::default(),
-                p2p_libp2p: crate::node_config::P2pLibp2pConfig::default(),
-                activity_sources: Vec::new(),
-            },
-            storage: StorageConfig {
-                quota_gb: 1,
-                retention_epochs: 2,
-            },
-            reward: RewardConfig {
-                reward_source: crate::node_config::RewardSourceMode::Static,
-                emission_year: 1,
-                reward_block_secs: 3_600,
-                player_block_reward: 1_000,
-                reward_adjustment_period_blocks: 2,
-                target_network_weight_units: 3_600_000_000_000,
-                reward_adjustment_cap_bps: 2_000,
-                collect_reward_bps: 5_000,
-                store_reward_bps: 2_500,
-                verify_reward_bps: 1_500,
-                propose_reward_bps: 1_000,
-                tail_emission_start_year: 4,
-                tail_emission_rate_bps: 200,
-                game_mappings: vec![RewardGameMapping {
-                    process_name: "TestGame.exe".into(),
-                    app_id: 730,
-                    game_coefficient_ppm: 1_000_000,
-                }],
-            },
-        };
+        let mut config = fixture_config(&data_dir);
+        config.runtime.game_process_names = Vec::new();
+        config.reward.reward_adjustment_period_blocks = 2;
+        config.reward.target_network_weight_units = 3_600_000_000_000;
+        config.reward.game_mappings = vec![RewardGameMapping {
+            process_name: "TestGame.exe".into(),
+            app_id: 730,
+            game_coefficient_ppm: 1_000_000,
+        }];
 
         let samples = vec![SteamCurrentPlayersSample::steam_current_players(
             730, 1_000, 0, "{}",
