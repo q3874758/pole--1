@@ -186,6 +186,13 @@ jobs:
         run: |
           mkdir -p dist/release
           cp dist/release-manifests/stable.json dist/release/stable.json
+          # The committed manifest carries the source-tree version (0.1.0);
+          # stamp the actual release version (tag without leading "v") so the
+          # update channel's version comparison is correct for this tag.
+          MANIFEST_VERSION="${VERSION#v}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$MANIFEST_VERSION\"/" dist/release/stable.json
+          echo "staged stable.json version=$MANIFEST_VERSION"
+          grep '"version"' dist/release/stable.json
 
       - name: Sign stable.json (cosign keyless OIDC + Rekor)
         env:
