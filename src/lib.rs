@@ -28,7 +28,6 @@ pub mod node_settlement;
 pub mod node_storage_audit;
 pub mod node_verifier;
 pub mod p2p;
-pub mod p2p_libp2p;
 pub mod params;
 pub mod primitives;
 pub mod records;
@@ -106,9 +105,8 @@ pub use node_cli_support::{
 };
 pub use node_config::{
     hex_32, ActivitySourceConfig, CapabilityConfig, CollectConfig, NodeConfig, NodeConfigError,
-    P2pLibp2pBootstrapPeerConfig, P2pLibp2pConfig, P2pLibp2pDiscoveryConfig, P2pSimulationConfig,
-    P2pSocketConfig, P2pSocketPeerConfig, RewardConfig, RewardGameMapping, RewardSourceMode,
-    RuntimeConfig, StorageConfig,
+    P2pSimulationConfig, P2pSocketConfig, P2pSocketPeerConfig, RewardConfig, RewardGameMapping,
+    RewardSourceMode, RuntimeConfig, StorageConfig,
 };
 pub use node_daemon::{
     adjustment_cycle_artifact_path, adjustment_cycle_index_path, adjustment_cycle_summary_path,
@@ -165,13 +163,6 @@ pub use node_storage_audit::{
 };
 pub use node_verifier::{verify_local_epoch, EpochVerificationReport, NodeVerificationError};
 pub use p2p::*;
-pub use p2p_libp2p::{
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, run_libp2p_skeleton_loop,
-    DiscoveryKind, Libp2pBackendError, Libp2pBackendSkeleton, Libp2pBootstrapPeer,
-    Libp2pDiscoveryState, Libp2pLoopReport, Libp2pPeerEntry, Libp2pPeerTable,
-    Libp2pRuntimeStateMachine, PeerConnectionState, RealLibp2pSwarmBuildReport,
-    SkeletonRuntimePhase,
-};
 pub use params::*;
 pub use primitives::*;
 pub use records::*;

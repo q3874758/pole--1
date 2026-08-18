@@ -2,13 +2,11 @@ use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, build_verification_credentials,
-    collect_configured_activity_source,
+    build_verification_credentials, collect_configured_activity_source,
     cosmos::{
         address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
     },
@@ -25,16 +23,15 @@ use pole_protocol_draft::{
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
     prune_retention, reward_local_epoch, run_collect_tick_with_client,
-    run_collect_tick_with_client_and_network, run_libp2p_skeleton_loop,
-    save_verification_credentials, socket_peers_from_config, source_kind_label,
-    submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
-    summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
-    BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
-    GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient, InMemoryP2pNetwork,
-    LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
-    ProtocolStore, ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork, SocketPeerProfile,
-    SteamCurrentPlayersSample, INITIAL_EMISSION_RATE_BPS, LONG_TERM_TAIL_EMISSION_RATE_BPS,
-    LONG_TERM_TAIL_START_YEAR, TOTAL_SUPPLY,
+    run_collect_tick_with_client_and_network, save_verification_credentials,
+    socket_peers_from_config, source_kind_label, submit_protocol_params_update_proposal,
+    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
+    verify_local_epoch, ActivitySourceKind, BatchBuilder, CollectLoopSummary, CollectTickResult,
+    FilesystemP2pNetwork, GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient,
+    InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork,
+    P2pSimulationConfig, P2pTopic, ProtocolStore, ReqwestHttpTextClient, ServiceManager,
+    SocketP2pNetwork, SocketPeerProfile, SteamCurrentPlayersSample, INITIAL_EMISSION_RATE_BPS,
+    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR, TOTAL_SUPPLY,
 };
 type NodeCommandHandler = pole_protocol_draft::CommandHandler;
 const NODE_USAGE_COMMANDS: &[&str] = &[
@@ -76,9 +73,6 @@ const NODE_USAGE_COMMANDS: &[&str] = &[
     "  pole-node reward-adjustment-show-summary <config-path>",
     "  pole-node adjustment-cycle-show-index <config-path>",
     "  pole-node adjustment-cycle-show-summary <config-path>",
-    "  pole-node libp2p-diagnose <config-path>",
-    "  pole-node libp2p-skeleton <config-path>",
-    "  pole-node libp2p-loop <config-path> [ticks]",
     "  pole-node service-run <config-path>",
     "  pole-node service-install <config-path>",
     "  pole-node service-uninstall <config-path>",
@@ -163,9 +157,6 @@ const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
         "adjustment-cycle-show-summary",
         reward_adjustment_show_summary_cmd,
     ),
-    ("libp2p-diagnose", libp2p_diagnose_cmd),
-    ("libp2p-skeleton", libp2p_skeleton_cmd),
-    ("libp2p-loop", libp2p_loop_cmd),
     ("service-run", service_run_cmd),
     ("service-install", service_install_cmd),
     ("service-uninstall", service_uninstall_cmd),
@@ -553,15 +544,6 @@ fn status(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "activity_source_count={}",
         config.runtime.activity_sources.len()
-    );
-    println!("libp2p_enabled={}", config.runtime.p2p_libp2p.enabled);
-    println!(
-        "libp2p_listen_addrs={:?}",
-        config.runtime.p2p_libp2p.listen_addrs
-    );
-    println!(
-        "libp2p_bootstrap_peer_count={}",
-        config.runtime.p2p_libp2p.bootstrap_peers.len()
     );
     println!(
         "effective_poll_interval_secs={}",
@@ -1080,65 +1062,6 @@ fn print_node_status_summary(summary: &pole_protocol_draft::NodeStatusSummary) {
             println!("activity_source_health={line}");
         }
     }
-}
-
-fn libp2p_diagnose_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node libp2p-diagnose <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let libp2p = &config.runtime.p2p_libp2p;
-    println!("libp2p_enabled={}", libp2p.enabled);
-    println!("libp2p_listen_addrs={:?}", libp2p.listen_addrs);
-    println!(
-        "libp2p_bootstrap_peer_count={}",
-        libp2p.bootstrap_peers.len()
-    );
-    println!("libp2p_kademlia={}", libp2p.discovery.kademlia);
-    println!("libp2p_mdns={}", libp2p.discovery.mdns);
-    println!("libp2p_rendezvous={}", libp2p.discovery.rendezvous);
-    Ok(())
-}
-
-fn libp2p_skeleton_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node libp2p-skeleton <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let skeleton =
-        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
-    let real_swarm =
-        build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p, config.node_id().ok())?;
-    println!("local_peer_id={}", skeleton.local_peer_id);
-    println!("listen_addrs={:?}", skeleton.listen_addrs);
-    println!("bootstrap_peer_count={}", skeleton.bootstrap_peers.len());
-    println!("kademlia_enabled={}", skeleton.kademlia_enabled);
-    println!("mdns_enabled={}", skeleton.mdns_enabled);
-    println!("rendezvous_enabled={}", skeleton.rendezvous_enabled);
-    println!("real_swarm_local_peer_id={}", real_swarm.local_peer_id);
-    println!("real_swarm_listener_count={}", real_swarm.listener_count);
-    Ok(())
-}
-
-fn libp2p_loop_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 && args.len() != 4 {
-        return Err("usage: pole-node libp2p-loop <config-path> [ticks]".into());
-    }
-    let ticks = args
-        .get(3)
-        .map(|value| value.parse::<u64>())
-        .transpose()?
-        .unwrap_or(5);
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let skeleton =
-        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
-    let report = run_libp2p_skeleton_loop(skeleton, ticks, Duration::ZERO);
-    println!("ticks_completed={}", report.ticks_completed);
-    println!("phase={:?}", report.phase);
-    println!("known_peer_count={}", report.known_peer_count);
-    println!("connected_peer_count={}", report.connected_peer_count);
-    println!("announced_peer_count={}", report.announced_peer_count);
-    Ok(())
 }
 
 fn service_run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -2446,7 +2369,6 @@ mod tests {
                 target_app_ids: vec![730, 570],
                 p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
                 p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-                p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
                 activity_sources: Vec::new(),
             },
             storage: pole_protocol_draft::StorageConfig {

@@ -1189,7 +1189,6 @@ mod tests {
                 target_app_ids: vec![730],
                 p2p_simulation: crate::node_config::P2pSimulationConfig::default(),
                 p2p_socket: crate::node_config::P2pSocketConfig::default(),
-                p2p_libp2p: crate::node_config::P2pLibp2pConfig::default(),
                 activity_sources: Vec::new(),
             },
             storage: StorageConfig {

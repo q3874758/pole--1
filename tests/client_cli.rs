@@ -1421,7 +1421,6 @@ fn status_reports_attached_network_and_retention_health() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -1551,7 +1550,6 @@ fn status_and_doctor_report_storage_challenge_failure() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -1653,7 +1651,6 @@ fn status_and_doctor_report_attached_network_challenge_activity_summary() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -1784,7 +1781,6 @@ fn status_and_doctor_report_last_auto_settlement_summary() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -1875,7 +1871,6 @@ fn status_and_doctor_report_last_auto_settlement_error() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -1974,7 +1969,6 @@ fn watch_p2p_sim_reports_attached_network_health() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2049,7 +2043,6 @@ fn watch_p2p_fs_reports_attached_network_health() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2141,7 +2134,6 @@ fn watch_p2p_socket_reports_attached_network_health() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2260,7 +2252,6 @@ fn watch_p2p_socket_can_use_config_backed_peer_specs() {
                     topics: vec!["batches".into(), "receipts".into()],
                 }],
             },
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2340,7 +2331,6 @@ fn prepare_epoch_builds_local_epoch_artifact() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2422,7 +2412,6 @@ fn settle_epoch_executes_local_submission_finalization_and_claim() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2508,7 +2497,6 @@ fn status_reports_pending_hour_reward_block_progress() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {
@@ -2744,7 +2732,6 @@ fn status_resolves_relative_data_dir_against_config_directory() {
             target_app_ids: vec![730],
             p2p_simulation: pole_protocol_draft::P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {

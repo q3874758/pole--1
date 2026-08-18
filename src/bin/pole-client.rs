@@ -16,8 +16,7 @@ use zeroize::Zeroize;
 
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
-    build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_libp2p_backend_skeleton, build_real_libp2p_swarm_report, chain_bridge,
+    build_epoch_commit_from_local_data, build_inmemory_simulation_network, chain_bridge,
     current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
@@ -89,8 +88,6 @@ const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client adjustment-cycle-show-summary [config-path]",
     "  pole-client control-api-serve [config-path] [bind-addr]",
     "  pole-client control-api-open [config-path] [bind-addr]",
-    "  pole-client libp2p-diagnose [config-path]",
-    "  pole-client libp2p-skeleton [config-path]",
     "  pole-client p2p-socket-show [config-path]",
     "  pole-client p2p-socket-add-peer <config-path> <peer-id-hex> <peer-addr> [topics]",
     "  pole-client repair-identity [config-path]",
@@ -183,8 +180,6 @@ const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ),
     ("control-api-serve", control_api_serve_cmd),
     ("control-api-open", control_api_open_cmd),
-    ("libp2p-diagnose", libp2p_diagnose_cmd),
-    ("libp2p-skeleton", libp2p_skeleton_cmd),
     ("p2p-socket-show", p2p_socket_show_cmd),
     ("p2p-socket-add-peer", p2p_socket_add_peer_cmd),
     ("repair-identity", repair_identity_cmd),
@@ -423,15 +418,6 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "activity_source_count={}",
         config.runtime.activity_sources.len()
     );
-    println!("libp2p_enabled={}", config.runtime.p2p_libp2p.enabled);
-    println!(
-        "libp2p_listen_addrs={:?}",
-        config.runtime.p2p_libp2p.listen_addrs
-    );
-    println!(
-        "libp2p_bootstrap_peer_count={}",
-        config.runtime.p2p_libp2p.bootstrap_peers.len()
-    );
     println!("background_mode={}", background_mode.subcommand());
     match autostart_outcome {
         #[cfg(windows)]
@@ -556,15 +542,6 @@ fn status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "activity_source_count={}",
         config.runtime.activity_sources.len()
-    );
-    println!("libp2p_enabled={}", config.runtime.p2p_libp2p.enabled);
-    println!(
-        "libp2p_listen_addrs={:?}",
-        config.runtime.p2p_libp2p.listen_addrs
-    );
-    println!(
-        "libp2p_bootstrap_peer_count={}",
-        config.runtime.p2p_libp2p.bootstrap_peers.len()
     );
     println!("foreground_process={foreground_process:?}");
     println!("active_game_processes={:?}", active_game_processes);
@@ -2399,64 +2376,6 @@ fn parse_activity_source_kind(
         "community" => Ok(ActivitySourceKind::Community),
         _ => Err(format!("unknown activity source kind {input}").into()),
     }
-}
-
-fn libp2p_diagnose_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client libp2p-diagnose [config-path]".into());
-    }
-    let config_path = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_CONFIG_PATH);
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
-    println!("PoLE client libp2p diagnose");
-    println!("config_path={}", config_path.to_string_lossy());
-    println!("libp2p_enabled={}", config.runtime.p2p_libp2p.enabled);
-    println!(
-        "libp2p_listen_addrs={:?}",
-        config.runtime.p2p_libp2p.listen_addrs
-    );
-    println!(
-        "libp2p_bootstrap_peer_count={}",
-        config.runtime.p2p_libp2p.bootstrap_peers.len()
-    );
-    println!(
-        "libp2p_kademlia={}",
-        config.runtime.p2p_libp2p.discovery.kademlia
-    );
-    println!("libp2p_mdns={}", config.runtime.p2p_libp2p.discovery.mdns);
-    println!(
-        "libp2p_rendezvous={}",
-        config.runtime.p2p_libp2p.discovery.rendezvous
-    );
-    Ok(())
-}
-
-fn libp2p_skeleton_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client libp2p-skeleton [config-path]".into());
-    }
-    let config_path = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_CONFIG_PATH);
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
-    let skeleton =
-        build_libp2p_backend_skeleton(&config.runtime.p2p_libp2p, config.node_id().ok())?;
-    let real_swarm =
-        build_real_libp2p_swarm_report(&config.runtime.p2p_libp2p, config.node_id().ok())?;
-    println!("PoLE client libp2p skeleton");
-    println!("config_path={}", config_path.to_string_lossy());
-    println!("local_peer_id={}", skeleton.local_peer_id);
-    println!("listen_addrs={:?}", skeleton.listen_addrs);
-    println!("bootstrap_peer_count={}", skeleton.bootstrap_peers.len());
-    println!("kademlia_enabled={}", skeleton.kademlia_enabled);
-    println!("mdns_enabled={}", skeleton.mdns_enabled);
-    println!("rendezvous_enabled={}", skeleton.rendezvous_enabled);
-    println!("real_swarm_local_peer_id={}", real_swarm.local_peer_id);
-    println!("real_swarm_listener_count={}", real_swarm.listener_count);
-    Ok(())
 }
 
 fn p2p_socket_show_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

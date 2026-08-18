@@ -9,9 +9,6 @@ use pole_protocol_draft::{
 use std::path::Path;
 use std::process::Command;
 
-#[cfg(feature = "real-libp2p")]
-use libp2p_identity::Keypair;
-
 struct FakeHttpClient {
     body: String,
 }
@@ -377,50 +374,6 @@ fn pole_node_build_batch_from_community_inline_json_outputs_batch_summary() {
 }
 
 #[test]
-fn pole_node_libp2p_skeleton_reports_configured_discovery() {
-    let config_path = std::env::temp_dir().join(format!(
-        "pole-node-libp2p-skeleton-{}.json",
-        std::process::id()
-    ));
-    let mut config = NodeConfig::default();
-    config.runtime.p2p_libp2p.enabled = true;
-    config.runtime.p2p_libp2p.listen_addrs = vec!["/ip4/127.0.0.1/tcp/0".into()];
-    #[cfg(feature = "real-libp2p")]
-    let bootstrap_peer_id = Keypair::generate_ed25519()
-        .public()
-        .to_peer_id()
-        .to_string();
-    #[cfg(not(feature = "real-libp2p"))]
-    let bootstrap_peer_id = "12D3KooWJ5Z5L6hG1Zq1x3wQ5P5ZkJ7V3xZ6QYp6iYvJpR6J8W8J".to_string();
-    config.runtime.p2p_libp2p.bootstrap_peers =
-        vec![pole_protocol_draft::P2pLibp2pBootstrapPeerConfig {
-            peer_id: bootstrap_peer_id,
-            addr: "/ip4/127.0.0.1/tcp/4002".into(),
-        }];
-    config.save_json(&config_path).unwrap();
-
-    let binary = env!("CARGO_BIN_EXE_pole-node");
-    let output = Command::new(binary)
-        .arg("libp2p-skeleton")
-        .arg(&config_path)
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("local_peer_id="));
-    assert!(stdout.contains("bootstrap_peer_count=1"));
-    assert!(stdout.contains("kademlia_enabled=true"));
-    assert!(stdout.contains("real_swarm_listener_count=1"));
-
-    let _ = std::fs::remove_file(config_path);
-}
-
-#[test]
 fn pole_node_tokenomics_reports_supply_allocations_and_schedule() {
     let binary = env!("CARGO_BIN_EXE_pole-node");
     let output = Command::new(binary)
@@ -712,40 +665,6 @@ fn pole_node_governance_commands_manage_future_params_update() {
     assert!(stdout.contains("tier3_weight_max_ppm=160000"));
 
     std::fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn pole_node_libp2p_loop_reports_running_state() {
-    let config_path =
-        std::env::temp_dir().join(format!("pole-node-libp2p-loop-{}.json", std::process::id()));
-    let mut config = NodeConfig::default();
-    config.runtime.p2p_libp2p.enabled = true;
-    config.runtime.p2p_libp2p.listen_addrs = vec!["/ip4/127.0.0.1/tcp/4001".into()];
-    config.runtime.p2p_libp2p.bootstrap_peers =
-        vec![pole_protocol_draft::P2pLibp2pBootstrapPeerConfig {
-            peer_id: "12D3KooWJ5Z5L6hG1Zq1x3wQ5P5ZkJ7V3xZ6QYp6iYvJpR6J8W8J".into(),
-            addr: "/ip4/127.0.0.1/tcp/4002".into(),
-        }];
-    config.save_json(&config_path).unwrap();
-
-    let binary = env!("CARGO_BIN_EXE_pole-node");
-    let output = Command::new(binary)
-        .arg("libp2p-loop")
-        .arg(&config_path)
-        .arg("3")
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ticks_completed=3"));
-    assert!(stdout.contains("phase=Running"));
-
-    let _ = std::fs::remove_file(config_path);
 }
 
 #[test]

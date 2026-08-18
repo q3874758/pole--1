@@ -64,8 +64,6 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub p2p_socket: P2pSocketConfig,
     #[serde(default)]
-    pub p2p_libp2p: P2pLibp2pConfig,
-    #[serde(default)]
     pub activity_sources: Vec<ActivitySourceConfig>,
 }
 
@@ -108,34 +106,6 @@ pub struct P2pSocketPeerConfig {
     pub addr: String,
     #[serde(default)]
     pub topics: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct P2pLibp2pConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_p2p_libp2p_listen_addrs")]
-    pub listen_addrs: Vec<String>,
-    #[serde(default)]
-    pub bootstrap_peers: Vec<P2pLibp2pBootstrapPeerConfig>,
-    #[serde(default)]
-    pub discovery: P2pLibp2pDiscoveryConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct P2pLibp2pBootstrapPeerConfig {
-    pub peer_id: String,
-    pub addr: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct P2pLibp2pDiscoveryConfig {
-    #[serde(default = "default_p2p_libp2p_kademlia")]
-    pub kademlia: bool,
-    #[serde(default = "default_p2p_libp2p_mdns")]
-    pub mdns: bool,
-    #[serde(default)]
-    pub rendezvous: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,7 +261,6 @@ impl Default for NodeConfig {
                 target_app_ids: vec![730],
                 p2p_simulation: P2pSimulationConfig::default(),
                 p2p_socket: P2pSocketConfig::default(),
-                p2p_libp2p: P2pLibp2pConfig::default(),
                 activity_sources: Vec::new(),
             },
             storage: StorageConfig {
@@ -345,18 +314,6 @@ fn default_p2p_dual_listener_count() -> usize {
 
 fn default_p2p_socket_bind_addr() -> String {
     "127.0.0.1:0".to_string()
-}
-
-fn default_p2p_libp2p_listen_addrs() -> Vec<String> {
-    vec!["/ip4/0.0.0.0/tcp/0".to_string()]
-}
-
-fn default_p2p_libp2p_kademlia() -> bool {
-    true
-}
-
-fn default_p2p_libp2p_mdns() -> bool {
-    true
 }
 
 fn default_player_block_reward() -> Amount {
@@ -439,27 +396,6 @@ impl Default for P2pSocketConfig {
         Self {
             bind_addr: default_p2p_socket_bind_addr(),
             peers: Vec::new(),
-        }
-    }
-}
-
-impl Default for P2pLibp2pConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            listen_addrs: default_p2p_libp2p_listen_addrs(),
-            bootstrap_peers: Vec::new(),
-            discovery: P2pLibp2pDiscoveryConfig::default(),
-        }
-    }
-}
-
-impl Default for P2pLibp2pDiscoveryConfig {
-    fn default() -> Self {
-        Self {
-            kademlia: default_p2p_libp2p_kademlia(),
-            mdns: default_p2p_libp2p_mdns(),
-            rendezvous: false,
         }
     }
 }

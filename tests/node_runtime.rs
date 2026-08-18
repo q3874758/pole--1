@@ -38,7 +38,6 @@ fn runtime_config() -> NodeConfig {
             target_app_ids: vec![730],
             p2p_simulation: P2pSimulationConfig::default(),
             p2p_socket: pole_protocol_draft::P2pSocketConfig::default(),
-            p2p_libp2p: pole_protocol_draft::P2pLibp2pConfig::default(),
             activity_sources: Vec::new(),
         },
         storage: StorageConfig {

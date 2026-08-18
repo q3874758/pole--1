@@ -45,9 +45,6 @@ x509-parser = "0.17"
 thiserror = "2"
 zeroize = "1.8"
 rpassword = "7.4"
-libp2p = { version = "0.56.0", default-features = false, features = ["ed25519", "identify", "kad", "macros", "mdns", "noise", "quic", "rendezvous", "serde", "tcp", "tokio", "yamux"], optional = true }
-libp2p-identity = { version = "0.2.13", features = ["ed25519", "peerid"], optional = true }
-multiaddr = { version = "0.18.2", optional = true }
 prost = "0.13"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -58,14 +55,10 @@ sha3 = "0.10"
 
 [features]
 default = []
-real-libp2p = ["dep:libp2p", "dep:libp2p-identity", "dep:multiaddr"]
 # `integration` is referenced by `tests/harness/mod.rs::HARNESS_FEATURE` and
 # gates real-`poled` bring-up tests. It is intentionally empty (no extra deps)
 # because the gated tests only depend on a built `poled` binary on $PATH.
 integration = []
-
-[patch.crates-io]
-core2 = { path = "vendor/core2" }
 
 [dev-dependencies]
 tempfile = "3"
