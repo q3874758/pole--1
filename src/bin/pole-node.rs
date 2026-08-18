@@ -19,10 +19,12 @@ use pole_protocol_draft::{
     open_local_protocol_state, parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
     parse_socket_topics, parse_third_party_activity_response, parse_vote_choice,
-    prepare_local_epoch, print_batch_summary, print_governance_index,
+    prepare_local_epoch, print_batch_summary, print_epoch_commit_artifact_roots,
+    print_governance_index,
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
-    prune_retention, reward_local_epoch, run_collect_tick_with_client,
+    prune_retention, reward_local_epoch, render_tokenomics_schedule,
+    run_collect_tick_with_client,
     run_collect_tick_with_client_and_network, save_verification_credentials,
     socket_peers_from_config, source_kind_label, submit_protocol_params_update_proposal,
     summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
@@ -30,8 +32,8 @@ use pole_protocol_draft::{
     FilesystemP2pNetwork, GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient,
     InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork,
     P2pSimulationConfig, P2pTopic, ProtocolStore, ReqwestHttpTextClient, ServiceManager,
-    SocketP2pNetwork, SocketPeerProfile, SteamCurrentPlayersSample, INITIAL_EMISSION_RATE_BPS,
-    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR, TOTAL_SUPPLY,
+    SocketP2pNetwork, SocketPeerProfile, SteamCurrentPlayersSample,
+    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR,
 };
 type NodeCommandHandler = pole_protocol_draft::CommandHandler;
 const NODE_USAGE_COMMANDS: &[&str] = &[
@@ -570,22 +572,10 @@ fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         LONG_TERM_TAIL_EMISSION_RATE_BPS,
     );
 
-    println!("PoLE node tokenomics");
-    println!("total_supply={TOTAL_SUPPLY}");
-    println!("initial_emission_rate_bps={INITIAL_EMISSION_RATE_BPS}");
-    println!("tail_emission_start_year={LONG_TERM_TAIL_START_YEAR}");
-    println!("tail_emission_rate_bps={LONG_TERM_TAIL_EMISSION_RATE_BPS}");
-    println!("player_rewards_allocation={}", breakdown.player_rewards);
-    println!("service_rewards_allocation={}", breakdown.service_rewards);
-    println!("treasury_allocation={}", breakdown.treasury);
-    println!("team_allocation={}", breakdown.team);
-    println!("early_supporters_allocation={}", breakdown.early_supporters);
-    for row in schedule {
-        println!(
-            "year={} nominal_rate_bps={} annual_emission={} cumulative_emission={}",
-            row.year, row.nominal_rate_bps, row.annual_emission, row.cumulative_emission
-        );
-    }
+    print!(
+        "{}",
+        render_tokenomics_schedule("PoLE node tokenomics", &breakdown, &schedule)
+    );
     Ok(())
 }
 
@@ -1491,22 +1481,6 @@ fn print_node_storage_and_network_status(summary: &pole_protocol_draft::NodeStat
         "last_auto_settlement_error={:?}",
         summary.last_auto_settlement_error
     );
-}
-
-fn print_epoch_commit_artifact_roots(
-    accepted_batches_root_hex: &str,
-    observations_root_hex: &str,
-    aggregates_root_hex: &str,
-    rewards_root_hex: &str,
-    availability_root_hex: &str,
-    challenge_deadline_height: u64,
-) {
-    println!("accepted_batches_root={accepted_batches_root_hex}");
-    println!("observations_root={observations_root_hex}");
-    println!("aggregates_root={aggregates_root_hex}");
-    println!("rewards_root={rewards_root_hex}");
-    println!("availability_root={availability_root_hex}");
-    println!("challenge_deadline_height={challenge_deadline_height}");
 }
 
 fn run_once_with_client(

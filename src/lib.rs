@@ -3,6 +3,7 @@
 pub mod activity_collector;
 pub mod app_paths;
 pub mod chain_bridge;
+pub mod cli_commands;
 pub mod cli_output;
 pub mod cli_parsing;
 pub mod cli_support;
@@ -57,6 +58,9 @@ pub use cli_output::{
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_protocol_params_summary, print_reward_adjustment_index,
     print_reward_adjustment_summary, CommandHandler,
+};
+pub use cli_commands::{
+    print_epoch_commit_artifact_roots, render_tokenomics_schedule,
 };
 pub use cli_parsing::{
     decode_hex32, parse_socket_addr, parse_socket_peer_spec, parse_socket_peer_specs,

@@ -20,7 +20,8 @@ use pole_protocol_draft::{
     current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
-    effective_reward_adjustment_cap_bps, effective_reward_block_secs,
+    effective_reward_adjustment_cap_bps, effective_reward_block_secs, print_epoch_commit_artifact_roots,
+    render_tokenomics_schedule,
     effective_target_network_weight_units, export_governance_proposal_artifact,
     export_governance_scheduled_artifact, format_usage_block, governance_index_artifact_path,
     governance_summary_artifact_path, heartbeat_path, hex_32, hex_encode,
@@ -42,8 +43,8 @@ use pole_protocol_draft::{
     ActivitySourceKind, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
     GovernanceArtifactIndex, GovernanceArtifactSummary, KeyPair, LocalNodeProgress, NodeConfig,
     P2pNetwork, ProtocolStore, ReqwestHttpTextClient, RewardAdjustmentArtifactSummary,
-    RewardSourceMode, ServiceRuntime, ServiceSnapshot, SocketP2pNetwork, INITIAL_EMISSION_RATE_BPS,
-    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR, TOTAL_SUPPLY,
+    RewardSourceMode, ServiceRuntime, ServiceSnapshot, SocketP2pNetwork,
+    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR,
 };
 type ClientCommandHandler = pole_protocol_draft::CommandHandler;
 
@@ -1173,22 +1174,6 @@ fn print_client_network_and_retention_diagnostics(
     );
 }
 
-fn print_epoch_commit_artifact_roots(
-    accepted_batches_root_hex: &str,
-    observations_root_hex: &str,
-    aggregates_root_hex: &str,
-    rewards_root_hex: &str,
-    availability_root_hex: &str,
-    challenge_deadline_height: u64,
-) {
-    println!("accepted_batches_root={accepted_batches_root_hex}");
-    println!("observations_root={observations_root_hex}");
-    println!("aggregates_root={aggregates_root_hex}");
-    println!("rewards_root={rewards_root_hex}");
-    println!("availability_root={availability_root_hex}");
-    println!("challenge_deadline_height={challenge_deadline_height}");
-}
-
 fn doctor_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() > 3 {
         return Err("usage: pole-client doctor [config-path]".into());
@@ -1351,22 +1336,7 @@ fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         LONG_TERM_TAIL_EMISSION_RATE_BPS,
     );
 
-    println!("PoLE tokenomics");
-    println!("total_supply={TOTAL_SUPPLY}");
-    println!("initial_emission_rate_bps={INITIAL_EMISSION_RATE_BPS}");
-    println!("tail_emission_start_year={LONG_TERM_TAIL_START_YEAR}");
-    println!("tail_emission_rate_bps={LONG_TERM_TAIL_EMISSION_RATE_BPS}");
-    println!("player_rewards_allocation={}", breakdown.player_rewards);
-    println!("service_rewards_allocation={}", breakdown.service_rewards);
-    println!("treasury_allocation={}", breakdown.treasury);
-    println!("team_allocation={}", breakdown.team);
-    println!("early_supporters_allocation={}", breakdown.early_supporters);
-    for row in schedule {
-        println!(
-            "year={} nominal_rate_bps={} annual_emission={} cumulative_emission={}",
-            row.year, row.nominal_rate_bps, row.annual_emission, row.cumulative_emission
-        );
-    }
+    print!("{}", render_tokenomics_schedule("PoLE tokenomics", &breakdown, &schedule));
 
     Ok(())
 }
