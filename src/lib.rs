@@ -6,7 +6,6 @@ pub mod chain_bridge;
 pub mod cli_output;
 pub mod cli_parsing;
 pub mod cli_support;
-pub mod config;
 pub mod control_api;
 pub mod control_api_types;
 pub mod cosmos;
