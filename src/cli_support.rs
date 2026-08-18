@@ -14,7 +14,14 @@ pub fn print_data_dir_path(label: &str, data_dir: &Path, child: &str) {
 }
 
 pub fn print_command_header(command_name: &str, config_path: &Path) {
-    println!("PoLE client {command_name}");
+    print_command_header_for("client", command_name, config_path);
+}
+
+/// Print a `PoLE {bin} {command}` header line plus the resolved config
+/// path. Both `pole-client` and `pole-node` share command bodies that
+/// call this with their own bin label so output stays consistent.
+pub fn print_command_header_for(bin_name: &str, command_name: &str, config_path: &Path) {
+    println!("PoLE {bin_name} {command_name}");
     print_path_entry("config_path", config_path);
 }
 

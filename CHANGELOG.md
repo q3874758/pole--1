@@ -8,6 +8,21 @@ once a stable version is published.
 
 ## [Unreleased]
 
+### Changed — CLI command-body unification (maintenance)
+
+- Unified the duplicate `governance-show-*` / `reward-adjustment-show-*`
+  command handlers between `pole-client` and `pole-node` into shared
+  implementations in `src/cli_commands.rs`. Both binaries now use the
+  same command body: optional leading `[config-path]` (default
+  `./node.json`) plus a `PoLE <bin> <command>` header, so `pole-node`
+  gains the header/optional-config behaviour already used by the client.
+- `print_command_header` is now backed by a parameterized
+  `print_command_header_for(bin, command, path)`; existing
+  `pole-client` output is unchanged.
+- Net reduction of ~210 duplicated lines across the two binaries;
+  `cargo test`, `cargo clippy --all-targets --features integration`,
+  and `cargo fmt` all stay green.
+
 ### Removed — Codebase reduction (maintenance)
 
 - Removed the production-dead `src/node_anomaly.rs` module

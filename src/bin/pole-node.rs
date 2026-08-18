@@ -12,28 +12,23 @@ use pole_protocol_draft::{
     },
     current_unix_millis, decode_hex32, detect_active_game_processes, dispatch_command,
     effective_collect_interval_secs, export_governance_proposal_artifact,
-    export_governance_scheduled_artifact, fetch_current_players_live, format_usage_block,
-    governance_index_artifact_path, governance_summary_artifact_path,
-    inmemory_simulation_listener_peer_ids, inmemory_simulation_retrieval_peer_id,
-    is_player_verifier, load_status, load_verification_credentials, maybe_write_payload,
-    open_local_protocol_state, parse_community_activity_response, parse_current_players_response,
+    fetch_current_players_live, format_usage_block, inmemory_simulation_listener_peer_ids,
+    inmemory_simulation_retrieval_peer_id, is_player_verifier, load_status,
+    load_verification_credentials, maybe_write_payload, open_local_protocol_state,
+    parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
     parse_socket_topics, parse_third_party_activity_response, parse_vote_choice,
     prepare_local_epoch, print_batch_summary, print_epoch_commit_artifact_roots,
-    print_governance_index,
-    print_governance_proposal_artifact, print_governance_scheduled_artifact,
-    print_governance_summary, print_reward_adjustment_index, print_reward_adjustment_summary,
-    prune_retention, reward_local_epoch, render_tokenomics_schedule,
-    run_collect_tick_with_client,
-    run_collect_tick_with_client_and_network, save_verification_credentials,
-    socket_peers_from_config, source_kind_label, submit_protocol_params_update_proposal,
-    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
-    verify_local_epoch, ActivitySourceKind, BatchBuilder, CollectLoopSummary, CollectTickResult,
-    FilesystemP2pNetwork, GovernanceArtifactIndex, GovernanceArtifactSummary, HttpTextClient,
+    print_governance_proposal_artifact, prune_retention, render_tokenomics_schedule,
+    reward_local_epoch, run_collect_tick_with_client, run_collect_tick_with_client_and_network,
+    save_verification_credentials, socket_peers_from_config, source_kind_label,
+    submit_protocol_params_update_proposal, summarize_collect_loop_with_client,
+    summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
+    BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork, HttpTextClient,
     InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork,
-    P2pSimulationConfig, P2pTopic, ProtocolStore, ReqwestHttpTextClient, ServiceManager,
-    SocketP2pNetwork, SocketPeerProfile, SteamCurrentPlayersSample,
-    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR,
+    P2pSimulationConfig, P2pTopic, ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork,
+    SocketPeerProfile, SteamCurrentPlayersSample, LONG_TERM_TAIL_EMISSION_RATE_BPS,
+    LONG_TERM_TAIL_START_YEAR,
 };
 type NodeCommandHandler = pole_protocol_draft::CommandHandler;
 const NODE_USAGE_COMMANDS: &[&str] = &[
@@ -818,83 +813,23 @@ fn governance_show_proposal_cmd(args: &[String]) -> Result<(), Box<dyn std::erro
 }
 
 fn governance_show_scheduled_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 && args.len() != 4 {
-        return Err("usage: pole-node governance-show-scheduled <config-path> [epoch-id]".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let (_, state) = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?;
-    let epoch_id = args
-        .get(3)
-        .map(|value| value.parse::<u64>())
-        .transpose()?
-        .unwrap_or(state.current_epoch.saturating_add(1));
-    let scheduled_params = state.store.scheduled_protocol_params(&epoch_id);
-    let (artifact, artifact_path, index_path) = export_governance_scheduled_artifact(
-        &config,
-        state.current_epoch,
-        epoch_id,
-        scheduled_params,
-    )?;
-    print_governance_scheduled_artifact(&artifact);
-    println!("artifact_path={}", artifact_path.to_string_lossy());
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    Ok(())
+    pole_protocol_draft::governance_show_scheduled(args, "node", "./node.json")
 }
 
 fn governance_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node governance-show-index <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let index_path = governance_index_artifact_path(&config);
-    let index = GovernanceArtifactIndex::load_or_default_json(&index_path)?;
-
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    print_governance_index(&index);
-    Ok(())
+    pole_protocol_draft::governance_show_index(args, "node", "./node.json")
 }
 
 fn governance_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node governance-show-summary <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let summary_path = governance_summary_artifact_path(&config);
-    let summary = GovernanceArtifactSummary::load_or_default_json(&summary_path)?;
-
-    println!("artifact_summary_path={}", summary_path.to_string_lossy());
-    println!("artifact_index_path={}", summary.artifact_index_path);
-    print_governance_summary(&summary);
-    Ok(())
+    pole_protocol_draft::governance_show_summary(args, "node", "./node.json")
 }
 
 fn reward_adjustment_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node reward-adjustment-show-index <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let index_path = pole_protocol_draft::reward_adjustment_index_path(&config);
-    let index =
-        pole_protocol_draft::RewardAdjustmentArtifactIndex::load_or_default_json(&index_path)?;
-
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    print_reward_adjustment_index(&index);
-    Ok(())
+    pole_protocol_draft::reward_adjustment_show_index(args, "node", "./node.json")
 }
 
 fn reward_adjustment_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 {
-        return Err("usage: pole-node reward-adjustment-show-summary <config-path>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let summary_path = pole_protocol_draft::reward_adjustment_summary_path(&config);
-    let summary =
-        pole_protocol_draft::RewardAdjustmentArtifactSummary::load_or_default_json(&summary_path)?;
-
-    println!("artifact_summary_path={}", summary_path.to_string_lossy());
-    println!("artifact_index_path={}", summary.artifact_index_path);
-    print_reward_adjustment_summary(&summary);
-    Ok(())
+    pole_protocol_draft::reward_adjustment_show_summary(args, "node", "./node.json")
 }
 
 fn print_node_status_summary(summary: &pole_protocol_draft::NodeStatusSummary) {

@@ -53,14 +53,16 @@ pub use activity_collector::{
     CommunityJsonCollector, EaLiveCollector, EpicLiveCollector, GogLiveCollector,
     LiveActivityCollector, ThirdPartyJsonCollector,
 };
+pub use cli_commands::{
+    governance_show_index, governance_show_scheduled, governance_show_summary,
+    print_epoch_commit_artifact_roots, render_tokenomics_schedule, resolve_config_and_header,
+    reward_adjustment_show_index, reward_adjustment_show_summary,
+};
 pub use cli_output::{
     dispatch_command, format_usage_block, parse_vote_choice, print_governance_index,
     print_governance_proposal_artifact, print_governance_scheduled_artifact,
     print_governance_summary, print_protocol_params_summary, print_reward_adjustment_index,
     print_reward_adjustment_summary, CommandHandler,
-};
-pub use cli_commands::{
-    print_epoch_commit_artifact_roots, render_tokenomics_schedule,
 };
 pub use cli_parsing::{
     decode_hex32, parse_socket_addr, parse_socket_peer_spec, parse_socket_peer_specs,

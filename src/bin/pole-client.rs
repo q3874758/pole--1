@@ -20,31 +20,26 @@ use pole_protocol_draft::{
     current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
-    effective_reward_adjustment_cap_bps, effective_reward_block_secs, print_epoch_commit_artifact_roots,
-    render_tokenomics_schedule,
-    effective_target_network_weight_units, export_governance_proposal_artifact,
-    export_governance_scheduled_artifact, format_usage_block, governance_index_artifact_path,
-    governance_summary_artifact_path, heartbeat_path, hex_32, hex_encode,
-    infer_reward_game_mapping, is_reward_config_subcommand, latest_local_epoch,
-    load_batches_for_epoch, load_cached_reward_game_mapping, load_config_and_epoch_arg,
-    load_status, looks_like_hex_32_arg, node_prepare, open_local_protocol_state,
-    parse_config_path_and_rest, parse_config_path_and_rest_with_known_first_arg,
-    parse_optional_u64_arg, parse_socket_peer_specs, parse_socket_topics, parse_vote_choice,
-    prepare_local_epoch, print_command_header, print_data_dir_path, print_governance_index,
-    print_governance_proposal_artifact, print_governance_scheduled_artifact,
-    print_governance_summary, print_path_entry, print_reward_adjustment_index,
-    print_reward_adjustment_summary, progress_path, prune_retention, recognition_cache_path,
+    effective_reward_adjustment_cap_bps, effective_reward_block_secs,
+    effective_target_network_weight_units, export_governance_proposal_artifact, format_usage_block,
+    heartbeat_path, hex_32, hex_encode, infer_reward_game_mapping, is_reward_config_subcommand,
+    latest_local_epoch, load_batches_for_epoch, load_cached_reward_game_mapping,
+    load_config_and_epoch_arg, load_status, looks_like_hex_32_arg, node_prepare,
+    open_local_protocol_state, parse_config_path_and_rest,
+    parse_config_path_and_rest_with_known_first_arg, parse_socket_peer_specs, parse_socket_topics,
+    parse_vote_choice, prepare_local_epoch, print_command_header, print_data_dir_path,
+    print_epoch_commit_artifact_roots, print_governance_proposal_artifact, print_path_entry,
+    progress_path, prune_retention, recognition_cache_path, render_tokenomics_schedule,
     resolve_challenge_window_blocks_arg, resolve_current_height_arg, resolve_epoch_id_arg,
     resolve_submission_height_arg, retention_book_path, reward_local_epoch,
     run_collect_tick_with_client, serve_control_api, settle_local_epoch, socket_peers_from_config,
     stable_hash32, store_cached_reward_game_mapping, submit_protocol_params_update_proposal,
     suggested_settlement_height, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceConfig,
-    ActivitySourceKind, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork,
-    GovernanceArtifactIndex, GovernanceArtifactSummary, KeyPair, LocalNodeProgress, NodeConfig,
-    P2pNetwork, ProtocolStore, ReqwestHttpTextClient, RewardAdjustmentArtifactSummary,
-    RewardSourceMode, ServiceRuntime, ServiceSnapshot, SocketP2pNetwork,
-    LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR,
+    ActivitySourceKind, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork, KeyPair,
+    LocalNodeProgress, NodeConfig, P2pNetwork, ReqwestHttpTextClient, RewardSourceMode,
+    ServiceRuntime, ServiceSnapshot, SocketP2pNetwork, LONG_TERM_TAIL_EMISSION_RATE_BPS,
+    LONG_TERM_TAIL_START_YEAR,
 };
 type ClientCommandHandler = pole_protocol_draft::CommandHandler;
 
@@ -1336,7 +1331,10 @@ fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         LONG_TERM_TAIL_EMISSION_RATE_BPS,
     );
 
-    print!("{}", render_tokenomics_schedule("PoLE tokenomics", &breakdown, &schedule));
+    print!(
+        "{}",
+        render_tokenomics_schedule("PoLE tokenomics", &breakdown, &schedule)
+    );
 
     Ok(())
 }
@@ -2146,105 +2144,23 @@ fn governance_show_proposal_cmd(args: &[String]) -> Result<(), Box<dyn std::erro
 }
 
 fn governance_show_scheduled_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 4 {
-        return Err("usage: pole-client governance-show-scheduled [config-path] [epoch-id]".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() > start_index + 1 {
-        return Err("usage: pole-client governance-show-scheduled [config-path] [epoch-id]".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let (_, state) = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?;
-    let epoch_id =
-        parse_optional_u64_arg(args, start_index)?.unwrap_or(state.current_epoch.saturating_add(1));
-
-    print_command_header("governance-show-scheduled", &config_path);
-    let scheduled_params = state.store.scheduled_protocol_params(&epoch_id);
-    let (artifact, artifact_path, index_path) = export_governance_scheduled_artifact(
-        &config,
-        state.current_epoch,
-        epoch_id,
-        scheduled_params,
-    )?;
-    print_governance_scheduled_artifact(&artifact);
-    println!("artifact_path={}", artifact_path.to_string_lossy());
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    Ok(())
+    pole_protocol_draft::governance_show_scheduled(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn governance_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client governance-show-index [config-path]".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() != start_index {
-        return Err("usage: pole-client governance-show-index [config-path]".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let index_path = governance_index_artifact_path(&config);
-    let index = GovernanceArtifactIndex::load_or_default_json(&index_path)?;
-
-    print_command_header("governance-show-index", &config_path);
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    print_governance_index(&index);
-    Ok(())
+    pole_protocol_draft::governance_show_index(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn governance_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client governance-show-summary [config-path]".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() != start_index {
-        return Err("usage: pole-client governance-show-summary [config-path]".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let summary_path = governance_summary_artifact_path(&config);
-    let summary = GovernanceArtifactSummary::load_or_default_json(&summary_path)?;
-
-    print_command_header("governance-show-summary", &config_path);
-    println!("artifact_summary_path={}", summary_path.to_string_lossy());
-    println!("artifact_index_path={}", summary.artifact_index_path);
-    print_governance_summary(&summary);
-    Ok(())
+    pole_protocol_draft::governance_show_summary(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn reward_adjustment_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client reward-adjustment-show-index [config-path]".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() != start_index {
-        return Err("usage: pole-client reward-adjustment-show-index [config-path]".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let index_path = pole_protocol_draft::reward_adjustment_index_path(&config);
-    let index =
-        pole_protocol_draft::RewardAdjustmentArtifactIndex::load_or_default_json(&index_path)?;
-
-    print_command_header("reward-adjustment-show-index", &config_path);
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    print_reward_adjustment_index(&index);
-    Ok(())
+    pole_protocol_draft::reward_adjustment_show_index(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn reward_adjustment_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client reward-adjustment-show-summary [config-path]".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() != start_index {
-        return Err("usage: pole-client reward-adjustment-show-summary [config-path]".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let summary_path = pole_protocol_draft::reward_adjustment_summary_path(&config);
-    let summary = RewardAdjustmentArtifactSummary::load_or_default_json(&summary_path)?;
-
-    print_command_header("reward-adjustment-show-summary", &config_path);
-    println!("artifact_summary_path={}", summary_path.to_string_lossy());
-    println!("artifact_index_path={}", summary.artifact_index_path);
-    print_reward_adjustment_summary(&summary);
-    Ok(())
+    pole_protocol_draft::reward_adjustment_show_summary(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn activity_sources_sync_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
