@@ -10,6 +10,15 @@ once a stable version is published.
 
 ### Removed — Codebase reduction (maintenance)
 
+- Removed the production-dead `src/node_anomaly.rs` module
+  (`detect_sample_anomalies` / `SampleAnomaly` / `SampleAnomalyKind`):
+  it had zero references outside its own definitions and unit test —
+  no pipeline, daemon, or CLI path ever called it. The whitepaper's
+  signature-anomaly check is implemented separately in
+  `node_verifier::verify_local_epoch`, so behaviour is unchanged.
+- Removed the unused `with_client` constructors on `RestClient` and
+  `TendermintRpc` (cosmos clients); both had no callers anywhere in
+  `src/` or `tests/` — the active path always uses `new()`.
 - Removed the unused `argon2` direct dependency (no reference anywhere
   in `src/`; the encrypted keystore uses `scrypt` for KDF, not Argon2)
   and the unused direct `prost` dependency (code only reaches protobuf

@@ -108,13 +108,6 @@ impl TendermintRpc {
         })
     }
 
-    pub fn with_client(base_url: impl Into<String>, client: Client) -> Self {
-        Self {
-            client,
-            base_url: base_url.into().trim_end_matches('/').to_string(),
-        }
-    }
-
     pub fn base_url(&self) -> &str {
         &self.base_url
     }

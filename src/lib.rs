@@ -15,7 +15,6 @@ mod governance_runtime;
 pub mod install_layout;
 mod json_file;
 pub mod node_aggregator;
-pub mod node_anomaly;
 pub mod node_cli_support;
 pub mod node_config;
 pub mod node_daemon;
@@ -98,7 +97,6 @@ pub use install_layout::{
 pub use node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
-pub use node_anomaly::{detect_sample_anomalies, SampleAnomaly, SampleAnomalyKind};
 pub use node_cli_support::{
     current_unix_millis, maybe_write_payload, parse_simulation_topology_args, print_batch_summary,
     source_kind_label,
