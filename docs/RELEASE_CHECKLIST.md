@@ -97,6 +97,17 @@
   - release.yml 三 job（release-linux / release-windows / release-github）全部 success；产出 14 资产：`pole-node_0.1.0_amd64.deb` + sha256、`PoLE-v0.1.0-x64-portable.zip` + sha256、`RELEASE_NOTES.md`、cyclonedx/spdx SBOM + cosign 签名（.sig/.pem）、`stable.json` + `.sig`/`.cert`。
   - 2026-08-17 正式发布（draft=false）：https://github.com/q3874758/pole--1/releases/tag/v0.1.0
 
+- [x] **5.8 发布后端到端验证（发现并修复 cosign ECDSA 签名 bug）** ✅ `17b39a7` `75272b5` `3d16a75`
+  - 验证方法：移走 in-tree `dist/release-manifests/stable.json` 强制走 GitHub 拉取分支，起 `control-api-serve` 后 `GET /api/update`——真实发布清单验签失败（`invalid_signature`）。
+  - 根因：`cosign sign-blob` keyless 默认产 **ECDSA P-256** 签名（`.sig` 为 72 字节 DER ASN.1，`.cert` 为 base64 编码的 PEM Fulcio 证书），而 `verify_cosign_keyless` 只支持 Ed25519（64 字节裸签名）→ 算法不匹配，所有真实发布签名验不过，更新通道对用户不可用。
+  - 修复（`src/signing.rs`）：按证书 SPKI 算法 OID 选择 Ed25519（1.3.101.112）或 ECDSA P-256（1.2.840.10045.2.1）；DER 签名用 `ecdsa::der` 解析；`.cert` 支持 base64(PEM) 双层解码。新增依赖 `p256` + `ecdsa`。
+  - 测试：`tests/signing_fixtures.rs` 用真实 v0.1.0 资产做 fixture（验签必须过、篡改必须败）；`tests/fixtures/** -text` 防 Windows checkout CRLF 破坏字节级签名。
+  - 复验：修复后 `GET /api/update` → `manifest_signed` ✅
+- [x] **5.9 v0.1.1 发布（含 ECDSA 修复，更新通道对真实用户可用）** ✅ `00fd3bc`（版本 bump）→ tag `v0.1.1` 于 `3d16a75`
+  - release.yml 增加：Stage release manifest 时用 `sed` 把 stable.json 的 `version` 改写为当前 tag 版本（`${VERSION#v}`）——否则每个 tag 发布出去的 manifest 恒为源码树版本 0.1.0，更新通道永不提示新版本。
+  - 2026-08-18 正式发布（draft=false）：https://github.com/q3874758/pole--1/releases/tag/v0.1.1
+  - 端到端复验：`latest/download/stable.json` 返回 version 0.1.1，`.sig`/`.cert` 公开可达，客户端 ECDSA 验签 `manifest_signed`，版本比较 0.1.1 > 0.1.0 → 更新通道可用 ✅
+
 ## 6. 🟡 文档清理（发布前顺手做）
 
 - [x] **6.1 删除 legacy/**（29 文件）— ✅ `77823ee`
@@ -123,4 +134,5 @@
 - [x] `cargo test --features integration` 全绿（poled 在 PATH）
 - [x] CI 五 job（rust ubuntu/windows、chain go+integration、license gate、emit sbom）+ release.yml 三 job 全绿（`e2f66f0`）
 - [x] 一次真实 `v0.1.0` 发布：zip + deb + SHA256 + cosign 签名 + stable.json 可被 `pole-client` 更新通道验证 ✅ 2026-08-17 发布 https://github.com/q3874758/pole--1/releases/tag/v0.1.0
+- [x] 更新通道端到端验证：真实发布清单（ECDSA P-256 签名）验签通过（`manifest_signed`），`latest/download/stable.json` 返回最新版本、侧车公开可达 ✅ 2026-08-18（详见 §5.8/5.9，修复 + v0.1.1 发布）
 - [x] Rust↔Go 奖励/发行/Merkle 对账 fixtures 全部通过
