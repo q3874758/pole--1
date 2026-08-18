@@ -8,6 +8,24 @@ once a stable version is published.
 
 ## [Unreleased]
 
+### Removed — Codebase reduction (maintenance)
+
+- Removed the libp2p diagnostic skeleton (`src/p2p_libp2p.rs`) and its
+  6 `libp2p-*` CLI commands; the active P2P runtime path is
+  `src/p2p.rs` (socket / filesystem / in-memory). Dropped the
+  `real-libp2p` feature and the `libp2p`, `libp2p-identity`,
+  `multiaddr` dependencies.
+- Removed the production-dead config validation module
+  (`src/config/`), its JSON schema, and the `jsonschema` dependency;
+  validation is covered by `NodeConfig::validate` /
+  `ProtocolParams::validate`.
+- Removed the now-unused `vendor/core2` patch and its integrity test.
+- Removed committed AI-tool work artifacts (`.mavis`, `.omx`,
+  `.harness`) and archived `deliverable-*.md` milestone reports.
+- Deduplicated three near-identical `NodeConfig` test fixtures.
+  Overall ~3,700 lines removed; `cargo test`, `cargo clippy -D
+  warnings`, and `cargo fmt` all stay green.
+
 ### Added — Production-Grade Hardening Pass
 
 This batch adds a complete production-readiness layer without
