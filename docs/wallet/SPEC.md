@@ -11,7 +11,7 @@ wallet/
 ├── lib.rs           # Public API
 ├── mnemonic.rs      # BIP39 24-word mnemonic generation/parsing
 ├── keys.rs          # Key derivation (BIP32) + ed25519 signing
-├── keystore.rs      # Encrypted file storage (AES-256-GCM + Argon2)
+├── keystore.rs      # Encrypted file storage (AES-256-GCM + scrypt)
 ├── commands.rs      # CLI subcommands
 └── error.rs         # WalletError type
 ```
@@ -34,7 +34,7 @@ JSON file stored at `<data_dir>/wallet/keystore.json`:
   "address": "2222...2222",
   "crypto": {
     "cipher": "aes-256-gcm",
-    "kdf": "argon2id",
+    "kdf": "scrypt",
     "salt": "<hex>",
     "nonce": "<hex>",
     "ciphertext": "<hex>"
@@ -60,8 +60,8 @@ JSON file stored at `<data_dir>/wallet/keystore.json`:
 
 ## Flow
 
-1. **Create**: 128-bit entropy → BIP39 mnemonic → BIP39 seed → PBKDF2/Argon2 → 32-byte master seed → BIP44 derivation (m/44'/501'/0'/0') → ed25519 keypair → keystore file (AES-256-GCM encrypted)
-2. **Sign**: Load keystore → Argon2 decrypt → derive key → ed25519 sign → return signature bytes
+1. **Create**: 128-bit entropy → BIP39 mnemonic → BIP39 seed → scrypt → 32-byte master seed → BIP44 derivation (m/44'/501'/0'/0') → ed25519 keypair → keystore file (AES-256-GCM encrypted)
+2. **Sign**: Load keystore → scrypt decrypt → derive key → ed25519 sign → return signature bytes
 3. **Recover**: Parse 24 words → verify checksum → derive seed → same flow as create
 
 ## Dependencies
@@ -69,7 +69,7 @@ JSON file stored at `<data_dir>/wallet/keystore.json`:
 - `mnemonic` or manual BIP39 implementation (English wordlist, 2048 words)
 - `ed25519-dalek` for signing
 - `aes-gcm` for encryption
-- `argon2` for KDF
+- `scrypt` for KDF
 - `zeroize` for secret clearing
 
 ## Integration

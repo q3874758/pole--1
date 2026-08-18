@@ -10,6 +10,14 @@ once a stable version is published.
 
 ### Removed — Codebase reduction (maintenance)
 
+- Removed the unused `argon2` direct dependency (no reference anywhere
+  in `src/`; the encrypted keystore uses `scrypt` for KDF, not Argon2)
+  and the unused direct `prost` dependency (code only reaches protobuf
+  types via `cosmos-sdk-proto`'s own re-export). `Cargo.lock` drops the
+  `argon2` dep subtree; `cargo build`, `cargo test`, and
+  `cargo clippy -D warnings` all stay green with behaviour unchanged.
+- Corrected the stale `docs/wallet/SPEC.md` references from Argon2 to
+  scrypt (the actual KDF), so docs match code and drop the removed dep.
 - Removed the libp2p diagnostic skeleton (`src/p2p_libp2p.rs`) and its
   6 `libp2p-*` CLI commands; the active P2P runtime path is
   `src/p2p.rs` (socket / filesystem / in-memory). Dropped the
