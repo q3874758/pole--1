@@ -25,52 +25,20 @@ once a stable version is published.
 - Deduplicated three near-identical `NodeConfig` test fixtures.
   Overall ~3,700 lines removed; `cargo test`, `cargo clippy -D
   warnings`, and `cargo fmt` all stay green.
+- Removed earlier (commit `288874a`) the unused `src/observability/`
+  and `src/schema/` modules (1,147 lines) — the now-stricken
+  Observability / Schema / Config-validation items that used to be
+  listed under `Added`. `src/observability/` + `src/config/` + the
+  JSON schema are all gone; the surviving hardening items below
+  (SBOM, crate metadata, release pipeline) remain live.
 
 ### Added — Production-Grade Hardening Pass
 
 This batch adds a complete production-readiness layer without
 changing protocol behaviour. Every change is backward compatible.
-
-#### Observability
-- `src/observability/metrics.rs` — in-process Prometheus registry
-  with 6 counters (`finalize_epoch_ok/err`, `claim_reward_ok/err`,
-  `rpc_retry`, `broadcast_bytes`). Lock-free `AtomicU64`, no
-  external dep.
-- `src/observability/server.rs` — blocking HTTP server on a single
-  TCP port exposing `GET /healthz` (liveness), `GET /readyz`
-  (chain-RPC reachability), and `GET /metrics` (Prometheus text
-  format 0.0.4).
-- `src/observability/mod.rs` — `init_tracing()` (pretty) and
-  `init_tracing_json()` (machine-readable) with `RUST_LOG` support
-  and idempotent guards.
-
-#### Schema versioning + migration
-- `src/schema/version.rs` — `Versioned<T>` envelope
-  (`{schema_version, data}`), `SchemaVersion` newtype, `CURRENT`
-  version constant.
-- `src/schema/migration.rs` — `MigrationRegistry` with chained
-  step functions, missing-path / step-failed error reporting,
-  step-to-immediate-next-version guard.
-- `src/schema/loader.rs` — `load_with_migrations` /
-  `save_versioned` file I/O with version auto-detection, "too new"
-  rejection, and a permissive default for legacy v0 raw payloads.
-- `src/schema/registries.rs` — concrete registries for
-  `LocalRetentionBook`, `NodeConfig`, and `LocalChainRuntimeState`.
-  Adding a new file type is three lines.
-
-#### Config validation
-- `config/node_config.schema.json` — Draft 2020-12 schema covering
-  every field of `NodeConfig` with patterns, ranges, and
-  `additionalProperties: false` on every object.
-- `src/config/validator.rs` — two-layer validation: schema check
-  via the embedded schema, plus semantic invariants (BPS sum ==
-  10000, target_app_ids non-empty, hex length cross-checks).
-- `src/config/validator.rs::schema_and_rust_struct_do_not_drift` —
-  drift detector that walks both the schema and a serialised
-  `NodeConfig::default()` and asserts the key sets match for the
-  top level plus `runtime`, `storage`, and `reward` (with
-  `$ref` resolution). Adding a field to Rust but not the schema
-  fails the test, and vice versa.
+(NOTE: the Observability, Schema versioning + migration and Config
+validation items that originally shipped here were later removed as
+unused — see the `### Removed` section for the cleanup commits.)
 
 #### SBOM + license compliance
 - `src/bin/pole-sbom.rs` — `pole-sbom` binary emitting

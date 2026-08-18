@@ -54,7 +54,7 @@ PoLE 是一个围绕 PC 游戏真实参与信号构建的专用应用型网络�
 | `node_rewards` | 奖励计算和分发 |
 | `node_verifier` | 本地 epoch 验证 |
 | `node_storage_audit` | 存储挑战执行 |
-| `p2p_libp2p` | LibP2P 网络实现 |
+| `p2p` | P2P 网络实现（socket / filesystem / in-memory） |
 | `wallet` | 密钥管理、密钥库、签名 |
 | `governance_runtime` | 治理提案和投票 |
 

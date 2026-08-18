@@ -175,7 +175,7 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `src/node_verifier.rs` | 挑战验证 |
 | `src/node_storage_audit.rs` | 存储挑战 |
 | `src/node_daemon.rs` | 节点运行时 |
-| `src/p2p_libp2p.rs` | P2P 网络 |
+| `src/p2p.rs` | P2P 网络 |
 | `src/governance_runtime.rs` | 治理执行 |
 | `src/wallet/` | 密钥管理和签名 |
 | `src/tokenomics.rs` | 代币经济参数 |
