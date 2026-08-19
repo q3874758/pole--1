@@ -22,6 +22,11 @@ once a stable version is published.
 - Net reduction of ~210 duplicated lines across the two binaries;
   `cargo test`, `cargo clippy --all-targets --features integration`,
   and `cargo fmt` all stay green.
+- Extended the same unification to `governance-vote` and
+  `governance-show-proposal` (shared `resolve_config_and_header_with_known_first`
+  matches a leading 64-hex proposal id before falling back to config-path).
+  Combined, the shared command bodies cover 8 commands and remove ~230
+  further duplicated lines.
 
 ### Removed — Codebase reduction (maintenance)
 

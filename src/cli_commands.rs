@@ -111,6 +111,103 @@ pub fn resolve_config_and_header(
     Ok((config_path, config, start_index))
 }
 
+/// Like [`resolve_config_and_header`] but treats a leading argument that
+/// matches `is_first_arg` as a business parameter (e.g. a 64-hex
+/// proposal id) rather than a config path. Used by
+/// `governance-vote`, `governance-show-proposal`, and the
+/// `governance-propose-*` commands.
+pub fn resolve_config_and_header_with_known_first(
+    args: &[String],
+    command_name: &str,
+    bin_name: &str,
+    default_config_path: &str,
+    is_first_arg: impl FnOnce(&str) -> bool,
+) -> Result<(PathBuf, NodeConfig, usize), Box<dyn std::error::Error>> {
+    use crate::cli_support::parse_config_path_and_rest_with_known_first_arg;
+    let (config_path_arg, start_index) =
+        parse_config_path_and_rest_with_known_first_arg(args, 2, default_config_path, is_first_arg);
+    let (config_path, config) =
+        NodeConfig::load_json_with_runtime_paths(config_path_arg).map_err(|e| e.to_string())?;
+    crate::cli_support::print_command_header_for(bin_name, command_name, &config_path);
+    Ok((config_path, config, start_index))
+}
+
+/// `governance-vote [config-path] <proposal-id-hex> <yes|no|abstain>
+/// <voting-power>` — shared by both binaries.
+pub fn governance_vote(
+    args: &[String],
+    bin_name: &str,
+    default_config_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (_config_path, config, start_index) = resolve_config_and_header_with_known_first(
+        args,
+        "governance-vote",
+        bin_name,
+        default_config_path,
+        crate::cli_support::looks_like_hex_32_arg,
+    )?;
+    if args.len() != start_index + 3 {
+        return Err(format!(
+            "usage: {bin_name} governance-vote [config-path] <proposal-id-hex> <yes|no|abstain> <voting-power>"
+        ).into());
+    }
+    let proposal_id = crate::cli_parsing::decode_hex32(&args[start_index], "proposal_id")?;
+    let choice = crate::cli_output::parse_vote_choice(&args[start_index + 1])?;
+    let voting_power: u128 = args[start_index + 2].parse()?;
+    let (effects, scheduled) = crate::governance_runtime::execute_governance_vote(
+        &config,
+        proposal_id,
+        choice,
+        voting_power,
+    )?;
+    println!("proposal_id={}", crate::node_config::hex_32(proposal_id));
+    println!("choice={:?}", choice);
+    println!("voting_power={voting_power}");
+    println!("effect_count={}", effects.len());
+    println!("scheduled_next_epoch={scheduled}");
+    Ok(())
+}
+
+/// `governance-show-proposal [config-path] <proposal-id-hex>` — print
+/// a governance proposal artifact. Shared by both binaries.
+pub fn governance_show_proposal(
+    args: &[String],
+    bin_name: &str,
+    default_config_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (_config_path, config, start_index) = resolve_config_and_header_with_known_first(
+        args,
+        "governance-show-proposal",
+        bin_name,
+        default_config_path,
+        crate::cli_support::looks_like_hex_32_arg,
+    )?;
+    if args.len() != start_index + 1 {
+        return Err(format!(
+            "usage: {bin_name} governance-show-proposal [config-path] <proposal-id-hex>"
+        )
+        .into());
+    }
+    let proposal_id = crate::cli_parsing::decode_hex32(&args[start_index], "proposal_id")?;
+    let (_, state) = crate::node_settlement::open_local_protocol_state(
+        &config,
+        config.runtime.challenge_window_blocks,
+    )?;
+    let Some((artifact, artifact_path, index_path)) =
+        crate::node_settlement::export_governance_proposal_artifact(
+            &config,
+            &state.store,
+            &proposal_id,
+        )?
+    else {
+        return Err("governance params update proposal not found".into());
+    };
+    crate::cli_output::print_governance_proposal_artifact(&artifact);
+    println!("artifact_path={}", artifact_path.to_string_lossy());
+    println!("artifact_index_path={}", index_path.to_string_lossy());
+    Ok(())
+}
+
 /// `governance-show-index [config-path]` — print the governance
 /// artifact index. Shared by both binaries.
 pub fn governance_show_index(

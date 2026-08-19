@@ -54,9 +54,11 @@ pub use activity_collector::{
     LiveActivityCollector, ThirdPartyJsonCollector,
 };
 pub use cli_commands::{
-    governance_show_index, governance_show_scheduled, governance_show_summary,
-    print_epoch_commit_artifact_roots, render_tokenomics_schedule, resolve_config_and_header,
-    reward_adjustment_show_index, reward_adjustment_show_summary,
+    governance_show_index, governance_show_proposal, governance_show_scheduled,
+    governance_show_summary, governance_vote, print_epoch_commit_artifact_roots,
+    render_tokenomics_schedule, resolve_config_and_header,
+    resolve_config_and_header_with_known_first, reward_adjustment_show_index,
+    reward_adjustment_show_summary,
 };
 pub use cli_output::{
     dispatch_command, format_usage_block, parse_vote_choice, print_governance_index,

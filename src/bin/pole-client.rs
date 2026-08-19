@@ -21,15 +21,14 @@ use pole_protocol_draft::{
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
     effective_reward_adjustment_cap_bps, effective_reward_block_secs,
-    effective_target_network_weight_units, export_governance_proposal_artifact, format_usage_block,
-    heartbeat_path, hex_32, hex_encode, infer_reward_game_mapping, is_reward_config_subcommand,
-    latest_local_epoch, load_batches_for_epoch, load_cached_reward_game_mapping,
-    load_config_and_epoch_arg, load_status, looks_like_hex_32_arg, node_prepare,
-    open_local_protocol_state, parse_config_path_and_rest,
-    parse_config_path_and_rest_with_known_first_arg, parse_socket_peer_specs, parse_socket_topics,
-    parse_vote_choice, prepare_local_epoch, print_command_header, print_data_dir_path,
-    print_epoch_commit_artifact_roots, print_governance_proposal_artifact, print_path_entry,
-    progress_path, prune_retention, recognition_cache_path, render_tokenomics_schedule,
+    effective_target_network_weight_units, format_usage_block, heartbeat_path, hex_32, hex_encode,
+    infer_reward_game_mapping, is_reward_config_subcommand, latest_local_epoch,
+    load_batches_for_epoch, load_cached_reward_game_mapping, load_config_and_epoch_arg,
+    load_status, looks_like_hex_32_arg, node_prepare, open_local_protocol_state,
+    parse_config_path_and_rest, parse_config_path_and_rest_with_known_first_arg,
+    parse_socket_peer_specs, parse_socket_topics, prepare_local_epoch, print_command_header,
+    print_data_dir_path, print_epoch_commit_artifact_roots, print_path_entry, progress_path,
+    prune_retention, recognition_cache_path, render_tokenomics_schedule,
     resolve_challenge_window_blocks_arg, resolve_current_height_arg, resolve_epoch_id_arg,
     resolve_submission_height_arg, retention_book_path, reward_local_epoch,
     run_collect_tick_with_client, serve_control_api, settle_local_epoch, socket_peers_from_config,
@@ -2081,66 +2080,11 @@ fn governance_propose_app_weight_cmd(args: &[String]) -> Result<(), Box<dyn std:
 }
 
 fn governance_vote_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 5 && args.len() != 6 {
-        return Err("usage: pole-client governance-vote [config-path] <proposal-id-hex> <yes|no|abstain> <voting-power>".into());
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest_with_known_first_arg(
-        args,
-        2,
-        DEFAULT_CONFIG_PATH,
-        looks_like_hex_32_arg,
-    );
-    if args.len() != start_index + 3 {
-        return Err("usage: pole-client governance-vote [config-path] <proposal-id-hex> <yes|no|abstain> <voting-power>".into());
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let proposal_id = decode_hex32(&args[start_index], "proposal_id")?;
-    let choice = parse_vote_choice(&args[start_index + 1])?;
-    let voting_power: u128 = args[start_index + 2].parse()?;
-
-    let (effects, scheduled) =
-        pole_protocol_draft::execute_governance_vote(&config, proposal_id, choice, voting_power)?;
-
-    print_command_header("governance-vote", &config_path);
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("choice={:?}", choice);
-    println!("voting_power={voting_power}");
-    println!("effect_count={}", effects.len());
-    println!("scheduled_next_epoch={scheduled}");
-    Ok(())
+    pole_protocol_draft::governance_vote(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn governance_show_proposal_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 3 && args.len() != 4 {
-        return Err(
-            "usage: pole-client governance-show-proposal [config-path] <proposal-id-hex>".into(),
-        );
-    }
-    let (config_path_arg, start_index) = parse_config_path_and_rest_with_known_first_arg(
-        args,
-        2,
-        DEFAULT_CONFIG_PATH,
-        looks_like_hex_32_arg,
-    );
-    if args.len() != start_index + 1 {
-        return Err(
-            "usage: pole-client governance-show-proposal [config-path] <proposal-id-hex>".into(),
-        );
-    }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
-    let proposal_id = decode_hex32(&args[start_index], "proposal_id")?;
-    let (_, state) = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?;
-    let Some((artifact, artifact_path, index_path)) =
-        export_governance_proposal_artifact(&config, &state.store, &proposal_id)?
-    else {
-        return Err("governance params update proposal not found".into());
-    };
-
-    print_command_header("governance-show-proposal", &config_path);
-    print_governance_proposal_artifact(&artifact);
-    println!("artifact_path={}", artifact_path.to_string_lossy());
-    println!("artifact_index_path={}", index_path.to_string_lossy());
-    Ok(())
+    pole_protocol_draft::governance_show_proposal(args, "client", DEFAULT_CONFIG_PATH)
 }
 
 fn governance_show_scheduled_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
