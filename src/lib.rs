@@ -52,6 +52,10 @@ pub use activity_collector::{
     CommunityJsonCollector, EaLiveCollector, EpicLiveCollector, GogLiveCollector,
     LiveActivityCollector, ThirdPartyJsonCollector,
 };
+pub use app_paths::{
+    current_platform, normalize_path, portable_layout_for_config, resolve_install_layout,
+    resolve_runtime_data_dir, runtime_layout_for_config, InstallLayout, InstallMode, Platform,
+};
 pub use cli_commands::{
     governance_show_index, governance_show_proposal, governance_show_scheduled,
     governance_show_summary, governance_vote, print_epoch_commit_artifact_roots,
@@ -97,10 +101,6 @@ pub use control_api_types::{
 };
 pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};
-pub use app_paths::{
-    current_platform, normalize_path, portable_layout_for_config, resolve_install_layout,
-    resolve_runtime_data_dir, runtime_layout_for_config, InstallLayout, InstallMode, Platform,
-};
 pub use node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
