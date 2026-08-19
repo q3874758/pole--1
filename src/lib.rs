@@ -13,8 +13,7 @@ pub mod cosmos;
 pub mod executor;
 pub mod genesis_builder;
 mod governance_runtime;
-pub mod install_layout;
-mod json_file;
+pub mod json_file;
 pub mod node_aggregator;
 pub mod node_cli_support;
 pub mod node_config;
@@ -98,7 +97,7 @@ pub use control_api_types::{
 };
 pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};
-pub use install_layout::{
+pub use app_paths::{
     current_platform, normalize_path, portable_layout_for_config, resolve_install_layout,
     resolve_runtime_data_dir, runtime_layout_for_config, InstallLayout, InstallMode, Platform,
 };
