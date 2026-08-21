@@ -10,6 +10,75 @@ use std::path::{Path, PathBuf};
 /// Default client config path, used by client-side command handlers.
 pub const DEFAULT_CONFIG_PATH: &str = "./node.json";
 
+/// Infer the running binary label from `argv[0]` so shared handlers keep
+/// their `PoLE <client|node|pole>` header consistent whether they run as a
+/// standalone `pole-client`/`pole-node` executable or the unified `pole`.
+pub fn infer_bin_label() -> &'static str {
+    let name = match std::env::args().next() {
+        Some(arg0) => {
+            let path = Path::new(&arg0);
+            match path.file_stem() {
+                Some(stem) => stem.to_string_lossy().into_owned(),
+                None => String::new(),
+            }
+        }
+        None => String::new(),
+    };
+    if name.contains("node") {
+        "node"
+    } else if name.contains("client") {
+        "client"
+    } else {
+        "pole"
+    }
+}
+
+/// `governance-vote [config-path] <proposal-id-hex> <yes|no|abstain>
+/// <voting-power>` — shared by both binaries.
+pub fn governance_vote_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::governance_vote(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `governance-show-proposal [config-path] <proposal-id-hex>` — shared.
+pub fn governance_show_proposal_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::governance_show_proposal(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `governance-show-scheduled [config-path] [epoch-id]` — shared.
+pub fn governance_show_scheduled_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::governance_show_scheduled(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `governance-show-index [config-path]` — shared.
+pub fn governance_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::governance_show_index(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `governance-show-summary [config-path]` — shared.
+pub fn governance_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::governance_show_summary(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `reward-adjustment-show-index [config-path]` — shared.
+pub fn reward_adjustment_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::reward_adjustment_show_index(args, infer_bin_label(), DEFAULT_CONFIG_PATH)
+}
+
+/// `reward-adjustment-show-summary [config-path]` — shared.
+pub fn reward_adjustment_show_summary_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    crate::cli_commands::reward_adjustment_show_summary(
+        args,
+        infer_bin_label(),
+        DEFAULT_CONFIG_PATH,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// wallet commands
+// ---------------------------------------------------------------------------
+
 /// `wallet-create [data-dir] [password] [comment]` — create a new wallet.
 pub fn wallet_create_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = args.get(2).map(PathBuf::from).unwrap_or_else(|| {

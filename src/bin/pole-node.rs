@@ -7,6 +7,9 @@ use pole_protocol_draft::bin_commands::{
     governance_propose_app_weight_cmd, governance_propose_params_cmd,
     governance_propose_retention_cmd, governance_propose_reward_tuning_cmd,
     governance_propose_slow_params_cmd, governance_propose_tier_weights_cmd,
+    governance_show_index_cmd, governance_show_proposal_cmd, governance_show_scheduled_cmd,
+    governance_show_summary_cmd, governance_vote_cmd, reward_adjustment_show_index_cmd,
+    reward_adjustment_show_summary_cmd,
 };
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
@@ -575,34 +578,6 @@ fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         render_tokenomics_schedule("PoLE node tokenomics", &breakdown, &schedule)
     );
     Ok(())
-}
-
-fn governance_vote_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::governance_vote(args, "node", "./node.json")
-}
-
-fn governance_show_proposal_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::governance_show_proposal(args, "node", "./node.json")
-}
-
-fn governance_show_scheduled_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::governance_show_scheduled(args, "node", "./node.json")
-}
-
-fn governance_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::governance_show_index(args, "node", "./node.json")
-}
-
-fn governance_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::governance_show_summary(args, "node", "./node.json")
-}
-
-fn reward_adjustment_show_index_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::reward_adjustment_show_index(args, "node", "./node.json")
-}
-
-fn reward_adjustment_show_summary_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    pole_protocol_draft::reward_adjustment_show_summary(args, "node", "./node.json")
 }
 
 fn print_node_status_summary(summary: &pole_protocol_draft::NodeStatusSummary) {
