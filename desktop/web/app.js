@@ -235,6 +235,41 @@ async function runServiceAction(action) {
   }
 }
 
+async function runUpdateAction(action) {
+  els.serviceActionResult.textContent = `正在执行更新操作 ${action} ...`;
+  try {
+    const payload =
+      action === "commit-install"
+        ? { stop_service_before_install: true, start_service_after_install: true }
+        : {};
+    const result = await requestJson(`/api/update/${action}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    els.serviceActionResult.textContent = JSON.stringify(result, null, 2);
+    await refreshUpdateStatus();
+    await refreshDashboard();
+  } catch (error) {
+    els.serviceActionResult.textContent = `更新操作失败: ${error.message}`;
+  }
+}
+
+async function refreshUpdateStatus() {
+  try {
+    const result = await requestJson("/api/update");
+    if (!result || !result.update) return;
+    const u = result.update;
+    setText(els.updateCurrentVersion, u.current_version);
+    setText(els.updateAvailable, u.update_available ? "是" : "否");
+    els.updateVersionBadge.textContent = u.update_available ? "有可用更新" : "当前";
+    if (u.latest_available_version && u.latest_available_version !== u.current_version) {
+      els.serviceActionResult.textContent = `最新可用版本: ${u.latest_available_version} (当前 ${u.current_version})`;
+    }
+  } catch (error) {
+    els.lastRefresh.textContent = `更新状态刷新失败: ${error.message}`;
+  }
+}
+
 async function refreshDashboard() {
   try {
     const data = await requestJson("/api/dashboard");
@@ -303,6 +338,12 @@ function initEventListeners() {
   document.querySelectorAll("[data-service-action]").forEach((button) => {
     button.addEventListener("click", () => {
       runServiceAction(button.dataset.serviceAction);
+    });
+  });
+
+  document.querySelectorAll("[data-update-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      runUpdateAction(button.dataset.updateAction);
     });
   });
 }
