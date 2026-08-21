@@ -459,7 +459,7 @@ impl InMemoryP2pNetwork {
         if !self.peers.contains(&peer_id) {
             return Err(P2pError::UnknownPeer(peer_id));
         }
-        Ok(self.inboxes.entry(peer_id).or_default().drain(..).collect())
+        Ok(std::mem::take(self.inboxes.entry(peer_id).or_default()))
     }
 
     pub fn advertise_payload(
