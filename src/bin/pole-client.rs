@@ -21,33 +21,30 @@ use pole_protocol_draft::bin_commands::{
     governance_propose_thresholds_cmd, governance_propose_tier_weights_cmd,
     governance_show_index_cmd, governance_show_proposal_cmd, governance_show_scheduled_cmd,
     governance_show_summary_cmd, governance_vote_cmd, reward_adjustment_show_index_cmd,
-    reward_adjustment_show_summary_cmd, wallet_address_cmd, wallet_create_cmd, wallet_recover_cmd,
-    wallet_set_reward_address_cmd,
+    reward_adjustment_show_summary_cmd, tokenomics_cmd, wallet_address_cmd, wallet_create_cmd,
+    wallet_recover_cmd, wallet_set_reward_address_cmd,
 };
 use pole_protocol_draft::{
-    aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
-    build_epoch_commit_from_local_data, build_inmemory_simulation_network, chain_bridge,
-    current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
-    detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
-    effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
-    effective_reward_adjustment_cap_bps, effective_reward_block_secs,
-    effective_target_network_weight_units, format_usage_block, heartbeat_path, hex_32, hex_encode,
-    infer_reward_game_mapping, is_reward_config_subcommand, latest_local_epoch,
-    load_batches_for_epoch, load_cached_reward_game_mapping, load_config_and_epoch_arg,
-    load_status, node_prepare, parse_config_path_and_rest,
+    aggregate_local_epoch, build_epoch_commit_from_local_data, build_inmemory_simulation_network,
+    chain_bridge, current_players_url, decode_hex32, default_data_dir_for_config,
+    detect_active_game_processes, detect_foreground_process_name, dispatch_command,
+    effective_challenge_window_blocks, effective_collect_interval_secs, effective_install_layout,
+    effective_player_block_reward, effective_reward_adjustment_cap_bps,
+    effective_reward_block_secs, effective_target_network_weight_units, format_usage_block,
+    heartbeat_path, hex_32, hex_encode, infer_reward_game_mapping, is_reward_config_subcommand,
+    latest_local_epoch, load_batches_for_epoch, load_cached_reward_game_mapping,
+    load_config_and_epoch_arg, load_status, node_prepare, parse_config_path_and_rest,
     parse_config_path_and_rest_with_known_first_arg, parse_socket_peer_specs, parse_socket_topics,
     prepare_local_epoch, print_command_header, print_data_dir_path,
     print_epoch_commit_artifact_roots, print_path_entry, progress_path, prune_retention,
-    recognition_cache_path, render_tokenomics_schedule, resolve_challenge_window_blocks_arg,
-    resolve_current_height_arg, resolve_epoch_id_arg, resolve_submission_height_arg,
-    retention_book_path, reward_local_epoch, run_collect_tick_with_client, serve_control_api,
-    settle_local_epoch, socket_peers_from_config, stable_hash32, store_cached_reward_game_mapping,
-    suggested_settlement_height, summarize_collect_loop_with_client,
-    summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceConfig,
-    ActivitySourceKind, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork, KeyPair,
-    LocalNodeProgress, NodeConfig, P2pNetwork, ReqwestHttpTextClient, RewardSourceMode,
-    ServiceRuntime, ServiceSnapshot, SocketP2pNetwork, LONG_TERM_TAIL_EMISSION_RATE_BPS,
-    LONG_TERM_TAIL_START_YEAR,
+    recognition_cache_path, resolve_challenge_window_blocks_arg, resolve_current_height_arg,
+    resolve_epoch_id_arg, resolve_submission_height_arg, retention_book_path, reward_local_epoch,
+    run_collect_tick_with_client, serve_control_api, settle_local_epoch, socket_peers_from_config,
+    stable_hash32, store_cached_reward_game_mapping, suggested_settlement_height,
+    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
+    verify_local_epoch, ActivitySourceConfig, ActivitySourceKind, CollectLoopSummary,
+    CollectTickResult, FilesystemP2pNetwork, KeyPair, LocalNodeProgress, NodeConfig, P2pNetwork,
+    ReqwestHttpTextClient, RewardSourceMode, ServiceRuntime, ServiceSnapshot, SocketP2pNetwork,
 };
 type ClientCommandHandler = pole_protocol_draft::CommandHandler;
 
@@ -1318,31 +1315,6 @@ fn doctor_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-
-    Ok(())
-}
-
-fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-client tokenomics [years]".into());
-    }
-
-    let years = args
-        .get(2)
-        .map(|value| value.parse::<u32>())
-        .transpose()?
-        .unwrap_or(10);
-    let breakdown = allocation_breakdown();
-    let schedule = annual_emission_schedule_with_tail(
-        years,
-        LONG_TERM_TAIL_START_YEAR,
-        LONG_TERM_TAIL_EMISSION_RATE_BPS,
-    );
-
-    print!(
-        "{}",
-        render_tokenomics_schedule("PoLE tokenomics", &breakdown, &schedule)
-    );
 
     Ok(())
 }

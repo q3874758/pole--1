@@ -9,11 +9,10 @@ use pole_protocol_draft::bin_commands::{
     governance_propose_slow_params_cmd, governance_propose_tier_weights_cmd,
     governance_show_index_cmd, governance_show_proposal_cmd, governance_show_scheduled_cmd,
     governance_show_summary_cmd, governance_vote_cmd, reward_adjustment_show_index_cmd,
-    reward_adjustment_show_summary_cmd,
+    reward_adjustment_show_summary_cmd, tokenomics_cmd,
 };
 use pole_protocol_draft::{
-    aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
-    build_epoch_commit_from_local_data, build_inmemory_simulation_network,
+    aggregate_local_epoch, build_epoch_commit_from_local_data, build_inmemory_simulation_network,
     build_verification_credentials, collect_configured_activity_source,
     cosmos::{
         address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
@@ -25,16 +24,15 @@ use pole_protocol_draft::{
     parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
     parse_socket_topics, parse_third_party_activity_response, prepare_local_epoch,
-    print_batch_summary, print_epoch_commit_artifact_roots, prune_retention,
-    render_tokenomics_schedule, reward_local_epoch, run_collect_tick_with_client,
-    run_collect_tick_with_client_and_network, save_verification_credentials,
-    socket_peers_from_config, source_kind_label, summarize_collect_loop_with_client,
-    summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
-    BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork, HttpTextClient,
-    InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork,
-    P2pSimulationConfig, P2pTopic, ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork,
-    SocketPeerProfile, SteamCurrentPlayersSample, LONG_TERM_TAIL_EMISSION_RATE_BPS,
-    LONG_TERM_TAIL_START_YEAR,
+    print_batch_summary, print_epoch_commit_artifact_roots, prune_retention, reward_local_epoch,
+    run_collect_tick_with_client, run_collect_tick_with_client_and_network,
+    save_verification_credentials, socket_peers_from_config, source_kind_label,
+    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
+    verify_local_epoch, ActivitySourceKind, BatchBuilder, CollectLoopSummary, CollectTickResult,
+    FilesystemP2pNetwork, HttpTextClient, InMemoryP2pNetwork, LocalNodeProgress,
+    LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
+    ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork, SocketPeerProfile,
+    SteamCurrentPlayersSample,
 };
 type NodeCommandHandler = pole_protocol_draft::CommandHandler;
 const NODE_USAGE_COMMANDS: &[&str] = &[
@@ -553,30 +551,6 @@ fn status(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         effective_collect_interval_secs(&config, &active_game_processes)
     );
     print_node_storage_and_network_status(&summary);
-    Ok(())
-}
-
-fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 3 {
-        return Err("usage: pole-node tokenomics [years]".into());
-    }
-
-    let years = args
-        .get(2)
-        .map(|value| value.parse::<u32>())
-        .transpose()?
-        .unwrap_or(10);
-    let breakdown = allocation_breakdown();
-    let schedule = annual_emission_schedule_with_tail(
-        years,
-        LONG_TERM_TAIL_START_YEAR,
-        LONG_TERM_TAIL_EMISSION_RATE_BPS,
-    );
-
-    print!(
-        "{}",
-        render_tokenomics_schedule("PoLE node tokenomics", &breakdown, &schedule)
-    );
     Ok(())
 }
 

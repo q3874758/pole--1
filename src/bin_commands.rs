@@ -75,6 +75,38 @@ pub fn reward_adjustment_show_summary_cmd(
     )
 }
 
+/// `tokenomics [years]` — print the tokenomics allocation and emission
+/// schedule. Title keeps the existing per-binary label so standalone
+/// `pole-node` output stays stable.
+pub fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() > 3 {
+        return Err("usage: pole tokenomics [years]".into());
+    }
+
+    let years = args
+        .get(2)
+        .map(|value| value.parse::<u32>())
+        .transpose()?
+        .unwrap_or(10);
+    let breakdown = crate::allocation_breakdown();
+    let schedule = crate::annual_emission_schedule_with_tail(
+        years,
+        crate::LONG_TERM_TAIL_START_YEAR,
+        crate::LONG_TERM_TAIL_EMISSION_RATE_BPS,
+    );
+
+    let title = if infer_bin_label() == "node" {
+        "PoLE node tokenomics"
+    } else {
+        "PoLE tokenomics"
+    };
+    print!(
+        "{}",
+        crate::render_tokenomics_schedule(title, &breakdown, &schedule)
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // wallet commands
 // ---------------------------------------------------------------------------
