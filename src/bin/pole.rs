@@ -1,11 +1,13 @@
 #![windows_subsystem = "windows"]
 
 use std::env;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
+/// Unified `pole` executable.
+///
+/// Dispatches in-process to the shared `cli_client` / `cli_node` library
+/// modules. No longer spawns `pole-client.exe` / `pole-node.exe` — all
+/// command logic runs inside this single binary.
 fn main() {
     let args: Vec<String> = env::args().collect();
     let program_path = env::args().next().map(PathBuf::from).unwrap();
@@ -43,32 +45,43 @@ fn main() {
         return;
     };
 
-    let binary_dir = program_path.parent().unwrap();
-
-    let exit_code = match mode {
-        "client" => run_forward(binary_dir, "pole-client.exe", &args),
-        "node" => run_forward(binary_dir, "pole-node.exe", &args),
+    // Rebase argv so the selected mode's dispatcher sees `<cmd>` at index 1.
+    //
+    //   pole client init ...  -> [pole, init, ...]   (strip the "client" token)
+    //   pole-client  init ... -> [pole-client, init, ...]  (no mode token)
+    let forwarded: Vec<String> = match mode {
+        "client" => rebase_args(&args, mode),
+        "node" => rebase_args(&args, mode),
         _ => unreachable!(),
     };
 
-    std::process::exit(exit_code);
+    let result = match mode {
+        "client" => pole_protocol_draft::cli_client::run(&forwarded),
+        "node" => pole_protocol_draft::cli_node::run(&forwarded),
+        _ => unreachable!(),
+    };
+
+    if let Err(err) = result {
+        eprintln!("pole error: {err}");
+        std::process::exit(1);
+    }
 }
 
-fn run_forward(binary_dir: &Path, exe_name: &str, args: &[String]) -> i32 {
-    let mut command = Command::new(binary_dir.join(exe_name));
-    command.args(&args[1..]);
-    #[cfg(windows)]
-    {
-        // CREATE_NO_WINDOW: keep the forwarded binary from popping a
-        // console window when pole.exe is launched from a GUI context.
-        command.creation_flags(0x08000000);
-    }
-    match command.spawn() {
-        Ok(mut c) => c.wait().map(|s| s.code().unwrap_or(1)).unwrap_or(1),
-        Err(e) => {
-            eprintln!("Failed to run {}: {}", exe_name, e);
-            1
-        }
+/// Build the argument vector handed to the mode's dispatcher.
+///
+/// When invoked as `pole client|node <cmd> ...`, the mode token at index 1
+/// is stripped so the underlying `dispatch_command` still reads `<cmd>` from
+/// `args[1]`. When invoked via argv0 (`pole-client <cmd> ...`) no stripping
+/// happens.
+fn rebase_args(args: &[String], mode: &str) -> Vec<String> {
+    let program_name_stripped_mode = matches!(args.get(1), Some(first) if first == mode);
+    if program_name_stripped_mode {
+        let mut rebased = Vec::with_capacity(args.len() - 1);
+        rebased.push(args[0].clone());
+        rebased.extend_from_slice(&args[2..]);
+        rebased
+    } else {
+        args.to_vec()
     }
 }
 
