@@ -8,6 +8,20 @@ once a stable version is published.
 
 ## [Unreleased]
 
+### Changed — Unified `pole` executable (maintenance)
+
+- Merged the `pole-genesis` and `pole-sbom` command logic into the
+  unified `pole.exe` dispatcher (in addition to the earlier
+  `pole-client` / `pole-node` merge): all command logic now lives in
+  shared library modules (`cli_client` / `cli_node` / `cli_genesis` /
+  `cli_sbom`), and `pole [client|node|genesis|sbom] <cmd>` dispatches
+  in-process. The standalone `pole-genesis` / `pole-sbom` binaries
+  remain as thin shims for compatibility.
+- Fixed `src/lib.rs` not exporting `cli_sbom` (broke compilation of the
+  unified dispatcher); fixed `clippy::drain_collect` in `src/p2p.rs`
+  (`mem::take`); release packaging now includes the unified `pole`
+  binary in the Windows portable zip and Linux DEB.
+
 ### Changed — CLI command-body unification (maintenance)
 
 - Unified the duplicate `governance-show-*` / `reward-adjustment-show-*`

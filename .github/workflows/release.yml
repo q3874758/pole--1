@@ -28,7 +28,7 @@ jobs:
       - name: Build release binaries
         run: |
           cargo build --release --manifest-path Cargo.toml
-          strip target/release/pole-node target/release/pole-client
+          strip target/release/pole target/release/pole-node target/release/pole-client target/release/pole-genesis target/release/pole-sbom
 
       - name: Build DEB package
         run: |
@@ -41,6 +41,7 @@ jobs:
 
           cp target/release/pole-node dist/packages/deb-build/opt/pole/
           cp target/release/pole-client dist/packages/deb-build/opt/pole/
+          cp target/release/pole dist/packages/deb-build/opt/pole/
           cp packaging/linux/deb/pole-node.service dist/packages/deb-build/etc/systemd/system/
           cp packaging/linux/deb/node.json dist/packages/deb-build/etc/pole/node.json
           cp packaging/linux/deb/control dist/packages/deb-build/DEBIAN/
@@ -83,7 +84,7 @@ jobs:
       - name: Create portable zip
         run: |
           New-Item -ItemType Directory -Force -Path dist/packages | Out-Null
-          Compress-Archive -Path target/release/pole-client.exe,target/release/pole-node.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
+          Compress-Archive -Path target/release/pole.exe,target/release/pole-client.exe,target/release/pole-node.exe,target/release/pole-genesis.exe,target/release/pole-sbom.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums
         run: |
