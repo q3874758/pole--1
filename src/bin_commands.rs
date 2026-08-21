@@ -86,3 +86,426 @@ pub fn wallet_set_reward_address_cmd(args: &[String]) -> Result<(), Box<dyn std:
     println!("config={}", config_path.display());
     Ok(())
 }
+
+/// `governance-propose-params [config-path] <proposal-id-hex> <effective-epoch>
+/// <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]`
+/// — propose an emission/reward params update.
+pub fn governance_propose_params_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 6 && args.len() != 7 && args.len() != 8 && args.len() != 9 {
+        return Err("usage: pole-client governance-propose-params [config-path] <proposal-id-hex> <effective-epoch> <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 4 && args.len() != start_index + 6 {
+        return Err("usage: pole-client governance-propose-params [config-path] <proposal-id-hex> <effective-epoch> <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let emission_year: u32 = args[start_index + 2].parse()?;
+    let effective_player_block_reward: u128 = args[start_index + 3].parse()?;
+    let tail_policy = if args.len() == start_index + 6 {
+        Some((
+            args[start_index + 4].parse::<u32>()?,
+            args[start_index + 5].parse::<u16>()?,
+        ))
+    } else {
+        None
+    };
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.rewards.emission_year = emission_year;
+    params.rewards.effective_player_block_reward = effective_player_block_reward;
+    if let Some((tail_start_year, tail_rate_bps)) = tail_policy {
+        params.rewards.tail_emission_start_year = tail_start_year;
+        params.rewards.tail_emission_rate_bps = tail_rate_bps;
+    }
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-params", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("emission_year={emission_year}");
+    println!("effective_player_block_reward={effective_player_block_reward}");
+    if let Some((tail_start_year, tail_rate_bps)) = tail_policy {
+        println!("tail_emission_start_year={tail_start_year}");
+        println!("tail_emission_rate_bps={tail_rate_bps}");
+    }
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-service-split [config-path] <proposal-id-hex>
+/// <effective-epoch> <collect_bps> <store_bps> <verify_bps> <propose_bps>` —
+/// propose a new service reward split.
+pub fn governance_propose_service_split_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 8 && args.len() != 9 {
+        return Err("usage: pole-client governance-propose-service-split [config-path] <proposal-id-hex> <effective-epoch> <collect_bps> <store_bps> <verify_bps> <propose_bps>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 6 {
+        return Err("usage: pole-client governance-propose-service-split [config-path] <proposal-id-hex> <effective-epoch> <collect_bps> <store_bps> <verify_bps> <propose_bps>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let collect_bps: u16 = args[start_index + 2].parse()?;
+    let store_bps: u16 = args[start_index + 3].parse()?;
+    let verify_bps: u16 = args[start_index + 4].parse()?;
+    let propose_bps: u16 = args[start_index + 5].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.rewards.collect_reward_bps = collect_bps;
+    params.rewards.store_reward_bps = store_bps;
+    params.rewards.verify_reward_bps = verify_bps;
+    params.rewards.propose_reward_bps = propose_bps;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-service-split", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("collect_reward_bps={collect_bps}");
+    println!("store_reward_bps={store_bps}");
+    println!("verify_reward_bps={verify_bps}");
+    println!("propose_reward_bps={propose_bps}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-reward-tuning [config-path] <proposal-id-hex>
+/// <effective-epoch> <target_network_weight_units> <reward_adjustment_cap_bps>
+/// <challenge_window_blocks> <effective-player-block-reward>` — propose a
+/// reward-adjustment tuning update.
+pub fn governance_propose_reward_tuning_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 8 && args.len() != 9 {
+        return Err("usage: pole-client governance-propose-reward-tuning [config-path] <proposal-id-hex> <effective-epoch> <target_network_weight_units> <reward_adjustment_cap_bps> <challenge_window_blocks> <effective-player-block-reward>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 6 {
+        return Err("usage: pole-client governance-propose-reward-tuning [config-path] <proposal-id-hex> <effective-epoch> <target_network_weight_units> <reward_adjustment_cap_bps> <challenge_window_blocks> <effective-player-block-reward>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let target_network_weight_units: u128 = args[start_index + 2].parse()?;
+    let reward_adjustment_cap_bps: u16 = args[start_index + 3].parse()?;
+    let challenge_window_blocks: u32 = args[start_index + 4].parse()?;
+    let effective_player_block_reward: u128 = args[start_index + 5].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.rewards.effective_player_block_reward = effective_player_block_reward;
+    params.rewards.target_network_weight_units = target_network_weight_units;
+    params.rewards.reward_adjustment_cap_bps = reward_adjustment_cap_bps;
+    params.challenge_window_blocks = challenge_window_blocks;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-reward-tuning", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("target_network_weight_units={target_network_weight_units}");
+    println!("reward_adjustment_cap_bps={reward_adjustment_cap_bps}");
+    println!("challenge_window_blocks={challenge_window_blocks}");
+    println!("effective_player_block_reward={effective_player_block_reward}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-thresholds [config-path] <proposal-id-hex>
+/// <effective-epoch> <quorum_bps> <approval_bps>` — propose new governance
+/// params-update thresholds.
+pub fn governance_propose_thresholds_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 6 && args.len() != 7 {
+        return Err("usage: pole-client governance-propose-thresholds [config-path] <proposal-id-hex> <effective-epoch> <quorum_bps> <approval_bps>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 4 {
+        return Err("usage: pole-client governance-propose-thresholds [config-path] <proposal-id-hex> <effective-epoch> <quorum_bps> <approval_bps>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let quorum_bps: u16 = args[start_index + 2].parse()?;
+    let approval_bps: u16 = args[start_index + 3].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.governance.params_update_quorum_bps = quorum_bps;
+    params.governance.params_update_approval_bps = approval_bps;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-thresholds", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("params_update_quorum_bps={quorum_bps}");
+    println!("params_update_approval_bps={approval_bps}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-slow-params [config-path] <proposal-id-hex>
+/// <effective-epoch> <reward-block-secs> <effective-player-block-reward>` —
+/// propose a slow (block-level) params update.
+pub fn governance_propose_slow_params_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 6 && args.len() != 7 {
+        return Err("usage: pole-client governance-propose-slow-params [config-path] <proposal-id-hex> <effective-epoch> <reward-block-secs> <effective-player-block-reward>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 4 {
+        return Err("usage: pole-client governance-propose-slow-params [config-path] <proposal-id-hex> <effective-epoch> <reward-block-secs> <effective-player-block-reward>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let reward_block_secs: u64 = args[start_index + 2].parse()?;
+    let effective_player_block_reward: u128 = args[start_index + 3].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.rewards.reward_block_secs = reward_block_secs;
+    params.rewards.effective_player_block_reward = effective_player_block_reward;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-slow-params", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("reward_block_secs={reward_block_secs}");
+    println!("effective_player_block_reward={effective_player_block_reward}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-retention [config-path] <proposal-id-hex>
+/// <effective-epoch> <min-retention-epochs> <challenge-window-blocks>` —
+/// propose a retention/backfill params update.
+pub fn governance_propose_retention_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 6 && args.len() != 7 {
+        return Err("usage: pole-client governance-propose-retention [config-path] <proposal-id-hex> <effective-epoch> <min-retention-epochs> <challenge-window-blocks>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 4 {
+        return Err("usage: pole-client governance-propose-retention [config-path] <proposal-id-hex> <effective-epoch> <min-retention-epochs> <challenge-window-blocks>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let min_retention_epochs: u32 = args[start_index + 2].parse()?;
+    let challenge_window_blocks: u32 = args[start_index + 3].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.min_retention_epochs = min_retention_epochs;
+    params.challenge_window_blocks = challenge_window_blocks;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-retention", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("min_retention_epochs={min_retention_epochs}");
+    println!("challenge_window_blocks={challenge_window_blocks}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-tier-weights [config-path] <proposal-id-hex>
+/// <effective-epoch> <tier1_weight_ppm> <tier2_min_ppm> <tier2_max_ppm>
+/// <tier3_min_ppm> <tier3_max_ppm>` — propose new tier weight bounds.
+pub fn governance_propose_tier_weights_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 9 && args.len() != 10 {
+        return Err("usage: pole-client governance-propose-tier-weights [config-path] <proposal-id-hex> <effective-epoch> <tier1_weight_ppm> <tier2_min_ppm> <tier2_max_ppm> <tier3_min_ppm> <tier3_max_ppm>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 7 {
+        return Err("usage: pole-client governance-propose-tier-weights [config-path] <proposal-id-hex> <effective-epoch> <tier1_weight_ppm> <tier2_min_ppm> <tier2_max_ppm> <tier3_min_ppm> <tier3_max_ppm>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let tier1_weight_ppm: u32 = args[start_index + 2].parse()?;
+    let tier2_weight_min_ppm: u32 = args[start_index + 3].parse()?;
+    let tier2_weight_max_ppm: u32 = args[start_index + 4].parse()?;
+    let tier3_weight_min_ppm: u32 = args[start_index + 5].parse()?;
+    let tier3_weight_max_ppm: u32 = args[start_index + 6].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params.rewards.tier1_weight_ppm = tier1_weight_ppm;
+    params.rewards.tier2_weight_min_ppm = tier2_weight_min_ppm;
+    params.rewards.tier2_weight_max_ppm = tier2_weight_max_ppm;
+    params.rewards.tier3_weight_min_ppm = tier3_weight_min_ppm;
+    params.rewards.tier3_weight_max_ppm = tier3_weight_max_ppm;
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-tier-weights", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("tier1_weight_ppm={tier1_weight_ppm}");
+    println!("tier2_weight_min_ppm={tier2_weight_min_ppm}");
+    println!("tier2_weight_max_ppm={tier2_weight_max_ppm}");
+    println!("tier3_weight_min_ppm={tier3_weight_min_ppm}");
+    println!("tier3_weight_max_ppm={tier3_weight_max_ppm}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
+
+/// `governance-propose-app-weight [config-path] <proposal-id-hex>
+/// <effective-epoch> <app-id> <game-coefficient-ppm>` — propose an
+/// app-specific reward weight override.
+pub fn governance_propose_app_weight_cmd(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 6 && args.len() != 7 {
+        return Err("usage: pole-client governance-propose-app-weight [config-path] <proposal-id-hex> <effective-epoch> <app-id> <game-coefficient-ppm>".into());
+    }
+    let (config_path_arg, start_index) = crate::parse_config_path_and_rest_with_known_first_arg(
+        args,
+        2,
+        DEFAULT_CONFIG_PATH,
+        crate::looks_like_hex_32_arg,
+    );
+    if args.len() != start_index + 4 {
+        return Err("usage: pole-client governance-propose-app-weight [config-path] <proposal-id-hex> <effective-epoch> <app-id> <game-coefficient-ppm>".into());
+    }
+    let (config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let proposal_id = crate::decode_hex32(&args[start_index], "proposal_id")?;
+    let effective_epoch: u64 = args[start_index + 1].parse()?;
+    let app_id: u32 = args[start_index + 2].parse()?;
+    let game_coefficient_ppm: u32 = args[start_index + 3].parse()?;
+
+    let mut params =
+        crate::open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
+            .1
+            .params
+            .clone();
+    params
+        .rewards
+        .app_weight_overrides
+        .retain(|entry| entry.app_id != app_id);
+    params
+        .rewards
+        .app_weight_overrides
+        .push(crate::AppWeightOverride {
+            app_id,
+            game_coefficient_ppm,
+        });
+    params
+        .rewards
+        .app_weight_overrides
+        .sort_by_key(|entry| entry.app_id);
+    let effects = crate::submit_protocol_params_update_proposal(
+        &config,
+        proposal_id,
+        effective_epoch,
+        params,
+    )?;
+
+    crate::print_command_header("governance-propose-app-weight", &config_path);
+    println!("proposal_id={}", crate::hex_32(proposal_id));
+    println!("effective_epoch={effective_epoch}");
+    println!("app_id={app_id}");
+    println!("game_coefficient_ppm={game_coefficient_ppm}");
+    println!("effect_count={}", effects.len());
+    Ok(())
+}
