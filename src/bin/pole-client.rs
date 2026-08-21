@@ -14,6 +14,9 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
+use pole_protocol_draft::bin_commands::{
+    wallet_address_cmd, wallet_create_cmd, wallet_recover_cmd, wallet_set_reward_address_cmd,
+};
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network, chain_bridge,
@@ -3978,78 +3981,4 @@ fn print_usage() {
         "{}",
         format_usage_block("defaults:", defaults.iter().map(String::as_str))
     );
-}
-
-fn wallet_create_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args
-        .get(2)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
-    let password = args
-        .get(3)
-        .cloned()
-        .unwrap_or_else(|| rpassword::prompt_password("password: ").unwrap_or_default());
-    let comment = args.get(4).cloned();
-
-    let mnemonic = pole_protocol_draft::create_wallet(&data_dir, comment, &password)?;
-    println!("wallet_created");
-    println!("mnemonic={}", mnemonic);
-    println!("data_dir={}", data_dir.display());
-    Ok(())
-}
-
-fn wallet_recover_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args
-        .get(2)
-        .map(PathBuf::from)
-        .ok_or("usage: wallet-recover [data-dir] [password] <24-word-mnemonic...>")?;
-    let password = args
-        .get(3)
-        .cloned()
-        .unwrap_or_else(|| rpassword::prompt_password("password: ").unwrap_or_default());
-    let words: Vec<String> = args[4..].to_vec();
-    if words.len() != 24 {
-        return Err("mnemonic must be exactly 24 words".into());
-    }
-
-    let address = pole_protocol_draft::recover_wallet(&words[..], &data_dir, None, &password)?;
-    println!("wallet_recovered");
-    println!("address={}", address);
-    println!("data_dir={}", data_dir.display());
-    Ok(())
-}
-
-fn wallet_address_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = args
-        .get(2)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
-    let password = args
-        .get(3)
-        .cloned()
-        .unwrap_or_else(|| rpassword::prompt_password("wallet password: ").unwrap_or_default());
-    let address = pole_protocol_draft::show_address_with_password(&data_dir, &password)?;
-    println!("{}", address);
-    Ok(())
-}
-
-fn wallet_set_reward_address_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = PathBuf::from(
-        args.get(2)
-            .ok_or("usage: wallet-set-reward-address <config-path> [data-dir] [password]")?,
-    );
-    let data_dir = args
-        .get(3)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into());
-    let password = args
-        .get(4)
-        .cloned()
-        .unwrap_or_else(|| rpassword::prompt_password("wallet password: ").unwrap_or_default());
-
-    let address = pole_protocol_draft::set_reward_address(&data_dir, &config_path, &password)?;
-    println!("reward_address_updated");
-    println!("address={}", address);
-    println!("config={}", config_path.display());
-    Ok(())
 }

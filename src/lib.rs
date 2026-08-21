@@ -2,6 +2,7 @@
 
 pub mod activity_collector;
 pub mod app_paths;
+pub mod bin_commands;
 pub mod chain_bridge;
 pub mod cli_commands;
 pub mod cli_output;
