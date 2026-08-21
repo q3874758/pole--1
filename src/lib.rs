@@ -6,6 +6,7 @@ pub mod bin_commands;
 pub mod chain_bridge;
 pub mod cli_client;
 pub mod cli_commands;
+pub mod cli_genesis;
 pub mod cli_node;
 pub mod cli_output;
 pub mod cli_parsing;
