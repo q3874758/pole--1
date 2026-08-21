@@ -365,7 +365,7 @@ pub fn collect_dashboard(
     };
 
     let update_status = crate::collect_update_overview(
-        "0.1.0",
+        env!("CARGO_PKG_VERSION"),
         "stable",
         &config.runtime.data_dir,
         PathBuf::from(&config.runtime.data_dir).join("releases"),
@@ -435,7 +435,7 @@ pub fn collect_dashboard(
             },
             meta: AppMetaView {
                 app_name: "PoLE".to_string(),
-                app_version: "0.1.0".to_string(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
                 control_api_default_bind_addr: "127.0.0.1:8787".to_string(),
                 remote_access_default_enabled: false,
                 browser_open_supported: true,

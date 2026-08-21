@@ -1,20 +1,41 @@
 {
   "channel": "stable",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "artifacts": [
     {
       "platform": "windows",
       "kind": "exe",
-      "path": "pole-node.exe",
-      "sha256": "7fe80242885ea2b4ca9069dbc8e18e053722b1fd53d6ef12f2eed22c559a4402",
-      "size_bytes": 6098432
+      "path": "pole.exe",
+      "sha256": "10ac3ca38399ccb244f99c3cb23f45cb80b158d2f553f97e8f906a16883aea97",
+      "size_bytes": 8404992
     },
     {
       "platform": "windows",
       "kind": "exe",
       "path": "pole-client.exe",
-      "sha256": "68d46266f0fd30f1734b48039d0369a8ff36fc138c97520a418d9b5a371331c7",
-      "size_bytes": 6731776
+      "sha256": "e1ba1a8562db95bd7bc2dca8d4a3ec649b20fcd03b49656fee4082522ca382f6",
+      "size_bytes": 7470080
+    },
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-node.exe",
+      "sha256": "79f0b17791bef1378e5805d30a3cfc7d9cd67f05f1739250f1ebb34516c400ed",
+      "size_bytes": 6701056
+    },
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-genesis.exe",
+      "sha256": "c1d1e367685f11c55df2a71defb88dbec2befd779316bb470ad3c0729d361d3a",
+      "size_bytes": 672768
+    },
+    {
+      "platform": "windows",
+      "kind": "exe",
+      "path": "pole-sbom.exe",
+      "sha256": "3ca20bc2edd04c5de2143bf50a30d7e8d57b31a00939dd7a935efbb80a88e544",
+      "size_bytes": 1069568
     }
   ],
   "signing": {
