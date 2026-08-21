@@ -3,6 +3,11 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+use pole_protocol_draft::bin_commands::{
+    governance_propose_app_weight_cmd, governance_propose_params_cmd,
+    governance_propose_retention_cmd, governance_propose_reward_tuning_cmd,
+    governance_propose_slow_params_cmd, governance_propose_tier_weights_cmd,
+};
 use pole_protocol_draft::{
     aggregate_local_epoch, allocation_breakdown, annual_emission_schedule_with_tail,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
@@ -14,19 +19,19 @@ use pole_protocol_draft::{
     effective_collect_interval_secs, fetch_current_players_live, format_usage_block,
     inmemory_simulation_listener_peer_ids, inmemory_simulation_retrieval_peer_id,
     is_player_verifier, load_status, load_verification_credentials, maybe_write_payload,
-    open_local_protocol_state, parse_community_activity_response, parse_current_players_response,
+    parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
     parse_socket_topics, parse_third_party_activity_response, prepare_local_epoch,
     print_batch_summary, print_epoch_commit_artifact_roots, prune_retention,
     render_tokenomics_schedule, reward_local_epoch, run_collect_tick_with_client,
     run_collect_tick_with_client_and_network, save_verification_credentials,
-    socket_peers_from_config, source_kind_label, submit_protocol_params_update_proposal,
-    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
-    verify_local_epoch, ActivitySourceKind, BatchBuilder, CollectLoopSummary, CollectTickResult,
-    FilesystemP2pNetwork, HttpTextClient, InMemoryP2pNetwork, LocalNodeProgress,
-    LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
-    ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork, SocketPeerProfile,
-    SteamCurrentPlayersSample, LONG_TERM_TAIL_EMISSION_RATE_BPS, LONG_TERM_TAIL_START_YEAR,
+    socket_peers_from_config, source_kind_label, summarize_collect_loop_with_client,
+    summarize_collect_loop_with_client_and_network, verify_local_epoch, ActivitySourceKind,
+    BatchBuilder, CollectLoopSummary, CollectTickResult, FilesystemP2pNetwork, HttpTextClient,
+    InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook, NodeConfig, P2pNetwork,
+    P2pSimulationConfig, P2pTopic, ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork,
+    SocketPeerProfile, SteamCurrentPlayersSample, LONG_TERM_TAIL_EMISSION_RATE_BPS,
+    LONG_TERM_TAIL_START_YEAR,
 };
 type NodeCommandHandler = pole_protocol_draft::CommandHandler;
 const NODE_USAGE_COMMANDS: &[&str] = &[
@@ -569,203 +574,6 @@ fn tokenomics_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "{}",
         render_tokenomics_schedule("PoLE node tokenomics", &breakdown, &schedule)
     );
-    Ok(())
-}
-
-fn governance_propose_params_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 7 && args.len() != 9 {
-        return Err("usage: pole-node governance-propose-params <config-path> <proposal-id-hex> <effective-epoch> <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let emission_year: u32 = args[5].parse()?;
-    let effective_player_block_reward: u128 = args[6].parse()?;
-    let tail_policy = if args.len() == 9 {
-        Some((args[7].parse::<u32>()?, args[8].parse::<u16>()?))
-    } else {
-        None
-    };
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params.rewards.emission_year = emission_year;
-    params.rewards.effective_player_block_reward = effective_player_block_reward;
-    if let Some((tail_start_year, tail_rate_bps)) = tail_policy {
-        params.rewards.tail_emission_start_year = tail_start_year;
-        params.rewards.tail_emission_rate_bps = tail_rate_bps;
-    }
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("emission_year={emission_year}");
-    println!("effective_player_block_reward={effective_player_block_reward}");
-    if let Some((tail_start_year, tail_rate_bps)) = tail_policy {
-        println!("tail_emission_start_year={tail_start_year}");
-        println!("tail_emission_rate_bps={tail_rate_bps}");
-    }
-    println!("effect_count={}", effects.len());
-    Ok(())
-}
-
-fn governance_propose_reward_tuning_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 9 {
-        return Err("usage: pole-node governance-propose-reward-tuning <config-path> <proposal-id-hex> <effective-epoch> <target_network_weight_units> <reward_adjustment_cap_bps> <challenge_window_blocks> <effective-player-block-reward>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let target_network_weight_units: u128 = args[5].parse()?;
-    let reward_adjustment_cap_bps: u16 = args[6].parse()?;
-    let challenge_window_blocks: u32 = args[7].parse()?;
-    let effective_player_block_reward: u128 = args[8].parse()?;
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params.rewards.target_network_weight_units = target_network_weight_units;
-    params.rewards.reward_adjustment_cap_bps = reward_adjustment_cap_bps;
-    params.rewards.effective_player_block_reward = effective_player_block_reward;
-    params.challenge_window_blocks = challenge_window_blocks;
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("target_network_weight_units={target_network_weight_units}");
-    println!("reward_adjustment_cap_bps={reward_adjustment_cap_bps}");
-    println!("challenge_window_blocks={challenge_window_blocks}");
-    println!("effective_player_block_reward={effective_player_block_reward}");
-    println!("effect_count={}", effects.len());
-    Ok(())
-}
-
-fn governance_propose_slow_params_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 7 {
-        return Err("usage: pole-node governance-propose-slow-params <config-path> <proposal-id-hex> <effective-epoch> <reward-block-secs> <effective-player-block-reward>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let reward_block_secs: u64 = args[5].parse()?;
-    let effective_player_block_reward: u128 = args[6].parse()?;
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params.rewards.reward_block_secs = reward_block_secs;
-    params.rewards.effective_player_block_reward = effective_player_block_reward;
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("reward_block_secs={reward_block_secs}");
-    println!("effective_player_block_reward={effective_player_block_reward}");
-    println!("effect_count={}", effects.len());
-    Ok(())
-}
-
-fn governance_propose_retention_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 7 {
-        return Err("usage: pole-node governance-propose-retention <config-path> <proposal-id-hex> <effective-epoch> <min-retention-epochs> <challenge-window-blocks>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let min_retention_epochs: u32 = args[5].parse()?;
-    let challenge_window_blocks: u32 = args[6].parse()?;
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params.min_retention_epochs = min_retention_epochs;
-    params.challenge_window_blocks = challenge_window_blocks;
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("min_retention_epochs={min_retention_epochs}");
-    println!("challenge_window_blocks={challenge_window_blocks}");
-    println!("effect_count={}", effects.len());
-    Ok(())
-}
-
-fn governance_propose_app_weight_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 7 {
-        return Err("usage: pole-node governance-propose-app-weight <config-path> <proposal-id-hex> <effective-epoch> <app-id> <game-coefficient-ppm>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let app_id: u32 = args[5].parse()?;
-    let game_coefficient_ppm: u32 = args[6].parse()?;
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params
-        .rewards
-        .app_weight_overrides
-        .retain(|entry| entry.app_id != app_id);
-    params
-        .rewards
-        .app_weight_overrides
-        .push(pole_protocol_draft::AppWeightOverride {
-            app_id,
-            game_coefficient_ppm,
-        });
-    params
-        .rewards
-        .app_weight_overrides
-        .sort_by_key(|entry| entry.app_id);
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("app_id={app_id}");
-    println!("game_coefficient_ppm={game_coefficient_ppm}");
-    println!("effect_count={}", effects.len());
-    Ok(())
-}
-
-fn governance_propose_tier_weights_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() != 10 {
-        return Err("usage: pole-node governance-propose-tier-weights <config-path> <proposal-id-hex> <effective-epoch> <tier1_weight_ppm> <tier2_min_ppm> <tier2_max_ppm> <tier3_min_ppm> <tier3_max_ppm>".into());
-    }
-    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    let proposal_id = decode_hex32(&args[3], "proposal_id")?;
-    let effective_epoch: u64 = args[4].parse()?;
-    let tier1_weight_ppm: u32 = args[5].parse()?;
-    let tier2_weight_min_ppm: u32 = args[6].parse()?;
-    let tier2_weight_max_ppm: u32 = args[7].parse()?;
-    let tier3_weight_min_ppm: u32 = args[8].parse()?;
-    let tier3_weight_max_ppm: u32 = args[9].parse()?;
-    let mut params = open_local_protocol_state(&config, config.runtime.challenge_window_blocks)?
-        .1
-        .params
-        .clone();
-    params.rewards.tier1_weight_ppm = tier1_weight_ppm;
-    params.rewards.tier2_weight_min_ppm = tier2_weight_min_ppm;
-    params.rewards.tier2_weight_max_ppm = tier2_weight_max_ppm;
-    params.rewards.tier3_weight_min_ppm = tier3_weight_min_ppm;
-    params.rewards.tier3_weight_max_ppm = tier3_weight_max_ppm;
-    let effects =
-        submit_protocol_params_update_proposal(&config, proposal_id, effective_epoch, params)?;
-
-    println!("proposal_id={}", pole_protocol_draft::hex_32(proposal_id));
-    println!("effective_epoch={effective_epoch}");
-    println!("tier1_weight_ppm={tier1_weight_ppm}");
-    println!("tier2_weight_min_ppm={tier2_weight_min_ppm}");
-    println!("tier2_weight_max_ppm={tier2_weight_max_ppm}");
-    println!("tier3_weight_min_ppm={tier3_weight_min_ppm}");
-    println!("tier3_weight_max_ppm={tier3_weight_max_ppm}");
-    println!("effect_count={}", effects.len());
     Ok(())
 }
 
