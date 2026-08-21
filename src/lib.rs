@@ -10,6 +10,7 @@ pub mod cli_genesis;
 pub mod cli_node;
 pub mod cli_output;
 pub mod cli_parsing;
+pub mod cli_sbom;
 pub mod cli_support;
 pub mod control_api;
 pub mod control_api_types;
