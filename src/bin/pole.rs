@@ -125,6 +125,8 @@ fn print_usage() {
     eprintln!("Examples:");
     eprintln!("  pole client init  - Initialize client config");
     eprintln!("  pole node status  - Check node status");
-    eprintln!("  pole genesis --chain-id pole_7776-1 --allocations allocations.csv --out genesis.json");
+    eprintln!(
+        "  pole genesis --chain-id pole_7776-1 --allocations allocations.csv --out genesis.json"
+    );
     eprintln!("  pole sbom --out sbom.cdx.json");
 }

@@ -16,9 +16,7 @@
 
 use std::path::PathBuf;
 
-use crate::genesis_builder::{
-    GenesisBuilder, GenesisError, GenesisInputs, ValidatorSpec,
-};
+use crate::genesis_builder::{GenesisBuilder, GenesisError, GenesisInputs, ValidatorSpec};
 
 #[derive(Debug)]
 struct Cli {
