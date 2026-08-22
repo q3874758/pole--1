@@ -74,8 +74,14 @@ fn env_lock() -> &'static Mutex<()> {
 fn release_manifest_loader_reads_channel_and_artifacts() {
     let manifest = load_release_manifest("dist/release-manifests/stable.json").unwrap();
     assert_eq!(manifest.channel, "stable");
-    assert_eq!(manifest.version, "0.1.0");
-    assert_eq!(manifest.artifacts.len(), 2);
+    // The shipped manifest must always advertise the current workspace
+    // version — bump them together on release (release.yml stamps the
+    // same value from the git tag).
+    assert_eq!(manifest.version, env!("CARGO_PKG_VERSION"));
+    assert!(
+        manifest.artifacts.len() >= 2,
+        "manifest should ship the unified pole binary plus compat shims"
+    );
     assert_eq!(manifest.artifacts[0].platform, "windows");
 }
 
