@@ -429,7 +429,10 @@ struct ChainAggregateRecordJson {
 /// Serialize a reward record the way the chain's
 /// `json.Marshal(types.RewardRecord{...})` does. `recipient` must be the
 /// on-chain bech32 recipient (the chain cannot see the Rust `node_id`);
-/// callers derive it with `cosmos::address::node_id_to_bech32`.
+/// callers derive it with [`RewardRecord::chain_recipient`], which prefers
+/// the record's own `recipient_address` (account domain) and only falls back
+/// to the legacy `node_id_to_bech32` truncation for records written before
+/// the field existed.
 pub fn reward_record_to_chain_json(
     record: &RewardRecord,
     recipient: &str,
@@ -801,6 +804,7 @@ mod tests {
         let record = RewardRecord {
             epoch_id: 9,
             node_id: [0u8; 32],
+            recipient_address: String::new(),
             player_reward: 50,
             collect_reward: 0,
             store_reward: 0,
@@ -821,6 +825,7 @@ mod tests {
         let empty = RewardRecord {
             epoch_id: 9,
             node_id: [0u8; 32],
+            recipient_address: String::new(),
             player_reward: 0,
             collect_reward: 0,
             store_reward: 0,

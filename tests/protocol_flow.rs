@@ -153,6 +153,7 @@ fn rewards_root_matches_reward_records_fixture() {
         RewardRecord {
             epoch_id: 1,
             node_id: collector,
+            recipient_address: String::new(),
             player_reward: 0,
             collect_reward: 0,
             store_reward: 0,
@@ -164,6 +165,7 @@ fn rewards_root_matches_reward_records_fixture() {
         RewardRecord {
             epoch_id: 1,
             node_id: proposer,
+            recipient_address: String::new(),
             player_reward: 0,
             collect_reward: 0,
             store_reward: 0,
@@ -387,6 +389,7 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     state.upsert_reward_record(RewardRecord {
         epoch_id: 1,
         node_id: target,
+        recipient_address: String::new(),
         player_reward: 0,
         collect_reward: 0,
         store_reward: 0,
@@ -399,6 +402,7 @@ fn protocol_flow_commit_challenge_finalize_claim_works() {
     state.upsert_reward_record(RewardRecord {
         epoch_id: 1,
         node_id: proposer,
+        recipient_address: String::new(),
         player_reward: 0,
         collect_reward: 0,
         store_reward: 0,
@@ -1209,6 +1213,7 @@ fn claim_reward_must_use_registered_reward_address() {
     state.upsert_reward_record(RewardRecord {
         epoch_id: 1,
         node_id,
+        recipient_address: String::new(),
         player_reward: 0,
         collect_reward: 0,
         store_reward: 0,

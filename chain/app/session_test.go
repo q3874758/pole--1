@@ -580,3 +580,154 @@ func TestWitnessRewardDistributedByAttestationCount(t *testing.T) {
 		t.Fatalf("registering an idle verifier must not dilute earned credits, got %+v", allocation)
 	}
 }
+
+// settledSessionWithTwoWitnesses drives the fixture to a valid settlement so
+// witnesses A and B each hold one adopted attestation in epoch 1.
+func settledSessionWithTwoWitnesses(t *testing.T) sessionFixture {
+	t.Helper()
+	f := newSessionFixture(t, 1, 600, 1_000)
+	f.submitHeartbeats(t, 2)
+	if err := f.attest(t, f.witnessA, "witness-observation-a", 1_000); err != nil {
+		t.Fatalf("attest by witness A: %v", err)
+	}
+	if err := f.attest(t, f.witnessB, "witness-observation-b", 1_000); err != nil {
+		t.Fatalf("attest by witness B: %v", err)
+	}
+	if _, err := f.settle(t); err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	return f
+}
+
+// witnessProposer registers a fresh node allowed to submit reward records.
+func witnessProposer(t *testing.T, f sessionFixture, fill byte) string {
+	t.Helper()
+	proposer := bech32Addr(t, f.app, fill)
+	registerNode(t, f.app, f.ctx, proposer, &types.NodeCapabilitySet{Propose: true})
+	return proposer
+}
+
+// submitRewardsWithCommit commits the rewards root derived from `records` and
+// submits the very same set, returning the handler's error.
+func submitRewardsWithCommit(t *testing.T, f sessionFixture, proposer string, records []types.RewardRecord) error {
+	t.Helper()
+	if err := f.app.PoleKeeper.SetEpochCommit(f.ctx, types.EpochCommit{
+		EpochId:                 1,
+		ProposerAddress:         proposer,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 100,
+		Rewards: &types.MerkleCommitment{
+			Root:      testCommitmentRoot(t, records),
+			LeafCount: uint32(len(records)),
+		},
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+
+	handler := f.app.MsgServiceRouter().Handler(&types.MsgSubmitRewardRecords{})
+	if handler == nil {
+		t.Fatalf("expected submit reward records handler")
+	}
+	msgRecords := make([]*types.RewardRecord, 0, len(records))
+	for i := range records {
+		msgRecords = append(msgRecords, &records[i])
+	}
+	_, err := handler(f.ctx, &types.MsgSubmitRewardRecords{
+		Proposer: proposer,
+		EpochId:  1,
+		Records:  msgRecords,
+	})
+	return err
+}
+
+// TestSubmitRewardRecordsEnforcesAttestationProportionalSplit: verify reward
+// is paid for recorded corroboration, not for holding the verify capability.
+// The split among credited witnesses must match their adopted-attestation
+// counts exactly.
+func TestSubmitRewardRecordsEnforcesAttestationProportionalSplit(t *testing.T) {
+	f := settledSessionWithTwoWitnesses(t)
+	proposer := witnessProposer(t, f, 60)
+
+	// A 4000 pool over two equal credits splits 2000/2000. Paying the whole
+	// pool to one witness is the self-dealing case the rule must catch.
+	records := []types.RewardRecord{
+		{EpochId: 1, Recipient: f.player, PlayerReward: 5_000, NetReward: 5_000},
+		{EpochId: 1, Recipient: f.witnessA, VerifyReward: 4_000, NetReward: 4_000},
+		{EpochId: 1, Recipient: f.witnessB, VerifyReward: 0, NetReward: 0},
+	}
+	err := submitRewardsWithCommit(t, f, proposer, records)
+	if err == nil {
+		t.Fatalf("expected a concentrated verify split to be rejected")
+	}
+	if !strings.Contains(err.Error(), "attestation-proportional split") {
+		t.Fatalf("expected a proportional-split error, got: %v", err)
+	}
+
+	// The proportional split is accepted.
+	records = []types.RewardRecord{
+		{EpochId: 1, Recipient: f.player, PlayerReward: 5_000, NetReward: 5_000},
+		{EpochId: 1, Recipient: f.witnessA, VerifyReward: 2_000, NetReward: 2_000},
+		{EpochId: 1, Recipient: f.witnessB, VerifyReward: 2_000, NetReward: 2_000},
+	}
+	if err := submitRewardsWithCommit(t, f, proposer, records); err != nil {
+		t.Fatalf("expected the proportional split to be accepted, got: %v", err)
+	}
+}
+
+// TestSubmitRewardRecordsRejectsOmittedWitness closes the omission hole: a
+// proposer must not drop the other credited witnesses and keep the pool,
+// because a set holding only one witness is trivially proportional.
+func TestSubmitRewardRecordsRejectsOmittedWitness(t *testing.T) {
+	f := settledSessionWithTwoWitnesses(t)
+	proposer := witnessProposer(t, f, 62)
+
+	records := []types.RewardRecord{
+		{EpochId: 1, Recipient: f.witnessA, VerifyReward: 4_000, NetReward: 4_000},
+	}
+	err := submitRewardsWithCommit(t, f, proposer, records)
+	if err == nil {
+		t.Fatalf("expected omitting a credited witness to be rejected")
+	}
+	if !strings.Contains(err.Error(), "missing witness") {
+		t.Fatalf("expected a missing-witness error, got: %v", err)
+	}
+}
+
+// TestSubmitRewardRecordsRejectsVerifyRewardWithoutCredits: a node that
+// corroborated nothing must receive no verify reward, even though it is a
+// registered verifier.
+func TestSubmitRewardRecordsRejectsVerifyRewardWithoutCredits(t *testing.T) {
+	f := settledSessionWithTwoWitnesses(t)
+	proposer := witnessProposer(t, f, 63)
+
+	idle := bech32Addr(t, f.app, 64)
+	registerNode(t, f.app, f.ctx, idle, &types.NodeCapabilitySet{Collect: true, Verify: true})
+
+	records := []types.RewardRecord{
+		{EpochId: 1, Recipient: f.witnessA, VerifyReward: 2_000, NetReward: 2_000},
+		{EpochId: 1, Recipient: f.witnessB, VerifyReward: 2_000, NetReward: 2_000},
+		{EpochId: 1, Recipient: idle, VerifyReward: 100, NetReward: 100},
+	}
+	err := submitRewardsWithCommit(t, f, proposer, records)
+	if err == nil {
+		t.Fatalf("expected a verify reward without credits to be rejected")
+	}
+	if !strings.Contains(err.Error(), "corroborated no settled session") {
+		t.Fatalf("expected a no-credits error, got: %v", err)
+	}
+}
+
+// TestSubmitRewardRecordsSkipsSplitCheckWithoutWitnessCredits: epochs with no
+// mutual-proof evidence keep the previous behaviour untouched, so historical
+// and challenge-adjusted epochs validate as before.
+func TestSubmitRewardRecordsSkipsSplitCheckWithoutWitnessCredits(t *testing.T) {
+	f := newSessionFixture(t, 1, 600, 1_000) // no attestations, so no credits
+	proposer := witnessProposer(t, f, 65)
+
+	records := []types.RewardRecord{
+		{EpochId: 1, Recipient: proposer, VerifyReward: 9_999, NetReward: 9_999},
+	}
+	if err := submitRewardsWithCommit(t, f, proposer, records); err != nil {
+		t.Fatalf("expected an epoch without witness credits to keep validating, got: %v", err)
+	}
+}

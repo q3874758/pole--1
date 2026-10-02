@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod activity_collector;
 pub mod app_paths;
@@ -31,6 +31,7 @@ pub mod node_runtime;
 pub mod node_settlement;
 pub mod node_storage_audit;
 pub mod node_verifier;
+pub mod os_support;
 pub mod p2p;
 pub mod params;
 pub mod primitives;
@@ -108,7 +109,7 @@ pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};
 pub use mutual_proof::{
     build_play_heartbeat, build_play_session, build_witness_attestation, collector_address,
-    identity_account_address, identity_account_bech32, load_play_sessions,
+    identity_account_address, identity_account_bech32, load_play_heartbeats, load_play_sessions,
     local_session_ids_for_slot, play_heartbeat_path, play_heartbeat_to_wire, play_session_path,
     play_session_to_wire, save_play_heartbeat, save_play_session, save_witness_attestation,
     session_id_from_parts, witness_attestation_path, witness_attestation_to_wire, MutualProofError,
@@ -180,6 +181,9 @@ pub use node_storage_audit::{
     NodeStorageAuditError, RetentionAuditArtifact, StorageChallengeArtifact,
 };
 pub use node_verifier::{verify_local_epoch, EpochVerificationReport, NodeVerificationError};
+pub use os_support::{
+    apply_process_background_priority, is_process_running, kill_process, trim_process_working_set,
+};
 pub use p2p::*;
 pub use params::*;
 pub use primitives::*;

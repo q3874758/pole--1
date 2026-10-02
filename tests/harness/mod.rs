@@ -5,15 +5,20 @@
 //! High-level helpers (`register_node`, `submit_batch`, `commit_epoch`,
 //! `claim_reward`) wrap the corresponding `MsgServer` entry points.
 //!
-//! Skeleton limitations:
-//! - The `submit_batch` / `commit_epoch` paths reuse the
-//!   `MsgUpsertNode` JSON projection as a stand-in. Replace once the
-//!   `BatchCommit → MsgSubmitBatch` and `EpochCommit → MsgCommitEpoch`
-//!   converters land.
+//! Every helper posts a real `pole.chain.pole.v1` message through the
+//! bridge client (`BridgeMessage` → proto `Any`), including the mutual
+//! proof surface (`submit_play_session_for`, `submit_heartbeat_for`,
+//! `attest_session_for`, `settle_session_for`) and the `SessionSettlement`
+//! REST read-back.
+//!
+//! Limitations:
 //! - The harness requires a built `poled` binary on $PATH; tests
 //!   should be guarded with `#[cfg(feature = "integration")]`.
 //! - All async ops time out after 30s. Recovery from a crashed `poled`
 //!   is not supported yet.
+//! - Scenarios that need more than one signer declare identities via
+//!   [`IntegrationHarnessBuilder::identity`]; each one gets a real
+//!   genesis auth account so it can broadcast on its own behalf.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -26,10 +31,12 @@ use tokio::time::sleep;
 
 use pole_protocol_draft::cosmos::wire_types::{
     AggregateRecordWire, BatchCommitWire, EpochCommitWire, MerkleCommitmentWire,
-    NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire,
+    NodeCapabilitySetWire, NodeRecordWire, NodeRoleWire, PlayHeartbeatWire, PlaySessionWire,
+    WitnessAttestationWire,
 };
 use pole_protocol_draft::cosmos::{
-    address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint, CosmosError,
+    address, BridgeMessage, BroadcastOptions, CosmosAddress, CosmosClient, CosmosEndpoint,
+    CosmosError, SessionSettlementView,
 };
 use pole_protocol_draft::records::{Challenge, ChallengeEvidenceRef};
 use pole_protocol_draft::wallet::KeyPair;
@@ -38,6 +45,11 @@ use pole_protocol_draft::{decode_hex32, ChallengeKind, ChallengeState, Hash32, N
 pub const DEFAULT_CHAIN_ID: &str = "pole-test";
 pub const DEFAULT_RPC_URL: &str = "http://127.0.0.1:26657";
 pub const DEFAULT_REST_URL: &str = "http://127.0.0.1:1317";
+
+/// Genesis balance handed to every provisioned identity. Covers tx fees
+/// many times over; the value is deliberately not a consensus
+/// parameter.
+const IDENTITY_MINT: &str = "1000000000000upole";
 
 /// 30s default. Chain needs ~5s to commit the first block, then each
 /// tx takes a couple of seconds, so this gives 10+ blocks of headroom
@@ -86,6 +98,57 @@ pub struct RegisteredNode {
     pub capabilities: RegisteredNodeCapabilities,
 }
 
+/// Declaration of one extra signer to provision at genesis time.
+///
+/// Every mutual-proof scenario needs at least three distinct on-chain
+/// identities (a player and two independent witnesses), and each one
+/// must be able to broadcast *its own* messages because the chain
+/// derives `GetSigners()` from the message's bech32 field. A single
+/// validator keypair therefore covers only the single-identity cases.
+#[derive(Debug, Clone)]
+pub struct HarnessIdentitySpec {
+    pub name: String,
+    pub seed: [u8; 32],
+}
+
+/// A provisioned signer: an Ed25519 keypair plus the `cosmos1...`
+/// account derived from its public key. The account is created and
+/// funded in genesis, so the identity can pay fees and broadcast.
+#[derive(Debug, Clone)]
+pub struct HarnessIdentity {
+    pub name: String,
+    pub key: KeyPair,
+    pub address: CosmosAddress,
+}
+
+impl HarnessIdentity {
+    /// `hex(pubkey)` — the off-chain node identity domain
+    /// (`stable_hash32(pubkey)` is the derived 32-byte `NodeId`).
+    pub fn public_hex(&self) -> String {
+        hex::encode(self.key.public)
+    }
+
+    /// `stable_hash32(pubkey)` — the `NodeId` this identity owns in the
+    /// off-chain record domain.
+    pub fn node_id(&self) -> NodeId {
+        pole_protocol_draft::stable_hash32(&self.key.public)
+    }
+
+    pub fn bech32(&self) -> &str {
+        &self.address.bech32
+    }
+}
+
+/// A play session as it will be submitted: the wire form plus the
+/// derived session id and node id the test needs for follow-up
+/// heartbeat / attestation / settlement calls.
+#[derive(Debug, Clone)]
+pub struct BuiltPlaySession {
+    pub session_id_hex: String,
+    pub node_id: NodeId,
+    pub wire: PlaySessionWire,
+}
+
 /// Builder for [`IntegrationHarness`]. Pre-decode the field shape so
 /// the boot path is easy to read.
 #[derive(Default)]
@@ -96,6 +159,7 @@ pub struct IntegrationHarnessBuilder {
     address_prefix: Option<String>,
     poled_path: Option<PathBuf>,
     pre_mint: Vec<(String, u128)>,
+    identities: Vec<HarnessIdentitySpec>,
 }
 
 impl IntegrationHarnessBuilder {
@@ -133,6 +197,21 @@ impl IntegrationHarnessBuilder {
     /// so the address is funded at startup.
     pub fn pre_mint(mut self, address: impl Into<String>, amount: u128) -> Self {
         self.pre_mint.push((address.into(), amount));
+        self
+    }
+
+    /// Declare an extra signer for multi-identity scenarios. Each
+    /// declared identity gets a genesis auth account (created with
+    /// `poled genesis add-genesis-account` on its raw bech32), so it can
+    /// pay fees and broadcast messages that name it as the signer.
+    ///
+    /// Seeds must be distinct; two identities sharing a seed share an
+    /// account and the second one is dropped.
+    pub fn identity(mut self, name: impl Into<String>, seed: [u8; 32]) -> Self {
+        self.identities.push(HarnessIdentitySpec {
+            name: name.into(),
+            seed,
+        });
         self
     }
 
@@ -192,11 +271,49 @@ impl IntegrationHarnessBuilder {
                 "genesis",
                 "add-genesis-account",
                 &validator_bech32,
-                "1000000000000upole",
+                IDENTITY_MINT,
                 "--keyring-backend",
                 "test",
             ],
         )?;
+
+        // 1.6. Provision the extra identities declared by the builder.
+        // Each needs a real genesis *auth account* (not merely a bank
+        // balance from `patch_genesis_balances`) because the chain reads
+        // the signer's account number and sequence before accepting a
+        // broadcast, and every mutual-proof message names its own
+        // signer. `add-genesis-account` on a bare bech32 creates both
+        // the auth account and the balance without needing a keyring.
+        let mut identities: Vec<HarnessIdentity> = Vec::new();
+        for spec in &self.identities {
+            let key = KeyPair::from_seed(&spec.seed);
+            let account = address::cosmos_account_from_pubkey(&key.public).to_vec();
+            let bech32 = address::encode_bech32(&prefix, &account)?;
+            if bech32 == validator_bech32
+                || identities
+                    .iter()
+                    .any(|existing| existing.address.bech32 == bech32)
+            {
+                continue;
+            }
+            poled_run(
+                &poled_bin,
+                &chain_home,
+                &[
+                    "genesis",
+                    "add-genesis-account",
+                    &bech32,
+                    IDENTITY_MINT,
+                    "--keyring-backend",
+                    "test",
+                ],
+            )?;
+            identities.push(HarnessIdentity {
+                name: spec.name.clone(),
+                key,
+                address: CosmosAddress { account, bech32 },
+            });
+        }
 
         // 2. Patch genesis.json if any pre-mints were requested
         if !self.pre_mint.is_empty() {
@@ -214,11 +331,13 @@ impl IntegrationHarnessBuilder {
         // 3. Start the chain in the background (stderr captured so
         // chain-side rejections are debuggable after a failed test).
         let poled_log = tmp.path().join("poled.log");
+        let log_file = std::fs::File::create(&poled_log)?;
+        let err_file = log_file.try_clone()?;
         let poled = Command::new(&poled_bin)
             .args(["start", "--home"])
             .arg(&chain_home)
-            .stdout(Stdio::null())
-            .stderr(Stdio::from(std::fs::File::create(&poled_log)?))
+            .stdout(Stdio::from(log_file))
+            .stderr(Stdio::from(err_file))
             .spawn()?;
 
         // 4. Wire up the bridge client
@@ -242,6 +361,7 @@ impl IntegrationHarnessBuilder {
             address_prefix: prefix,
             validator_key,
             validator_address,
+            identities,
             poled: Some(poled),
             client,
         };
@@ -263,11 +383,18 @@ pub struct IntegrationHarness {
     pub address_prefix: String,
     pub validator_key: KeyPair,
     pub validator_address: CosmosAddress,
+    /// Extra signers declared through
+    /// [`IntegrationHarnessBuilder::identity`], in declaration order.
+    pub identities: Vec<HarnessIdentity>,
     pub poled: Option<Child>,
     pub client: CosmosClient,
 }
 
 impl IntegrationHarness {
+    pub fn tx_opts(&self) -> BroadcastOptions {
+        BroadcastOptions::commit()
+    }
+
     /// Wait until `/status` returns a positive block height.
     pub async fn wait_for_rpc(&self) -> Result<(), HarnessError> {
         let url = self.rpc_url.clone();
@@ -338,16 +465,23 @@ impl IntegrationHarness {
             verify: capabilities.verify,
             propose: capabilities.propose,
         };
+        let (role, is_player) = if capabilities.propose {
+            (NodeRoleWire::Coordinator, true)
+        } else if capabilities.store || capabilities.verify {
+            (NodeRoleWire::Service, true)
+        } else {
+            (NodeRoleWire::Player, true)
+        };
         let node = NodeRecordWire {
             operator_address: self.validator_address.bech32.clone(),
             reward_address: self.validator_address.bech32.clone(),
             consensus_address: String::new(),
-            role: NodeRoleWire::Player,
+            role,
             capabilities: caps,
             active: true,
             bonded_tokens: 0,
             last_updated_epoch: 0,
-            is_player: false,
+            is_player,
         };
         let msg = BridgeMessage::UpsertNode {
             operator: self.validator_address.clone(),
@@ -359,7 +493,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {
@@ -373,6 +507,322 @@ impl IntegrationHarness {
             node_id_hex: hex::encode(self.validator_key.public),
             capabilities,
         })
+    }
+
+    /// `MsgUpsertNode` for one of the provisioned identities.
+    ///
+    /// The mutual-proof tests need zero-bond service nodes: the chain
+    /// short-circuits the bond requirement when `is_player` is set
+    /// (`RequiredBondedTokensForNode` returns 0 for players), and the
+    /// `PLAYER` role forbids the collect/verify capabilities the witness
+    /// rules demand. `SERVICE` + `is_player` + `collect`/`verify` + an
+    /// empty consensus address satisfies every gate while requiring no
+    /// stake, which is what lets a test run three independent signers on
+    /// a single-validator chain.
+    pub async fn register_identity(
+        &self,
+        identity: &HarnessIdentity,
+        role: NodeRoleWire,
+        is_player: bool,
+        capabilities: RegisteredNodeCapabilities,
+    ) -> Result<RegisteredNode, HarnessError> {
+        let caps = NodeCapabilitySetWire {
+            collect: capabilities.collect,
+            store: capabilities.store,
+            verify: capabilities.verify,
+            propose: capabilities.propose,
+        };
+        let node = NodeRecordWire {
+            operator_address: identity.address.bech32.clone(),
+            reward_address: identity.address.bech32.clone(),
+            consensus_address: String::new(),
+            role,
+            capabilities: caps,
+            active: true,
+            bonded_tokens: 0,
+            last_updated_epoch: 0,
+            is_player,
+        };
+        let msg = BridgeMessage::UpsertNode {
+            operator: identity.address.clone(),
+            node,
+        };
+        let resp = self
+            .client
+            .submit(&msg, &identity.address, &identity.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(RegisteredNode {
+            operator_bech32: identity.address.bech32.clone(),
+            node_id_hex: identity.public_hex(),
+            capabilities,
+        })
+    }
+
+    /// `MsgSubmitBatch` on behalf of one identity.
+    ///
+    /// `batch_root_hex` must be unique per `(epoch, collector)` — the
+    /// chain keys batch commits by
+    /// `Join3(epoch_id, collector_address, batch_root)`, so reusing a
+    /// root for the same collector silently overwrites the observation
+    /// instead of adding a second one. Every witness therefore needs its
+    /// own collector identity (or its own root) before it can attest.
+    pub async fn submit_batch_for(
+        &self,
+        identity: &HarnessIdentity,
+        epoch_id: u64,
+        batch_root_hex: &str,
+    ) -> Result<String, HarnessError> {
+        let batch_commit = BatchCommitWire {
+            epoch_id,
+            collector_address: identity.address.bech32.clone(),
+            slot_start: 1,
+            slot_end: 100,
+            batch: MerkleCommitmentWire {
+                root: batch_root_hex.to_string(),
+                leaf_count: 1,
+            },
+            payload_cid: format!("bafy-test-cid-{}", identity.name),
+            observation_count: 1,
+            submitted_at_height: 0,
+        };
+        let msg = BridgeMessage::SubmitBatch {
+            collector: identity.address.clone(),
+            batch_commit,
+        };
+        let resp = self
+            .client
+            .submit(&msg, &identity.address, &identity.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// Build (and sign) a `PlaySession` for `identity`, off-chain.
+    ///
+    /// The signature is made with the identity's node key and is not
+    /// currently re-verified by the chain, but building the real record
+    /// keeps the harness honest about the wire shape and the derived
+    /// `session_id`. `collector` names the node that collected the
+    /// observation; pass the player's own node id for self-collection.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_play_session_wire(
+        &self,
+        identity: &HarnessIdentity,
+        app_id: u32,
+        epoch_id: u64,
+        slot_id: u64,
+        play_seconds: u64,
+        collector: NodeId,
+        observation_cid: &str,
+        observed_players: u64,
+    ) -> BuiltPlaySession {
+        use pole_protocol_draft::records::PlaySession;
+
+        let node_id = identity.node_id();
+        let session = PlaySession {
+            session_id: pole_protocol_draft::session_id_from_parts(
+                &node_id,
+                app_id,
+                epoch_id,
+                slot_id,
+                observation_cid,
+            ),
+            node_address: pole_protocol_draft::identity_account_address(&identity.key.public),
+            app_id,
+            epoch_id,
+            slot_id,
+            play_seconds,
+            collector_address: pole_protocol_draft::collector_address(&collector),
+            observation_cid: observation_cid.to_string(),
+            observed_players,
+            submitted_at_height: 0,
+            session_signature: Vec::new(),
+        };
+        let mut session = session;
+        session.session_signature = identity.key.sign(&session.signing_payload());
+        let wire = pole_protocol_draft::play_session_to_wire(&session)
+            .expect("play session projects to wire");
+        BuiltPlaySession {
+            session_id_hex: wire.session_id_hex.clone(),
+            node_id,
+            wire,
+        }
+    }
+
+    /// `MsgSubmitPlaySession` for `identity`.
+    pub async fn submit_play_session_for(
+        &self,
+        identity: &HarnessIdentity,
+        session: &PlaySessionWire,
+    ) -> Result<String, HarnessError> {
+        let msg = BridgeMessage::SubmitPlaySession {
+            node_address: identity.address.clone(),
+            session: session.clone(),
+        };
+        let resp = self
+            .client
+            .submit(&msg, &identity.address, &identity.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// Build (and sign) one `PlayHeartbeat` for `session`.
+    pub fn build_play_heartbeat_wire(
+        &self,
+        identity: &HarnessIdentity,
+        session: &PlaySessionWire,
+        bucket_index: u64,
+        signed_at_millis: u64,
+    ) -> PlayHeartbeatWire {
+        use pole_protocol_draft::records::PlayHeartbeat;
+
+        let mut heartbeat = PlayHeartbeat {
+            session_id: decode_hex32(&session.session_id_hex, "session_id_hex")
+                .expect("session id is 32 bytes of hex"),
+            node_address: pole_protocol_draft::identity_account_address(&identity.key.public),
+            bucket_index,
+            signed_at_millis,
+            heartbeat_signature: Vec::new(),
+        };
+        heartbeat.heartbeat_signature = identity.key.sign(&heartbeat.signing_payload());
+        pole_protocol_draft::play_heartbeat_to_wire(&heartbeat)
+            .expect("play heartbeat projects to wire")
+    }
+
+    /// `MsgSubmitPlayHeartbeat` for the session's owning identity.
+    pub async fn submit_heartbeat_for(
+        &self,
+        identity: &HarnessIdentity,
+        heartbeat: &PlayHeartbeatWire,
+    ) -> Result<String, HarnessError> {
+        let msg = BridgeMessage::SubmitPlayHeartbeat {
+            node_address: identity.address.clone(),
+            heartbeat: heartbeat.clone(),
+        };
+        let resp = self
+            .client
+            .submit(&msg, &identity.address, &identity.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// Build (and sign) a `WitnessAttestation` from `witness`'s own
+    /// observation of `session`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_witness_attestation_wire(
+        &self,
+        witness: &HarnessIdentity,
+        session: &PlaySessionWire,
+        own_observation_cid: &str,
+        observed_play_seconds: u64,
+        observed_players: u64,
+    ) -> WitnessAttestationWire {
+        use pole_protocol_draft::records::WitnessAttestation;
+
+        let mut attestation = WitnessAttestation {
+            session_id: decode_hex32(&session.session_id_hex, "session_id_hex")
+                .expect("session id is 32 bytes of hex"),
+            witness_address: pole_protocol_draft::identity_account_address(&witness.key.public),
+            observed_play_seconds,
+            witness_observation_cid: own_observation_cid.to_string(),
+            observed_players,
+            attested_at_height: 0,
+            witness_signature: Vec::new(),
+        };
+        attestation.witness_signature = witness.key.sign(&attestation.signing_payload());
+        pole_protocol_draft::witness_attestation_to_wire(&attestation)
+            .expect("witness attestation projects to wire")
+    }
+
+    /// `MsgAttestSession` broadcast by the witness itself (the chain
+    /// derives the signer from `attestation.witness_address`).
+    pub async fn attest_session_for(
+        &self,
+        witness: &HarnessIdentity,
+        attestation: &WitnessAttestationWire,
+    ) -> Result<String, HarnessError> {
+        let msg = BridgeMessage::AttestSession {
+            witness: witness.address.clone(),
+            attestation: attestation.clone(),
+        };
+        let resp = self
+            .client
+            .submit(&msg, &witness.address, &witness.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// `MsgSettleSession` broadcast by `settler` (needs `verify`).
+    pub async fn settle_session_for(
+        &self,
+        settler: &HarnessIdentity,
+        session_id_hex: &str,
+    ) -> Result<String, HarnessError> {
+        let msg = BridgeMessage::SettleSession {
+            settler: settler.address.clone(),
+            session_id_hex: session_id_hex.to_string(),
+        };
+        let resp = self
+            .client
+            .submit(&msg, &settler.address, &settler.key, &self.tx_opts())
+            .await?;
+        if !resp.is_ok() {
+            return Err(HarnessError::ChainRejected {
+                code: resp.code,
+                log: resp.log,
+            });
+        }
+        Ok(resp.tx_hash)
+    }
+
+    /// Read the on-chain `SessionSettlement` for `session_id_hex` over
+    /// REST. Errors with `MissingField` when the session has not been
+    /// settled yet (the query returns 404 in that case).
+    pub async fn session_settlement(
+        &self,
+        session_id_hex: &str,
+    ) -> Result<SessionSettlementView, HarnessError> {
+        let rest = pole_protocol_draft::cosmos::RestClient::new(self.rest_url.clone())?;
+        Ok(rest.session_settlement(session_id_hex).await?)
+    }
+
+    /// Read the epoch's adopted witness credits (witness bech32 →
+    /// attestation count) over REST.
+    pub async fn witness_credits(
+        &self,
+        epoch_id: u64,
+    ) -> Result<std::collections::BTreeMap<String, u64>, HarnessError> {
+        let rest = pole_protocol_draft::cosmos::RestClient::new(self.rest_url.clone())?;
+        Ok(rest.witness_credits(epoch_id).await?)
     }
 
     /// `MsgSubmitBatch` for the validator's collector account. The
@@ -409,7 +859,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {
@@ -450,8 +900,8 @@ impl IntegrationHarness {
                 leaf_count: 0,
             },
             rewards: MerkleCommitmentWire {
-                root: "44".repeat(32),
-                leaf_count: 1,
+                root: "00".repeat(32),
+                leaf_count: 0,
             },
             availability: MerkleCommitmentWire {
                 root: "55".repeat(32),
@@ -474,7 +924,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {
@@ -505,7 +955,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {
@@ -542,7 +992,7 @@ impl IntegrationHarness {
                             &msg,
                             &self.validator_address,
                             &self.validator_key,
-                            &Default::default(),
+                            &self.tx_opts(),
                         )
                         .await
                     {
@@ -582,7 +1032,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {
@@ -634,7 +1084,7 @@ impl IntegrationHarness {
                 &msg,
                 &self.validator_address,
                 &self.validator_key,
-                &Default::default(),
+                &self.tx_opts(),
             )
             .await?;
         if !resp.is_ok() {

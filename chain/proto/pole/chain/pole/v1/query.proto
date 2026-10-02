@@ -18,6 +18,21 @@ service Query {
   rpc GameWeight(QueryGameWeightRequest) returns (QueryGameWeightResponse);
   rpc PlaySession(QueryPlaySessionRequest) returns (QueryPlaySessionResponse);
   rpc SessionSettlement(QuerySessionSettlementRequest) returns (QuerySessionSettlementResponse);
+  rpc WitnessCredits(QueryWitnessCreditsRequest) returns (QueryWitnessCreditsResponse);
+}
+
+// WitnessCredit is one witness's adopted-attestation count for an epoch.
+message WitnessCredit {
+  string address = 1;
+  uint64 credits = 2;
+}
+
+message QueryWitnessCreditsRequest {
+  uint64 epoch_id = 1;
+}
+
+message QueryWitnessCreditsResponse {
+  repeated WitnessCredit credits = 1;
 }
 
 message QueryParamsRequest {}

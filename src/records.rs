@@ -66,6 +66,15 @@ pub struct AggregateRecord {
 pub struct RewardRecord {
     pub epoch_id: EpochId,
     pub node_id: NodeId,
+    /// Chain account (bech32) that may claim this record.
+    ///
+    /// This is a *different* identity domain from `node_id`
+    /// (`stable_hash32` of the node public key) and cannot be derived from it.
+    /// Records produced before this field existed deserialise to the empty
+    /// string and fall back to the legacy `node_id` truncation, which keeps
+    /// the historical cross-language merkle fixtures valid.
+    #[serde(default)]
+    pub recipient_address: String,
     #[serde(default)]
     pub player_reward: Amount,
     pub collect_reward: Amount,
@@ -74,6 +83,23 @@ pub struct RewardRecord {
     pub propose_reward: Amount,
     pub slash_debit: Amount,
     pub net_reward: Amount,
+}
+
+impl RewardRecord {
+    /// The recipient used when this record is serialised for the chain.
+    ///
+    /// Prefers the explicit `recipient_address` recorded at computation time;
+    /// when absent (legacy records and fixtures) it falls back to the legacy
+    /// `node_id` truncation so previously committed roots stay reproducible.
+    pub fn chain_recipient(&self) -> Result<String, crate::cosmos::error::CosmosError> {
+        if !self.recipient_address.is_empty() {
+            return Ok(self.recipient_address.clone());
+        }
+        crate::cosmos::address::node_id_to_bech32(
+            crate::cosmos::address::DEFAULT_BECH32_PREFIX,
+            &self.node_id,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]

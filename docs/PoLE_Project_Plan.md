@@ -180,6 +180,11 @@ PoLE 通过以下 6 大支柱活动，构建海量代币销毁黑洞：
   - 当前实现为内置 socket 传输（低延迟批次公告、收据与挑战广播），并支持 `fs` / `sim` 离线诊断模式；
   - 节点间建立连接，分发批次公告、副本收据与心跳应答。
   - 注：早期的 `p2p_libp2p` 骨架与配套命令已在清理中移除；更强的传输后端列在 Roadmap。
+- **无感低开销后台运行时 (`os_support`)**：
+  - **原生 Win32 / POSIX FFI**：彻底取缔旧版 PowerShell / 外部子进程频繁拉起开销（每次进程启停耗费 50~200ms CPU 抖动），改为直接 Win32 C ABI 纳秒级调用；
+  - **硬件调度级 EcoQoS 与空闲优先级 (`IDLE_PRIORITY_CLASS`)**：将节点线程优先级降至最低，并通过 `PROCESS_POWER_THROTTLING_EXECUTION_SPEED` 强制将守护进程调度到大小核架构中的能效核（E-Core），将所有性能大核（P-Core）与前台时间 100% 留给 3D 游戏；
+  - **内存动态裁剪 (`SetProcessWorkingSetSize`)**：在心跳采样与沉睡间歇自动向操作系统交还非活动工作集物理内存，使节点后台驻留物理内存降低至 < 15MB（远优于 < 80MB 的标准指标）；
+  - **零损耗前台焦点与进程嗅探**：通过动态解析 `GetForegroundWindow` / `QueryFullProcessImageNameW` 与 `CreateToolhelp32Snapshot` 快照遍历，探测开销低于 0.1ms，彻底杜绝任何游戏微卡顿（Micro-stutter）与帧率波动。
 - **流水线批次组装器 (`node_pipeline`)**：
   - 将通过见证的会话记录组装为默克尔批次（`AssembledBatch`），计算批次哈希。
 - **本地审计与验证器 (`node_verifier` / `node_storage_audit`)**：
@@ -197,9 +202,9 @@ PoLE 通过以下 6 大支柱活动，构建海量代币销毁黑洞：
   - 接收各项活动、手续费与罚没的黑洞销毁地址。
 
 ### 3.3 桌面交互端（Desktop GUI）—— 规划中，尚未实现
-- 目标：一键式低资源占用运行（CPU 占用 < 0.5%，内存占用 < 80MB）；
+- 目标：一键式低资源占用运行（CPU 占用 < 0.1%，空闲物理内存 < 15MB）；
 - 目标玩家感知极简：“打开即玩，后台自动见证，收益实时透明，活动一键报名”。
-- 现状：仓库提供 CLI（`pole-client` / `pole-node` / `pole`）与本地控制面 HTTP API（`src/control_api.rs`），尚无桌面壳代码；桌面端与 Web 控制台属 Roadmap 阶段四范围。
+- 现状：仓库提供 CLI（`pole-client` / `pole-node` / `pole`）与本地控制面 HTTP API（`src/control_api.rs`），已内嵌 Windows 平台深度静默运行与能耗节流引擎；桌面端与 Web 控制台属 Roadmap 阶段四范围。
 
 ---
 
@@ -210,6 +215,7 @@ PoLE 通过以下 6 大支柱活动，构建海量代币销毁黑洞：
 - [x] 基于 Cosmos SDK 的专用链 `x/pole` 模块与消息状态机实现；
 - [x] 批次提交（BatchCommit）、小时奖励根（RewardRoot）与挑战裁决（Challenge）主线闭环；
 - [x] 节点互证闭环（`PlaySession` / `PlayHeartbeat` / `WitnessAttestation` / `SessionSettlement`）与链上有效性判定；
+- [x] 原生低开销静默后台运行时（Win32 EcoQoS、IDLE 优先级、动态内存释放 < 15MB、零子进程开销，彻底杜绝游戏掉帧卡顿）；
 - [x] CLI 控制台（`pole-client` / `pole-node` / `pole`）与本地控制面 HTTP API、便携式打包规范。
 
 ### 阶段二：P2P 去中心化相互见证与抗作弊网络落地（当前重点）

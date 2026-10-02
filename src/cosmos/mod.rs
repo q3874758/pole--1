@@ -28,7 +28,10 @@ pub use address::{
 };
 pub use eip712::{eip712_sign, hash_struct, keccak256, typed_data_hash, DomainSeparator};
 pub use error::{CosmosError, Result};
-pub use query_client::{AccountInfo, RestClient};
+pub use query_client::{
+    parse_session_settlement, parse_witness_credits, witness_credits_blocking, AccountInfo,
+    RestClient, SessionSettlementView, WitnessCreditEntry,
+};
 pub use rpc_client::{
     AbciQueryResponseInner, BroadcastOptions, BroadcastTxResponse, StatusResponse, TendermintRpc,
 };
@@ -123,7 +126,11 @@ impl CosmosClient {
     ) -> Result<BroadcastTxResponse> {
         let b64 = signed.to_base64()?;
         let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)?;
-        self.rpc.broadcast_tx_sync(&bytes, opts).await
+        if opts.commit {
+            self.rpc.broadcast_tx_commit(&bytes, opts).await
+        } else {
+            self.rpc.broadcast_tx_sync(&bytes, opts).await
+        }
     }
 
     /// Codes returned by `CheckTx` when the account sequence we signed

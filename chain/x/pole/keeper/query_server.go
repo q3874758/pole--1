@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"cosmossdk.io/collections"
 	"google.golang.org/grpc/codes"
@@ -115,6 +116,31 @@ func (q *queryServer) SessionSettlement(ctx context.Context, req *types.QuerySes
 		return nil, grpcError(err)
 	}
 	return &types.QuerySessionSettlementResponse{Settlement: &record}, nil
+}
+
+// WitnessCredits returns each witness's adopted-attestation count for the
+// epoch. This is the on-chain basis of the witness reward split, exposed so
+// an off-chain proposer derives the same per-witness amounts the chain will
+// enforce on submission (see msgServer.validateWitnessRewardSplit).
+//
+// An epoch with no credits returns an empty list rather than NotFound: the
+// absence is a normal state (nothing settled yet), not a missing resource.
+func (q *queryServer) WitnessCredits(ctx context.Context, req *types.QueryWitnessCreditsRequest) (*types.QueryWitnessCreditsResponse, error) {
+	credits, err := q.keeper.WitnessCreditsForEpoch(ctx, req.EpochId)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	addresses := make([]string, 0, len(credits))
+	for address := range credits {
+		addresses = append(addresses, address)
+	}
+	sort.Strings(addresses)
+
+	entries := make([]*types.WitnessCredit, 0, len(addresses))
+	for _, address := range addresses {
+		entries = append(entries, &types.WitnessCredit{Address: address, Credits: credits[address]})
+	}
+	return &types.QueryWitnessCreditsResponse{Credits: entries}, nil
 }
 
 func grpcError(err error) error {

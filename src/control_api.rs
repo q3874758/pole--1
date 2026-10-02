@@ -63,33 +63,7 @@ fn read_pid(path: &Path) -> Option<u32> {
 }
 
 fn process_is_running(pid: u32) -> bool {
-    #[cfg(windows)]
-    {
-        let script = format!(
-            "$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ exit 0 }} else {{ exit 1 }}"
-        );
-        std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(windows))]
-    {
-        std::process::Command::new("sh")
-            .args(["-c", &format!("kill -0 {pid} >/dev/null 2>&1")])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
+    crate::os_support::is_process_running(pid)
 }
 
 pub fn collect_status(
@@ -885,23 +859,7 @@ fn daemon_pid_path(config: &NodeConfig) -> PathBuf {
 }
 
 fn kill_runtime_process(pid: u32) -> bool {
-    #[cfg(windows)]
-    {
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(windows))]
-    {
-        std::process::Command::new("sh")
-            .args(["-c", &format!("kill -TERM {pid} >/dev/null 2>&1")])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
+    crate::os_support::kill_process(pid)
 }
 
 fn spawn_user_mode_runtime(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {

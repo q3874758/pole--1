@@ -3430,7 +3430,7 @@ fn open_dashboard_url(url: &str) -> Result<(), Box<dyn std::error::Error>> {
             let lower = opener.to_ascii_lowercase();
             if lower.ends_with(".cmd") || lower.ends_with(".bat") {
                 Command::new("cmd")
-                    .args(["/C", opener.as_str(), url])
+                    .args(["/C", "call", opener.as_str(), url])
                     .status()?
             } else {
                 Command::new(opener.as_str()).arg(url).status()?
@@ -3521,30 +3521,7 @@ fn unix_time_millis() -> Result<u64, Box<dyn std::error::Error>> {
 }
 
 fn process_is_running(pid: u32) -> bool {
-    #[cfg(windows)]
-    {
-        let script = format!(
-            "$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ exit 0 }} else {{ exit 1 }}"
-        );
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = pid;
-        false
-    }
+    crate::os_support::is_process_running(pid)
 }
 
 fn configure_game_process_awareness(config: &mut NodeConfig) {

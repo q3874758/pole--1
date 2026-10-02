@@ -21,12 +21,12 @@ use crate::{
     current_unix_millis, decode_hex32, detect_active_game_processes, dispatch_command,
     effective_collect_interval_secs, fetch_current_players_live, format_usage_block,
     inmemory_simulation_listener_peer_ids, inmemory_simulation_retrieval_peer_id,
-    is_player_verifier, load_status, load_verification_credentials, maybe_write_payload,
-    parse_community_activity_response, parse_current_players_response,
-    parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
-    parse_socket_topics, parse_third_party_activity_response, play_heartbeat_to_wire,
-    play_session_path, play_session_to_wire, prepare_local_epoch, print_batch_summary,
-    print_epoch_commit_artifact_roots, prune_retention, reward_local_epoch,
+    is_player_verifier, load_play_heartbeats, load_play_sessions, load_status,
+    load_verification_credentials, maybe_write_payload, parse_community_activity_response,
+    parse_current_players_response, parse_simulation_topology_args, parse_socket_addr,
+    parse_socket_peer_specs, parse_socket_topics, parse_third_party_activity_response,
+    play_heartbeat_to_wire, play_session_path, play_session_to_wire, prepare_local_epoch,
+    print_batch_summary, print_epoch_commit_artifact_roots, prune_retention, reward_local_epoch,
     run_collect_tick_with_client, run_collect_tick_with_client_and_network, save_play_heartbeat,
     save_play_session, save_verification_credentials, save_witness_attestation,
     socket_peers_from_config, source_kind_label, summarize_collect_loop_with_client,
@@ -94,6 +94,7 @@ pub const NODE_USAGE_COMMANDS: &[&str] = &[
     "  pole-node attest-session <config-path> <session-id-hex> <own-observation-cid> <observed-play-seconds> <observed-players> [chain-id]",
     "  pole-node settle-session <config-path> <session-id-hex> [chain-id]",
     "  pole-node reward-record-submit <config-path> <epoch-id> [chain-id]",
+    "  pole-node play-proof-submit <config-path> <epoch-id> [chain-id]",
 ];
 pub const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
     ("init-config", init_config_cmd),
@@ -184,6 +185,7 @@ pub const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
     ("attest-session", attest_session_cmd),
     ("settle-session", settle_session_cmd),
     ("reward-record-submit", reward_record_submit_cmd),
+    ("play-proof-submit", play_proof_submit_cmd),
 ];
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -2110,8 +2112,7 @@ fn reward_record_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::E
     let mut records = Vec::with_capacity(artifact.records.len());
     for entry in &artifact.records {
         let record = &entry.reward;
-        let node_id = decode_hex32(&entry.node_id_hex, "reward entry node_id_hex")?;
-        let recipient = cosmos_address::node_id_to_bech32("cosmos", &node_id)?;
+        let recipient = record.chain_recipient()?;
         records.push(crate::cosmos::wire_types::RewardRecordWire {
             epoch_id: record.epoch_id,
             recipient,
@@ -2145,6 +2146,83 @@ fn reward_record_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::E
         msg,
         &identity,
     ))
+}
+
+/// Submit every stored play session of one epoch together with its recorded
+/// heartbeats (chain: `MsgSubmitPlaySession` + `MsgSubmitPlayHeartbeat`).
+///
+/// The daemon persists sessions and bucket heartbeats as it collects; this
+/// command is the broadcasting half, mirroring how `reward-record-submit`
+/// turns a locally computed artifact into on-chain messages. Sessions are
+/// submitted before their heartbeats because the chain rejects a heartbeat
+/// whose session it has not seen yet.
+fn play_proof_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 4 || args.len() > 5 {
+        return Err(
+            "usage: pole-node play-proof-submit <config-path> <epoch-id> [chain-id]".into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let epoch_id: u64 = args[3].parse()?;
+    let chain_id = args.get(4).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    let sessions: Vec<crate::records::PlaySession> = load_play_sessions(&config)
+        .into_iter()
+        .filter(|session| session.epoch_id == epoch_id)
+        .collect();
+    if sessions.is_empty() {
+        println!("play_sessions=0 epoch={epoch_id}");
+        return Ok(());
+    }
+
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let node_address = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+
+    let mut submitted_sessions = 0usize;
+    let mut submitted_heartbeats = 0usize;
+    for session in &sessions {
+        let session_id_hex = crate::hex_32(session.session_id);
+        println!("session_id_hex={session_id_hex} app_id={}", session.app_id);
+
+        let msg = BridgeMessage::SubmitPlaySession {
+            node_address: node_address.clone(),
+            session: play_session_to_wire(session)?,
+        };
+        rt.block_on(submit_bridge_message(
+            &chain_id,
+            &format!("play_session session_id_hex={session_id_hex}"),
+            msg,
+            &identity,
+        ))?;
+        submitted_sessions += 1;
+
+        for heartbeat in load_play_heartbeats(&config, &session_id_hex) {
+            let bucket_index = heartbeat.bucket_index;
+            let msg = BridgeMessage::SubmitPlayHeartbeat {
+                node_address: node_address.clone(),
+                heartbeat: play_heartbeat_to_wire(&heartbeat)?,
+            };
+            rt.block_on(submit_bridge_message(
+                &chain_id,
+                &format!(
+                    "play_heartbeat session_id_hex={session_id_hex} bucket_index={bucket_index}"
+                ),
+                msg,
+                &identity,
+            ))?;
+            submitted_heartbeats += 1;
+        }
+    }
+    println!(
+        "play_proof_submit epoch={epoch_id} sessions={submitted_sessions} heartbeats={submitted_heartbeats}"
+    );
+    Ok(())
 }
 
 fn issue_replica_receipt(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

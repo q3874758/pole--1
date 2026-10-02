@@ -1870,6 +1870,7 @@ mod tests {
             RewardRecord {
                 epoch_id: 1,
                 node_id: node_id(&kp),
+                recipient_address: String::new(),
                 player_reward: 0,
                 collect_reward: 0,
                 store_reward: 0,
@@ -1932,6 +1933,7 @@ mod tests {
             RewardRecord {
                 epoch_id: 1,
                 node_id: node_id(&kp),
+                recipient_address: String::new(),
                 player_reward: 0,
                 collect_reward: 0,
                 store_reward: 0,

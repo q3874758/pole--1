@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cosmos::CosmosEndpoint;
 use crate::node_aggregator::{
     compute_local_epoch_aggregation, EpochAggregationComputation, NodeAggregationError,
 };
@@ -462,36 +463,76 @@ pub fn compute_local_epoch_rewards(
     );
 
     let local_node_id = config.node_id()?;
-    if local_player_reward_total > 0 {
-        reward_map
-            .entry(local_node_id)
-            .or_insert_with(|| empty_reward_record(epoch_id, local_node_id))
-            .player_reward += local_player_reward_total;
-    }
-    if service_reward_pools.verify_pool > 0 {
-        // Witness reward is earned by actually corroborating play sessions,
-        // not by merely running with the verify capability enabled. A node
-        // that submitted no attestations this epoch contributed nothing to
-        // verification and earns nothing from the pool. The chain's
-        // WitnessCreditsForEpoch is authoritative for the network-wide
-        // split; this is the node's local view of its own share.
-        let local_attestations = local_witness_attestation_count(config, epoch_id);
-        if local_attestations > 0 {
-            reward_map
-                .entry(local_node_id)
-                .or_insert_with(|| empty_reward_record(epoch_id, local_node_id))
-                .verify_reward += service_reward_pools.verify_pool;
+    // Name this node on-chain by its account address, not by truncating its
+    // node id: the two live in different identity domains and the chain only
+    // recognises the account address. Records written before this field
+    // existed keep the legacy truncation through `chain_recipient`.
+    let local_account = config.identity_account_bech32().ok();
+    let local_recipient = local_account.as_deref();
+    if let Some(address) = local_recipient {
+        for record in reward_map.values_mut() {
+            if record.node_id == local_node_id {
+                record.recipient_address = address.to_string();
+            }
         }
     }
+
+    if local_player_reward_total > 0 {
+        reward_record_for_node(&mut reward_map, epoch_id, local_node_id, local_recipient)
+            .player_reward += local_player_reward_total;
+    }
+
+    // Witness reward is earned by corroborating play sessions, not by merely
+    // running with the verify capability enabled. The chain enforces an exact
+    // attestation-proportional split over the credits it recorded
+    // (`validateWitnessRewardSplit` in `MsgSubmitRewardRecords`), so a node
+    // that paid itself the whole pool would have its entire submission
+    // rejected. Reproduce the chain's split from the same inputs instead:
+    // the credits the proposer cached from the chain (`WitnessCredits`
+    // query) and this epoch's verify pool.
+    let credits = load_witness_credits(config, epoch_id);
+    if !credits.is_empty() {
+        let allocation = allocate_witness_rewards(&credits, service_reward_pools.verify_pool);
+        for (recipient, amount) in allocation {
+            let node_id = match local_recipient {
+                Some(address) if address == recipient => local_node_id,
+                _ => witness_node_id(&recipient),
+            };
+            let record = reward_record_for_node(
+                &mut reward_map,
+                epoch_id,
+                node_id,
+                Some(recipient.as_str()),
+            );
+            record.verify_reward = record.verify_reward.saturating_add(amount);
+        }
+    } else if service_reward_pools.verify_pool > 0
+        && local_witness_attestation_count(config, epoch_id) > 0
+    {
+        // No cached credits: either the chain is unreachable or the epoch
+        // predates mutual proof, and the chain records nothing to split.
+        // Fall back to the local view so offline epochs keep their reward.
+        reward_record_for_node(&mut reward_map, epoch_id, local_node_id, local_recipient)
+            .verify_reward += service_reward_pools.verify_pool;
+    }
+
     if service_reward_pools.propose_pool > 0 {
-        reward_map
-            .entry(local_node_id)
-            .or_insert_with(|| empty_reward_record(epoch_id, local_node_id))
+        reward_record_for_node(&mut reward_map, epoch_id, local_node_id, local_recipient)
             .propose_reward += service_reward_pools.propose_pool;
     }
 
     let mut records = reward_map.into_values().collect::<Vec<_>>();
-    records.sort_by_key(|record| record.node_id);
+    // Order by the same key the reward root uses. The chain rebuilds the
+    // root from its own `(epoch_id, recipient)` index when it validates a
+    // submission, so a slice ordered any other way produces different
+    // leaves and is rejected. Legacy records with no address fall back to
+    // the node-id truncation, which is what the root itself uses.
+    records.sort_by_key(|record| {
+        (
+            record.epoch_id,
+            record.chain_recipient().unwrap_or_default(),
+        )
+    });
     for record in &mut records {
         record.net_reward = record
             .player_reward
@@ -753,11 +794,9 @@ pub fn reward_record_root(records: &[RewardRecord]) -> Result<Hash32, NodeReward
     let mut with_recipient = records
         .iter()
         .map(|record| {
-            let recipient = crate::cosmos::address::node_id_to_bech32(
-                crate::cosmos::address::DEFAULT_BECH32_PREFIX,
-                &record.node_id,
-            )
-            .map_err(|err| NodeRewardError::Io(std::io::Error::other(err)))?;
+            let recipient = record
+                .chain_recipient()
+                .map_err(|err| NodeRewardError::Io(std::io::Error::other(err)))?;
             Ok((record.epoch_id, recipient, record))
         })
         .collect::<Result<Vec<_>, NodeRewardError>>()?;
@@ -1044,6 +1083,33 @@ fn select_active_game_mapping(
     })
 }
 
+/// The reward-mapped apps currently running, as `(canonical process name, app
+/// id)` pairs, sorted and de-duplicated.
+///
+/// The mutual-proof layer uses this so a play session names exactly the app the
+/// reward tick would credit. Sharing [`find_game_mapping`] and
+/// [`canonical_process_name`] here keeps the two layers from drifting apart on
+/// what counts as "playing".
+pub fn active_mapped_apps(
+    config: &NodeConfig,
+    active_game_processes: &[String],
+) -> Vec<(String, u32)> {
+    let mut apps = Vec::new();
+    for process_name in active_game_processes {
+        if let Some(mapping) = find_game_mapping(config, process_name) {
+            let entry = (
+                canonical_process_name(&mapping.process_name),
+                mapping.app_id,
+            );
+            if !apps.contains(&entry) {
+                apps.push(entry);
+            }
+        }
+    }
+    apps.sort();
+    apps
+}
+
 fn activated_protocol_game_coefficient_ppm_for_app(
     config: &NodeConfig,
     app_id: u32,
@@ -1108,6 +1174,115 @@ pub fn player_reward_tick_artifact_path(
     Path::new(&config.runtime.data_dir)
         .join("player-reward-blocks")
         .join(format!("epoch-{epoch_id:06}-slot-{slot_id:06}.json"))
+}
+
+/// The witness credits the chain recorded for `epoch_id`: witness account
+/// (bech32) -> number of that witness's attestations the chain adopted for
+/// settled *valid* sessions.
+///
+/// This is the authoritative input to the witness split. The chain rejects
+/// any reward submission whose `verify_reward` values do not follow it, so
+/// it must be read from the chain rather than counted locally. Any failure
+/// (chain unreachable, endpoint missing) yields an empty map, which the
+/// caller treats as "no chain-recorded credits for this epoch".
+fn load_witness_credits(config: &NodeConfig, epoch_id: EpochId) -> BTreeMap<String, u64> {
+    let endpoint = CosmosEndpoint::local_pole(config.chain_id.as_str());
+    crate::cosmos::query_client::witness_credits_blocking(&endpoint.rest_url, epoch_id)
+        .unwrap_or_default()
+}
+
+/// A deterministic local `NodeId` for a witness named only by its chain
+/// account.
+///
+/// Witness reward reaches a node through its *account* address
+/// (`sha256(pubkey)[..20]`), which is a different identity domain from the
+/// node id and cannot be converted. Local bookkeeping still keys records by
+/// node id, so remote witnesses get a synthetic id derived from the address.
+/// It never leaves the local map: the chain and the reward root only ever
+/// see the `recipient_address`, which is what ordering and payout key on.
+fn witness_node_id(recipient: &str) -> NodeId {
+    crate::node_pipeline::stable_hash32(recipient.as_bytes())
+}
+
+/// Fetch (or create) the record for `node_id`, stamping the chain account
+/// when one is known.
+fn reward_record_for_node<'a>(
+    rewards: &'a mut BTreeMap<NodeId, RewardRecord>,
+    epoch_id: EpochId,
+    node_id: NodeId,
+    recipient: Option<&str>,
+) -> &'a mut RewardRecord {
+    let record = rewards
+        .entry(node_id)
+        .or_insert_with(|| empty_reward_record(epoch_id, node_id));
+    if let Some(address) = recipient {
+        if !address.is_empty() {
+            record.recipient_address = address.to_string();
+        }
+    }
+    record
+}
+
+/// Split `pool` across witnesses in proportion to their adopted
+/// attestation counts.
+///
+/// This mirrors the chain's `types.AllocateWitnessRewards` exactly, because
+/// the two computations must agree: the chain recomputes the split from the
+/// submitted set and rejects any record that differs. Fractional shares go
+/// to the largest remainders, ties broken by ascending account address, and
+/// the last few units are handed out one at a time until the pool is
+/// exhausted — so the allocation is exact and every proposer derives the
+/// same numbers.
+fn allocate_witness_rewards(
+    credits: &BTreeMap<String, u64>,
+    pool: Amount,
+) -> BTreeMap<String, Amount> {
+    let mut allocation = BTreeMap::new();
+    let total_credits = credits.values().copied().fold(0u64, u64::saturating_add);
+    if pool == 0 || total_credits == 0 {
+        for witness in credits.keys() {
+            allocation.insert(witness.clone(), 0);
+        }
+        return allocation;
+    }
+
+    let mut remainders: Vec<(Amount, &String)> = Vec::new();
+    let mut distributed = 0u128;
+    for (witness, credit) in credits {
+        if *credit == 0 {
+            allocation.insert(witness.clone(), 0);
+            continue;
+        }
+        let product = pool.saturating_mul(u128::from(*credit));
+        let total = u128::from(total_credits);
+        let share = product / total;
+        let remainder = product % total;
+        allocation.insert(witness.clone(), share);
+        distributed = distributed.saturating_add(share);
+        remainders.push((remainder, witness));
+    }
+
+    // Largest remainder first; the account address is the deterministic
+    // tie-break, matching the chain's `sort.SliceStable`.
+    remainders.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.as_str().cmp(right.1.as_str()))
+    });
+
+    let mut leftover = pool.saturating_sub(distributed);
+    let mut index = 0usize;
+    while leftover > 0 && index < remainders.len() {
+        let witness = remainders[index].1;
+        if let Some(entry) = allocation.get_mut(witness) {
+            *entry += 1;
+        }
+        leftover -= 1;
+        index += 1;
+    }
+
+    allocation
 }
 
 /// Count the local node's witness attestations for an epoch: credentials it
@@ -1185,6 +1360,7 @@ fn empty_reward_record(epoch_id: EpochId, node_id: NodeId) -> RewardRecord {
     RewardRecord {
         epoch_id,
         node_id,
+        recipient_address: String::new(),
         player_reward: 0,
         collect_reward: 0,
         store_reward: 0,
@@ -1286,6 +1462,83 @@ mod tests {
         assert!(allocate_proportional(&w, 0).is_empty());
     }
 
+    // Mirror of chain/x/pole/types/witness_reward_test.go: the Rust split
+    // must reproduce the chain's allocation exactly, or a submitted reward
+    // submission fails `validateWitnessRewardSplit`.
+    const WITNESS_A: &str = "pole1witnessaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1";
+    const WITNESS_B: &str = "pole1witnessbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2";
+    const WITNESS_C: &str = "pole1witnesscccccccccccccccccccccccccccc3";
+
+    #[test]
+    fn allocate_witness_rewards_splits_by_credit_share() {
+        let credits = BTreeMap::from([(WITNESS_A.to_string(), 3u64), (WITNESS_B.to_string(), 1)]);
+        let allocation = allocate_witness_rewards(&credits, 4_000);
+        assert_eq!(allocation[WITNESS_A], 3_000);
+        assert_eq!(allocation[WITNESS_B], 1_000);
+    }
+
+    #[test]
+    fn allocate_witness_rewards_is_exact_and_deterministic() {
+        let credits = BTreeMap::from([
+            (WITNESS_A.to_string(), 2u64),
+            (WITNESS_B.to_string(), 1),
+            (WITNESS_C.to_string(), 1),
+        ]);
+        let allocation = allocate_witness_rewards(&credits, 1_001);
+        assert_eq!(allocation.values().copied().sum::<Amount>(), 1_001);
+        // The largest remainder (the 2-credit witness) takes the extra unit.
+        assert_eq!(allocation[WITNESS_A], 501);
+        assert_eq!(allocation[WITNESS_B], 250);
+        assert_eq!(allocation[WITNESS_C], 250);
+
+        for _ in 0..10 {
+            let again = allocate_witness_rewards(&credits, 1_001);
+            assert_eq!(again, allocation);
+        }
+    }
+
+    #[test]
+    fn allocate_witness_rewards_handles_degenerate_inputs() {
+        let zero_pool = allocate_witness_rewards(
+            &BTreeMap::from([(
+                "pole1nobodyaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1".to_string(),
+                4u64,
+            )]),
+            0,
+        );
+        assert!(zero_pool.values().all(|amount| *amount == 0));
+        let no_credits = allocate_witness_rewards(
+            &BTreeMap::from([(
+                "pole1nobodyaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1".to_string(),
+                0u64,
+            )]),
+            500,
+        );
+        assert!(no_credits.values().all(|amount| *amount == 0));
+        assert!(allocate_witness_rewards(&BTreeMap::new(), 500).is_empty());
+    }
+
+    #[test]
+    fn allocate_witness_rewards_tie_break_is_address_ascending() {
+        // Equal remainders: the lexicographically smaller account takes the
+        // dust unit, matching the chain's deterministic tie-break.
+        let credits = BTreeMap::from([(WITNESS_B.to_string(), 1u64), (WITNESS_A.to_string(), 1)]);
+        let allocation = allocate_witness_rewards(&credits, 3);
+        assert_eq!(allocation[WITNESS_A], 2);
+        assert_eq!(allocation[WITNESS_B], 1);
+    }
+
+    #[test]
+    fn reward_record_for_node_stamps_recipient_and_reuses_existing_record() {
+        let mut rewards = BTreeMap::new();
+        reward_record_for_node(&mut rewards, 3, node_id(7), Some(WITNESS_A)).collect_reward += 5;
+        reward_record_for_node(&mut rewards, 3, node_id(7), None).store_reward += 2;
+        let record = &rewards[&node_id(7)];
+        assert_eq!(record.collect_reward, 5);
+        assert_eq!(record.store_reward, 2);
+        assert_eq!(record.recipient_address, WITNESS_A);
+    }
+
     // Cross-language golden: reward_record_root over node_ids
     // 0x31/0x32/0x33 (recipients cosmos1xy.../cosmos1xg.../cosmos1xv...)
     // must equal the chain's MerkleRootHexForRecords recomputation over
@@ -1299,6 +1552,7 @@ mod tests {
             RewardRecord {
                 epoch_id: 9,
                 node_id: node_id(0x33),
+                recipient_address: String::new(),
                 player_reward: 0,
                 collect_reward: 0,
                 store_reward: 0,
@@ -1310,6 +1564,7 @@ mod tests {
             RewardRecord {
                 epoch_id: 9,
                 node_id: node_id(0x31),
+                recipient_address: String::new(),
                 player_reward: 50,
                 collect_reward: 0,
                 store_reward: 0,
@@ -1321,6 +1576,7 @@ mod tests {
             RewardRecord {
                 epoch_id: 9,
                 node_id: node_id(0x32),
+                recipient_address: String::new(),
                 player_reward: 0,
                 collect_reward: 10,
                 store_reward: 20,

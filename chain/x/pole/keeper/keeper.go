@@ -796,10 +796,13 @@ func (k Keeper) ValidateEpochRoots(ctx context.Context, epochId uint64, commit t
 // commitment before the challenge window, and aggregate upserts during
 // the window would otherwise make FinalizeEpoch's root check fail even
 // for an honest network. The rewards commitment is deliberately left
-// untouched — reward records have no live submission path, so the
-// proposer's committed rewards root must not be overwritten with a
-// chain-derived (usually empty-set) root. Mirrors the aggregates part
-// of RecomputeEpochCommitments (challenge resolutions).
+// untouched here: reward records are submitted by the proposer through
+// MsgSubmitRewardRecords, and overwriting the committed rewards root with a
+// chain-derived root would make that submission fail its own root check. A
+// derived root equals the committed root only once every record has already
+// been submitted, which is exactly when there is nothing left to refresh.
+// Mirrors the aggregates part of RecomputeEpochCommitments (challenge
+// resolutions, which adjust reward records and therefore do recompute).
 func (k Keeper) RefreshAggregatesCommitment(ctx context.Context, epochId uint64) error {
 	commit, err := k.GetEpochCommit(ctx, epochId)
 	if err != nil {

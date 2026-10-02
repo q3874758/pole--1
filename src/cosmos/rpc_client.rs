@@ -12,6 +12,7 @@ pub struct BroadcastOptions {
     pub max_retries: u32,
     pub retry_delay: Duration,
     pub request_timeout: Duration,
+    pub commit: bool,
 }
 
 impl Default for BroadcastOptions {
@@ -20,6 +21,18 @@ impl Default for BroadcastOptions {
             max_retries: 3,
             retry_delay: Duration::from_secs(2),
             request_timeout: Duration::from_secs(15),
+            commit: false,
+        }
+    }
+}
+
+impl BroadcastOptions {
+    pub fn commit() -> Self {
+        Self {
+            max_retries: 3,
+            retry_delay: Duration::from_secs(2),
+            request_timeout: Duration::from_secs(30),
+            commit: true,
         }
     }
 }
@@ -144,6 +157,96 @@ impl TendermintRpc {
         })
     }
 
+    /// Broadcast a pre-signed transaction and wait for it to be committed in a block.
+    /// Returns the delivery result containing execution code and log.
+    pub async fn broadcast_tx_commit(
+        &self,
+        tx_bytes: &[u8],
+        opts: &BroadcastOptions,
+    ) -> Result<BroadcastTxResponse> {
+        let mut last_err = String::new();
+        for attempt in 1..=opts.max_retries.max(1) {
+            match self
+                .broadcast_tx_commit_once(tx_bytes, opts.request_timeout)
+                .await
+            {
+                Ok(resp) if resp.is_ok() => return Ok(resp),
+                Ok(resp) => {
+                    last_err = format!("code={} log={}", resp.code, resp.log);
+                    if !Self::is_retriable_code(resp.code) {
+                        return Ok(resp);
+                    }
+                }
+                Err(e) => last_err = e.to_string(),
+            }
+            if attempt < opts.max_retries {
+                tokio::time::sleep(opts.retry_delay).await;
+            }
+        }
+        Err(CosmosError::BroadcastExhausted {
+            attempts: opts.max_retries,
+            last: last_err,
+        })
+    }
+
+    async fn broadcast_tx_commit_once(
+        &self,
+        tx_bytes: &[u8],
+        timeout: Duration,
+    ) -> Result<BroadcastTxResponse> {
+        let tx_b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "pole-bridge",
+            "method": "broadcast_tx_commit",
+            "params": { "tx": tx_b64 }
+        });
+        let resp = self
+            .client
+            .post(&self.base_url)
+            .timeout(timeout)
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status();
+        let raw: serde_json::Value = resp.json().await?;
+        if !status.is_success() {
+            return Err(CosmosError::Rest {
+                status: status.as_u16(),
+                body: raw.to_string(),
+            });
+        }
+        if let Some(err) = raw.get("error") {
+            return Err(CosmosError::Rpc {
+                code: err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1) as i32,
+                message: err.to_string(),
+            });
+        }
+        let parsed: BroadcastTxCommitResponseWrapper =
+            serde_json::from_value(raw).map_err(|e| CosmosError::Decode(e.to_string()))?;
+        let commit = parsed.result;
+        let (code, log, codespace) = if commit.check_tx.code != 0 {
+            (
+                commit.check_tx.code,
+                commit.check_tx.log,
+                commit.check_tx.codespace,
+            )
+        } else {
+            (
+                commit.tx_result.code,
+                commit.tx_result.log,
+                commit.tx_result.codespace,
+            )
+        };
+        Ok(BroadcastTxResponse {
+            tx_hash: commit.hash,
+            code,
+            data: commit.tx_result.data.unwrap_or_default(),
+            log,
+            codespace,
+        })
+    }
+
     async fn broadcast_tx_sync_once(
         &self,
         tx_bytes: &[u8],
@@ -257,6 +360,46 @@ impl TendermintRpc {
 #[derive(Debug, Deserialize)]
 struct BroadcastTxResponseWrapper {
     result: BroadcastTxResponse,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
+struct ResponseCheckTx {
+    #[serde(default)]
+    code: u32,
+    #[serde(default)]
+    data: Option<String>,
+    #[serde(default)]
+    log: String,
+    #[serde(default)]
+    codespace: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ResponseDeliverTx {
+    #[serde(default)]
+    code: u32,
+    #[serde(default)]
+    data: Option<String>,
+    #[serde(default)]
+    log: String,
+    #[serde(default)]
+    codespace: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BroadcastTxCommitResult {
+    #[serde(default)]
+    check_tx: ResponseCheckTx,
+    #[serde(default, alias = "deliver_tx")]
+    tx_result: ResponseDeliverTx,
+    #[serde(default, rename = "hash", alias = "txhash")]
+    hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BroadcastTxCommitResponseWrapper {
+    result: BroadcastTxCommitResult,
 }
 
 #[cfg(test)]

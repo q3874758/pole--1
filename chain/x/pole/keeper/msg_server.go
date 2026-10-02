@@ -726,12 +726,92 @@ func (m *msgServer) SubmitRewardRecords(ctx context.Context, msg *types.MsgSubmi
 		)
 	}
 
+	if err := m.validateWitnessRewardSplit(ctx, msg.EpochId, records); err != nil {
+		return nil, err
+	}
+
 	for _, record := range records {
 		if err := m.keeper.SetRewardRecord(ctx, record); err != nil {
 			return nil, err
 		}
 	}
 	return &types.MsgSubmitRewardRecordsResponse{RewardRootHex: root, LeafCount: leafCount}, nil
+}
+
+// validateWitnessRewardSplit enforces the verify-reward rule on the submitted
+// record set: verify reward is paid for corroboration the chain actually
+// recorded, not for operating with the verify capability enabled.
+//
+// The check is deliberately phrased over the submitted set rather than over an
+// absolute pool, because the epoch's verify pool is itself a proposer-chosen
+// part of the committed reward root. Taking the sum of the verify rewards held
+// by witnesses that actually have credits makes the rule self-contained: the
+// chain asks only that the split among credit holders be exactly proportional
+// to their adopted-attestation counts, and that a node with no credits receive
+// none. That is a genuine consensus constraint — a proposer cannot hand the
+// whole pool to itself, and it cannot pay a node for merely running the
+// capability.
+//
+// Epochs with no witness credits (no settled valid session, or settlements
+// predating the mutual-proof feature) skip the check entirely, so historical
+// and challenge-adjusted epochs keep validating unchanged.
+func (m *msgServer) validateWitnessRewardSplit(ctx context.Context, epochId uint64, records []types.RewardRecord) error {
+	credits, err := m.keeper.WitnessCreditsForEpoch(ctx, epochId)
+	if err != nil {
+		return err
+	}
+	if len(credits) == 0 {
+		return nil
+	}
+
+	// The pool is whatever the submitted credited records add up to. The
+	// proportional check below then fixes every credited recipient's exact
+	// amount relative to that total, so a proposer cannot concentrate the
+	// split on one witness.
+	var creditedPool uint64
+	present := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		present[record.Recipient] = struct{}{}
+		if credits[record.Recipient] > 0 {
+			creditedPool += record.VerifyReward
+		}
+	}
+
+	// Every credited witness must appear in the submitted set. Without this,
+	// a proposer could simply omit the other witnesses and pay itself the
+	// whole credited total, which would then look perfectly proportional.
+	for witness := range credits {
+		if _, ok := present[witness]; !ok {
+			return errorsmod.Wrapf(
+				sdkerrors.ErrInvalidRequest,
+				"epoch %d reward records are missing witness %s, which corroborated settled sessions",
+				epochId, witness,
+			)
+		}
+	}
+
+	allocation := types.AllocateWitnessRewards(credits, creditedPool)
+	for _, record := range records {
+		if credits[record.Recipient] == 0 {
+			if record.VerifyReward != 0 {
+				return errorsmod.Wrapf(
+					sdkerrors.ErrInvalidRequest,
+					"reward record %s has verify reward %d but corroborated no settled session in epoch %d",
+					record.Recipient, record.VerifyReward, epochId,
+				)
+			}
+			continue
+		}
+		want := allocation[record.Recipient]
+		if record.VerifyReward != want {
+			return errorsmod.Wrapf(
+				sdkerrors.ErrInvalidRequest,
+				"reward record %s verify reward %d does not match the attestation-proportional split %d in epoch %d",
+				record.Recipient, record.VerifyReward, want, epochId,
+			)
+		}
+	}
+	return nil
 }
 
 func (m *msgServer) validateChallengeEvidence(ctx context.Context, challenge types.Challenge) error {

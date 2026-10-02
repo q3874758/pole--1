@@ -325,6 +325,14 @@ pub fn load_play_sessions(config: &NodeConfig) -> Vec<PlaySession> {
     load_directory::<PlaySession>(config, "play-sessions")
 }
 
+/// Heartbeats already recorded for one session, ordered by bucket index.
+pub fn load_play_heartbeats(config: &NodeConfig, session_id_hex: &str) -> Vec<PlayHeartbeat> {
+    crate::json_file::load_json_or_default::<Vec<PlayHeartbeat>, NodeDaemonError>(
+        play_heartbeat_path(config, session_id_hex),
+    )
+    .unwrap_or_default()
+}
+
 pub fn save_play_heartbeat(
     config: &NodeConfig,
     heartbeat: &PlayHeartbeat,

@@ -1,11 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,18 +13,22 @@ use crate::activity_collector::{
     collect_configured_activity_source, cross_validate_samples, ActivityCollectorError,
 };
 use crate::json_file::{load_json, load_json_or_default, save_pretty_json};
+use crate::mutual_proof::{
+    build_play_heartbeat, build_play_session, load_play_sessions, save_play_heartbeat,
+    save_play_session, PlaySessionInputs,
+};
 use crate::node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
 use crate::node_config::{NodeConfig, NodeConfigError};
 use crate::node_pipeline::{merkle_leaf_sha256, merkle_root, stable_hash32, AssembledBatch};
 use crate::node_rewards::{
-    adjusted_player_block_reward, effective_challenge_window_blocks,
+    active_mapped_apps, adjusted_player_block_reward, effective_challenge_window_blocks,
     effective_min_retention_epochs, effective_player_block_reward,
     effective_reward_adjustment_cap_bps, effective_reward_block_secs,
-    effective_target_network_weight_units, record_player_reward_tick, reward_local_epoch,
-    EpochRewardArtifact, NodeRewardError, PendingPlayerRewardBlockState, PlayerRewardTickArtifact,
-    RewardTickContext,
+    effective_target_network_weight_units, latest_activated_protocol_params,
+    record_player_reward_tick, reward_local_epoch, EpochRewardArtifact, NodeRewardError,
+    PendingPlayerRewardBlockState, PlayerRewardTickArtifact, RewardTickContext,
 };
 use crate::node_runtime::{CollectAndStoreOutcome, LocalNodeRuntime, NodeRuntimeError};
 use crate::node_settlement::{
@@ -1155,6 +1156,11 @@ struct TickCollectionContext {
     activity_failed_sources: Vec<String>,
     cross_validated_samples: usize,
     player_reward_tick_artifact: PlayerRewardTickArtifact,
+    /// Mapped game processes seen running this tick, as detected by
+    /// [`detect_active_game_processes`]. Carried up so the mutual-proof pass can
+    /// only prove liveness for a slot in which a mapped game was actually
+    /// running.
+    active_game_processes: Vec<String>,
 }
 
 struct TickEpochArtifacts {
@@ -1202,7 +1208,18 @@ fn run_collect_tick_with_client_inner(
         activity_failed_sources,
         cross_validated_samples,
         player_reward_tick_artifact,
+        active_game_processes,
     } = collect_tick_context(config, progress, client)?;
+    // Capture the best per-app population figure while `samples` is still
+    // owned here: the play-session claim records what this node itself saw.
+    let observed_players_by_app: BTreeMap<AppId, u64> = {
+        let mut observed = BTreeMap::new();
+        for sample in &samples {
+            let entry = observed.entry(sample.app_id).or_insert(0u64);
+            *entry = (*entry).max(sample.observed_players);
+        }
+        observed
+    };
     if !activity_failed_sources.is_empty() {
         eprintln!(
             "pole-node: {} activity source(s) failed this tick: {}",
@@ -1276,6 +1293,29 @@ fn run_collect_tick_with_client_inner(
     progress.reward_blocks_completed = progress
         .reward_blocks_completed
         .saturating_add(player_reward_tick_artifact.completed_reward_block_count as u64);
+    // Prove liveness for this slot before the cursor moves past it. A heartbeat
+    // is only meaningful for the `(epoch_id, slot_id)` the node actually played,
+    // so this must run while `progress` still names that slot.
+    match record_play_heartbeats(
+        config,
+        progress,
+        &active_game_processes,
+        &observed_players_by_app,
+        &outcome.assembled_batch.payload_cid,
+    ) {
+        Ok(proof) if proof.heartbeats_saved > 0 => {
+            eprintln!(
+                "pole-node: play proofs for epoch {} slot {}: {} new session(s), {} reused, {} heartbeat(s)",
+                progress.next_epoch_id,
+                progress.next_slot_id,
+                proof.sessions_created,
+                proof.sessions_reused,
+                proof.heartbeats_saved
+            );
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("pole-node: play heartbeat error: {err}"),
+    }
     progress.advance(config.runtime.slots_per_epoch);
     progress.save_json(progress_path(config))?;
 
@@ -1608,7 +1648,140 @@ fn collect_tick_context(
         activity_failed_sources,
         cross_validated_samples,
         player_reward_tick_artifact: player_reward_tick.artifact,
+        active_game_processes,
     })
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayHeartbeatTickOutcome {
+    pub sessions_created: usize,
+    pub sessions_reused: usize,
+    pub heartbeats_saved: usize,
+}
+
+/// Derive the reward-block window a slot belongs to and the heartbeat bucket
+/// within it, from the slot cursor alone.
+///
+/// A play session claims one whole reward block of play time, and the chain
+/// scores heartbeat coverage as `distinct buckets / ceil(play_seconds /
+/// bucket_seconds)`. Bucket indices must therefore spread across the block
+/// rather than restarting every slot. Both values are pure functions of
+/// `slot_id`, so a replayed tick derives an identical proof and identical
+/// heartbeats collapse onto one bucket instead of inflating the count.
+fn heartbeat_bucket_for_slot(
+    slot_id: u64,
+    block_secs: u64,
+    bucket_seconds: u64,
+    tick_interval_secs: u64,
+) -> (u64, u64) {
+    let slots_per_block = (block_secs / tick_interval_secs.max(1)).max(1);
+    let zero_based_slot = slot_id.saturating_sub(1);
+    let block_index = zero_based_slot / slots_per_block;
+    let block_offset = zero_based_slot % slots_per_block;
+    let elapsed_in_block_secs = block_offset.saturating_mul(tick_interval_secs);
+    (block_index, elapsed_in_block_secs / bucket_seconds.max(1))
+}
+
+/// Record this node's own play proofs for the current slot: one play session
+/// per mapped app observed running, plus one heartbeat per tick.
+///
+/// Liveness is only claimed for a slot in which a mapped game was actually
+/// detected, so an idle node accumulates no play time. Heartbeats land in
+/// distinct buckets as the block advances, which is what lets the chain's
+/// `MinHeartbeatCount` / `MinHeartbeatCoverageBps` gates corroborate a claim
+/// instead of taking it on faith. Writes are best-effort at the call site: a
+/// failure here must not abort the collect tick.
+fn record_play_heartbeats(
+    config: &NodeConfig,
+    progress: &LocalNodeProgress,
+    active_game_processes: &[String],
+    observed_players_by_app: &BTreeMap<AppId, u64>,
+    observation_cid: &str,
+) -> Result<PlayHeartbeatTickOutcome, NodeDaemonError> {
+    let mut outcome = PlayHeartbeatTickOutcome::default();
+    if active_game_processes.is_empty() || observation_cid.is_empty() {
+        return Ok(outcome);
+    }
+    let active_apps = active_mapped_apps(config, active_game_processes);
+    if active_apps.is_empty() {
+        return Ok(outcome);
+    }
+
+    let block_secs = effective_reward_block_secs(config).max(1);
+    let bucket_seconds = latest_activated_protocol_params(config)
+        .map(|params| params.mutual_proof.heartbeat_bucket_seconds)
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| crate::params::MutualProofParams::default().heartbeat_bucket_seconds)
+        .max(1);
+    let tick_interval_secs = effective_collect_interval_secs(config, active_game_processes).max(1);
+    let (block_index, bucket_index) = heartbeat_bucket_for_slot(
+        progress.next_slot_id,
+        block_secs,
+        bucket_seconds,
+        tick_interval_secs,
+    );
+
+    let identity = config.identity_keypair()?;
+    let node_id = config.node_id()?;
+    let slots_per_block = (block_secs / tick_interval_secs).max(1);
+    let stored_sessions = load_play_sessions(config);
+    let signed_at_millis = current_unix_millis()?;
+
+    for (_process_name, app_id) in active_apps {
+        let reused = stored_sessions.iter().find(|session| {
+            session.app_id == app_id
+                && session.epoch_id == progress.next_epoch_id
+                && session.slot_id.saturating_sub(1) / slots_per_block == block_index
+        });
+        let (session, session_created) = match reused {
+            Some(session) => (session.clone(), false),
+            None => {
+                let session = build_play_session(
+                    config,
+                    &identity,
+                    &PlaySessionInputs {
+                        app_id,
+                        epoch_id: progress.next_epoch_id,
+                        slot_id: progress.next_slot_id,
+                        play_seconds: block_secs,
+                        collector_id: node_id,
+                        observation_cid,
+                        observed_players: observed_players_by_app
+                            .get(&app_id)
+                            .copied()
+                            .unwrap_or(0),
+                    },
+                )?;
+                save_play_session(config, &session)?;
+                (session, true)
+            }
+        };
+
+        // A heartbeat already stored for this bucket proves the same thing as
+        // one we would write now, so only genuinely new proofs count.
+        let session_id_hex = crate::hex_32(session.session_id);
+        let already_recorded = crate::mutual_proof::load_play_heartbeats(config, &session_id_hex)
+            .iter()
+            .any(|current| current.bucket_index == bucket_index);
+        if already_recorded {
+            if !session_created {
+                outcome.sessions_reused += 1;
+            }
+            continue;
+        }
+
+        let heartbeat =
+            build_play_heartbeat(config, &identity, &session, bucket_index, signed_at_millis)?;
+        save_play_heartbeat(config, &heartbeat)?;
+        if session_created {
+            outcome.sessions_created += 1;
+        } else {
+            outcome.sessions_reused += 1;
+        }
+        outcome.heartbeats_saved += 1;
+    }
+
+    Ok(outcome)
 }
 
 fn current_adjustment_cycle_artifact(
@@ -2249,6 +2422,7 @@ fn run_collect_loop_with_client_inner(
 
         let active_game_processes = detect_active_game_processes(config);
         let sleep_secs = effective_collect_interval_secs(config, &active_game_processes);
+        crate::os_support::trim_process_working_set();
         thread::sleep(Duration::from_secs(sleep_secs));
     }
 
@@ -2283,6 +2457,7 @@ fn run_collect_loop_summary_with_client_inner(
 
         let active_game_processes = detect_active_game_processes(config);
         let sleep_secs = effective_collect_interval_secs(config, &active_game_processes);
+        crate::os_support::trim_process_working_set();
         thread::sleep(Duration::from_secs(sleep_secs));
     }
 
@@ -3092,69 +3267,16 @@ fn current_unix_millis() -> Result<u64, NodeDaemonError> {
 
 fn apply_background_runtime_hints(config: &NodeConfig) {
     if config.runtime.os_background_priority {
-        #[cfg(windows)]
-        {
-            let script = format!(
-                "$p = Get-Process -Id {}; $p.PriorityClass = 'Idle'",
-                std::process::id()
-            );
-            let _ = Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    &script,
-                ])
-                .status();
-        }
+        crate::os_support::apply_process_background_priority();
     }
 }
 
 pub fn detect_active_game_processes(config: &NodeConfig) -> Vec<String> {
-    detect_active_process_names(&config.runtime.game_process_names)
+    crate::os_support::detect_active_process_names(&config.runtime.game_process_names)
 }
 
 pub fn detect_foreground_process_name() -> Option<String> {
-    if let Ok(override_name) = env::var("POLE_CLIENT_FOREGROUND_PROCESS_OVERRIDE") {
-        return display_process_name(&override_name);
-    }
-
-    #[cfg(windows)]
-    {
-        let script = r#"
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class PoLEForegroundWindow {
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-}
-"@
-$hwnd = [PoLEForegroundWindow]::GetForegroundWindow()
-if ($hwnd -eq [IntPtr]::Zero) { return }
-$pid = 0
-[PoLEForegroundWindow]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
-if ($pid -gt 0) {
-    Get-Process -Id $pid -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName
-}
-"#;
-        let output = run_powershell_script(script)?;
-        let name = output
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())?;
-        display_process_name(name)
-    }
-
-    #[cfg(not(windows))]
-    {
-        None
-    }
+    crate::os_support::detect_foreground_process_name()
 }
 
 pub fn effective_collect_interval_secs(
@@ -3171,98 +3293,20 @@ pub fn effective_collect_interval_secs(
     }
 }
 
-fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
-    let configured = normalize_process_names(process_names);
-    if configured.is_empty() {
-        return Vec::new();
-    }
-
-    #[cfg(windows)]
-    {
-        let targets = configured
-            .iter()
-            .map(|name| format!("'{}'", name.replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(",");
-        let script = format!(
-            "$targets = @({targets}); Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $targets -contains $_.ProcessName.ToLowerInvariant() }} | Select-Object -ExpandProperty ProcessName -Unique"
-        );
-        if let Some(output) = run_powershell_script(&script) {
-            let running = output
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(|line| line.to_string())
-                .collect::<Vec<_>>();
-            return match_configured_process_names(&configured, &running);
-        }
-    }
-
-    Vec::new()
+pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
+    crate::os_support::detect_active_process_names(process_names)
 }
 
-fn normalize_process_names(process_names: &[String]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut normalized = Vec::new();
-    for name in process_names {
-        let name = normalize_process_name(name);
-        if !name.is_empty() && seen.insert(name.clone()) {
-            normalized.push(name);
-        }
-    }
-    normalized
+pub fn normalize_process_names(process_names: &[String]) -> Vec<String> {
+    crate::os_support::normalize_process_names(process_names)
 }
 
-#[cfg(windows)]
-fn match_configured_process_names(configured: &[String], running: &[String]) -> Vec<String> {
-    let running_set = normalize_process_names(running)
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    configured
-        .iter()
-        .filter(|name| running_set.contains(*name))
-        .cloned()
-        .collect()
+pub fn normalize_process_name(input: &str) -> String {
+    crate::os_support::normalize_process_name(input)
 }
 
-fn normalize_process_name(input: &str) -> String {
-    input
-        .trim()
-        .to_ascii_lowercase()
-        .trim_end_matches(".exe")
-        .to_string()
-}
-
-fn display_process_name(input: &str) -> Option<String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let base = if trimmed.len() >= 4 && trimmed[trimmed.len() - 4..].eq_ignore_ascii_case(".exe") {
-        &trimmed[..trimmed.len() - 4]
-    } else {
-        trimmed
-    };
-    Some(format!("{base}.exe"))
-}
-
-#[cfg(windows)]
-fn run_powershell_script(script: &str) -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+pub fn display_process_name(input: &str) -> Option<String> {
+    crate::os_support::display_process_name(input)
 }
 
 pub fn load_batches_for_epoch(
@@ -3765,6 +3809,125 @@ mod tests {
         assert_eq!(player_activity_blocks_for_epoch(&config, 0), 3);
         assert!(is_player_verifier(&config, 1));
         assert!(!is_player_verifier(&config, 2));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn heartbeat_buckets_spread_across_a_reward_block() {
+        // 3600 s block, 300 s ticks => 12 slots per block; 300 s buckets =>
+        // exactly one distinct bucket per slot, which is the most coverage a
+        // node can honestly claim.
+        let buckets = (1..=12)
+            .map(|slot| heartbeat_bucket_for_slot(slot, 3_600, 300, 300))
+            .collect::<Vec<_>>();
+        assert_eq!(buckets[0], (0, 0));
+        assert_eq!(buckets[11], (0, 11));
+        let distinct = buckets
+            .iter()
+            .map(|(_, bucket)| *bucket)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(distinct.len(), 12);
+
+        // The next block restarts at bucket 0 but advances the block index.
+        assert_eq!(heartbeat_bucket_for_slot(13, 3_600, 300, 300), (1, 0));
+    }
+
+    #[test]
+    fn heartbeat_bucket_secs_wider_than_ticks_collapses_buckets() {
+        // A 600 s bucket over 300 s ticks puts two consecutive slots in the
+        // same bucket; the chain counts distinct buckets, so the second proof
+        // must not inflate coverage.
+        assert_eq!(heartbeat_bucket_for_slot(1, 3_600, 600, 300), (0, 0));
+        assert_eq!(heartbeat_bucket_for_slot(2, 3_600, 600, 300), (0, 0));
+        assert_eq!(heartbeat_bucket_for_slot(3, 3_600, 600, 300), (0, 1));
+    }
+
+    #[test]
+    fn play_heartbeats_are_only_recorded_while_a_mapped_game_runs() {
+        let root = std::env::temp_dir().join(format!("pole-heartbeat-{}", std::process::id()));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = root.to_string_lossy().into_owned();
+        config.runtime.poll_interval_secs = 300;
+        config.runtime.slots_per_epoch = 288;
+        config.runtime.low_impact_mode = false;
+        config.reward.reward_block_secs = 3_600;
+        config.reward.game_mappings = vec![crate::node_config::RewardGameMapping {
+            process_name: "Game.exe".to_string(),
+            app_id: 730,
+            game_coefficient_ppm: 1_000_000,
+        }];
+        let identity = crate::wallet::KeyPair::from_seed(&[0x5Au8; 32]);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("identity.json"),
+            serde_json::to_string(&identity).unwrap(),
+        )
+        .unwrap();
+
+        let mut progress = LocalNodeProgress::default_from_config(&config);
+        let observed = BTreeMap::from([(730u32, 42u64)]);
+
+        // An idle node claims nothing, even with a valid observation payload.
+        let idle = record_play_heartbeats(&config, &progress, &[], &observed, "cid-1").unwrap();
+        assert_eq!(idle, PlayHeartbeatTickOutcome::default());
+        assert!(load_play_sessions(&config).is_empty());
+
+        let running = vec!["Game.exe".to_string()];
+        let first =
+            record_play_heartbeats(&config, &progress, &running, &observed, "cid-1").unwrap();
+        assert_eq!(first.sessions_created, 1);
+        assert_eq!(first.sessions_reused, 0);
+        assert_eq!(first.heartbeats_saved, 1);
+
+        let sessions = load_play_sessions(&config);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].app_id, 730);
+        assert_eq!(sessions[0].epoch_id, 1);
+        assert_eq!(sessions[0].slot_id, 1);
+        assert_eq!(sessions[0].play_seconds, 3_600);
+        assert_eq!(sessions[0].observed_players, 42);
+        let session_id_hex = crate::hex_32(sessions[0].session_id);
+        let heartbeats = crate::mutual_proof::load_play_heartbeats(&config, &session_id_hex);
+        assert_eq!(heartbeats.len(), 1);
+        assert_eq!(heartbeats[0].bucket_index, 0);
+
+        // Replaying the same slot reuses the session and the bucket instead of
+        // stacking a second heartbeat on it.
+        progress.next_slot_id = 1;
+        let replay =
+            record_play_heartbeats(&config, &progress, &running, &observed, "cid-1").unwrap();
+        assert_eq!(replay.heartbeats_saved, 0);
+        assert_eq!(replay.sessions_created, 0);
+        assert_eq!(replay.sessions_reused, 1);
+        assert_eq!(
+            crate::mutual_proof::load_play_heartbeats(&config, &session_id_hex).len(),
+            1
+        );
+
+        // Inside the same reward block the session is reused and the bucket
+        // advances, so coverage grows without a second play claim.
+        progress.next_slot_id = 2;
+        let next_bucket =
+            record_play_heartbeats(&config, &progress, &running, &observed, "cid-1").unwrap();
+        assert_eq!(next_bucket.sessions_created, 0);
+        assert_eq!(next_bucket.sessions_reused, 1);
+        assert_eq!(next_bucket.heartbeats_saved, 1);
+        assert_eq!(load_play_sessions(&config).len(), 1);
+        let heartbeats = crate::mutual_proof::load_play_heartbeats(&config, &session_id_hex);
+        assert_eq!(heartbeats.len(), 2);
+        assert_eq!(heartbeats[1].bucket_index, 1);
+
+        // A slot in the next reward block starts a fresh session rather than
+        // stretching the first one past its claimed duration.
+        progress.next_slot_id = 13;
+        let second_block =
+            record_play_heartbeats(&config, &progress, &running, &observed, "cid-2").unwrap();
+        assert_eq!(second_block.sessions_created, 1);
+        assert_eq!(load_play_sessions(&config).len(), 2);
 
         std::fs::remove_dir_all(&root).unwrap();
     }
