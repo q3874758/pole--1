@@ -105,6 +105,30 @@ pub fn print_protocol_params_summary(params: &ProtocolParams) {
         "slow_params_update_approval_bps={}",
         params.governance.slow_params_update_approval_bps
     );
+    // Mutual-proof gates (proto fields 24-31). Emitted so operators can
+    // confirm a chain was actually started with witness/heartbeat checks
+    // enabled instead of silently-zero gates.
+    let proof = &params.mutual_proof;
+    println!("min_witness_count={}", proof.min_witness_count);
+    println!(
+        "min_witness_observation_tolerance_ppm={}",
+        proof.min_witness_observation_tolerance_ppm
+    );
+    println!(
+        "min_distinct_observations={}",
+        proof.min_distinct_observations
+    );
+    println!("session_slash_bps={}", proof.session_slash_bps);
+    println!("min_heartbeat_count={}", proof.min_heartbeat_count);
+    println!(
+        "heartbeat_bucket_seconds={}",
+        proof.heartbeat_bucket_seconds
+    );
+    println!(
+        "min_heartbeat_coverage_bps={}",
+        proof.min_heartbeat_coverage_bps
+    );
+    println!("challenge_bond_burn_bps={}", proof.challenge_bond_burn_bps);
 }
 
 pub fn print_reward_adjustment_index(index: &RewardAdjustmentArtifactIndex) {

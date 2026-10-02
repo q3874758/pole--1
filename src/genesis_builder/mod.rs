@@ -296,6 +296,21 @@ fn default_pole_params() -> serde_json::Value {
         "reward_burn_threshold": 10000,
         "reward_burn_bps": 1000,
         "governance_burn_bps": 100,
+        // Verification and mutual-proof gates. These must be emitted
+        // explicitly: proto3 treats an absent field as zero, and a zero
+        // gate disables the corresponding check on-chain entirely. Leaving
+        // them out silently built chains that finalized without any
+        // verification coverage and accepted unproven play claims.
+        "min_verification_count": 3,
+        "min_player_verifier_share_bps": 5000,
+        "min_witness_count": 2,
+        "min_witness_observation_tolerance_ppm": 500_000,
+        "min_distinct_observations": 2,
+        "session_slash_bps": 5000,
+        "min_heartbeat_count": 2,
+        "heartbeat_bucket_seconds": 300,
+        "min_heartbeat_coverage_bps": 5000,
+        "challenge_bond_burn_bps": 2500,
     })
 }
 

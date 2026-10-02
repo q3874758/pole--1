@@ -189,10 +189,18 @@ impl LocalNodeRuntime {
             assembled_batch.payload_bytes.clone(),
         )?;
 
+        // Advertise our on-chain account address alongside the node id:
+        // peer batch announcements are how witnesses learn the collector's
+        // address, and the node id alone cannot produce it.
+        let collector_address = self.config.identity_account_bech32().unwrap_or_default();
+
         let batch_recipients = publish_best_effort(
             network,
             node_id,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled_batch)),
+            P2pMessage::Batch(batch_announcement_from_assembled(
+                &assembled_batch,
+                &collector_address,
+            )),
         )?;
 
         let stored_payload = if self.config.capabilities.store {

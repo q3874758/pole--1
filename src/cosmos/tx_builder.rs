@@ -5,7 +5,8 @@ use crate::cosmos::error::{CosmosError, Result};
 use crate::cosmos::tx_signer::{sign_with_keypair, SignedTx};
 use crate::cosmos::wire_types::{
     AggregateRecordWire, BatchCommitWire, EpochCommitWire, GameWeightEntryWire, NodeRecordWire,
-    ParamsWire, ReplicaReceiptWire,
+    ParamsWire, PlayHeartbeatWire, PlaySessionWire, ReplicaReceiptWire, RewardRecordWire,
+    WitnessAttestationWire,
 };
 use crate::primitives::{ChallengeState, EpochId};
 use crate::records::Challenge;
@@ -125,6 +126,38 @@ pub enum BridgeMessage {
     /// will reject the broadcast, but the type keeps the API stable
     /// for callers that want to compile against the full surface.
     Unsupported { type_url: String, note: String },
+    /// A node's signed claim that it played a mapped game for N seconds
+    /// in one slot (chain: MsgSubmitPlaySession).
+    SubmitPlaySession {
+        node_address: CosmosAddress,
+        session: PlaySessionWire,
+    },
+    /// One signed liveness proof for a play session
+    /// (chain: MsgSubmitPlayHeartbeat).
+    SubmitPlayHeartbeat {
+        node_address: CosmosAddress,
+        heartbeat: PlayHeartbeatWire,
+    },
+    /// An independent node's corroboration of a play session, carrying its
+    /// own observation (chain: MsgAttestSession).
+    AttestSession {
+        witness: CosmosAddress,
+        attestation: WitnessAttestationWire,
+    },
+    /// Ask the chain to evaluate a play session
+    /// (chain: MsgSettleSession).
+    SettleSession {
+        settler: CosmosAddress,
+        session_id_hex: String,
+    },
+    /// Submit the reward records backing an epoch's committed rewards root
+    /// (chain: MsgSubmitRewardRecords). This is the live reward-record path
+    /// that makes a committed reward root claimable.
+    SubmitRewardRecords {
+        proposer: CosmosAddress,
+        epoch_id: EpochId,
+        records: Vec<RewardRecordWire>,
+    },
 }
 
 impl BridgeMessage {
@@ -220,6 +253,39 @@ impl BridgeMessage {
                 type_url: type_url.clone(),
                 value: note.as_bytes().to_vec(),
             },
+            BridgeMessage::SubmitPlaySession {
+                node_address,
+                session,
+            } => crate::cosmos::pole_msgs::encode_msg_submit_play_session(
+                &node_address.bech32,
+                session,
+            ),
+            BridgeMessage::SubmitPlayHeartbeat {
+                node_address,
+                heartbeat,
+            } => crate::cosmos::pole_msgs::encode_msg_submit_play_heartbeat(
+                &node_address.bech32,
+                heartbeat,
+            ),
+            BridgeMessage::AttestSession {
+                witness,
+                attestation,
+            } => crate::cosmos::pole_msgs::encode_msg_attest_session(&witness.bech32, attestation),
+            BridgeMessage::SettleSession {
+                settler,
+                session_id_hex,
+            } => {
+                crate::cosmos::pole_msgs::encode_msg_settle_session(&settler.bech32, session_id_hex)
+            }
+            BridgeMessage::SubmitRewardRecords {
+                proposer,
+                epoch_id,
+                records,
+            } => crate::cosmos::pole_msgs::encode_msg_submit_reward_records(
+                &proposer.bech32,
+                *epoch_id,
+                records,
+            ),
         }
     }
 }

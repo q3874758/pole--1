@@ -54,6 +54,26 @@ func (m *MsgUpdateParams) GetSigners() []sdk.AccAddress {
 	return mustAccSigners(m.Authority)
 }
 
+func (m *MsgSubmitPlaySession) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.NodeAddress)
+}
+
+func (m *MsgSubmitPlayHeartbeat) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.NodeAddress)
+}
+
+func (m *MsgAttestSession) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.Witness)
+}
+
+func (m *MsgSettleSession) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.Settler)
+}
+
+func (m *MsgSubmitRewardRecords) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.Proposer)
+}
+
 func mustAccSigners(bech32 string) []sdk.AccAddress {
 	addr, err := sdk.AccAddressFromBech32(bech32)
 	if err != nil {

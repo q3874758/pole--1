@@ -18,20 +18,21 @@ pub struct SignDocInputs {
 }
 
 impl SignDocInputs {
-    /// Produce the canonical byte sequence that gets signed under
-    /// `SIGN_MODE_DIRECT`. The SDK definition is:
-    ///     sha256( body_bytes || auth_info_bytes || chain_id || account_number_be )
+    /// Produce the canonical `SignDoc` protobuf bytes that get signed
+    /// under `SIGN_MODE_DIRECT`. The SDK definition is:
+    ///     proto.Marshal(SignDoc{body_bytes, auth_info_bytes, chain_id, account_number})
     ///
-    /// Implemented by [`crate::cosmos::proto::sign_doc_hash`]; the
+    /// Implemented by [`crate::cosmos::proto::sign_doc_bytes`]; the
     /// indirection through a method is just so callers don't have to
     /// pass the four pieces of context separately.
-    pub fn signing_bytes(&self) -> [u8; 32] {
-        crate::cosmos::proto::sign_doc_hash(
+    pub fn signing_bytes(&self) -> Result<Vec<u8>> {
+        crate::cosmos::proto::sign_doc_bytes(
             &self.body_bytes,
             &self.auth_info_bytes,
             &self.chain_id,
             self.account_number,
         )
+        .map_err(|e| CosmosError::Encode(format!("SignDoc: {e}")))
     }
 }
 
@@ -67,7 +68,7 @@ impl SignedTx {
 /// signature is 64 bytes (Ed25519) and is what the SDK verifies under
 /// SignModeDirect.
 pub fn sign_sign_doc(keypair: &KeyPair, doc: &SignDocInputs) -> Result<Vec<u8>> {
-    let bytes = doc.signing_bytes();
+    let bytes = doc.signing_bytes()?;
     let sig = keypair.sign(&bytes);
     if sig.len() != 64 {
         return Err(CosmosError::InvalidSignatureLength(sig.len()));
@@ -110,10 +111,45 @@ mod tests {
             chain_id: "pole-test".into(),
             account_number: 42,
         };
-        let a = doc.signing_bytes();
-        let b = doc.signing_bytes();
+        let a = doc.signing_bytes().unwrap();
+        let b = doc.signing_bytes().unwrap();
         assert_eq!(a, b);
-        assert_eq!(a.len(), 32, "SHA-256 output is 32 bytes");
+    }
+
+    /// The sign bytes must be a real protobuf `SignDoc` message — the
+    /// SDK's `SignModeDirect` handler marshals exactly this struct and
+    /// Ed25519 hashes it internally. Asserting the literal wire bytes
+    /// pins the encoding against a regression to a hand-rolled
+    /// concatenation + sha256 (which the chain rejects as
+    /// `ErrUnauthorized`).
+    #[test]
+    fn sign_doc_signing_bytes_are_a_proto_sign_doc() {
+        use crate::cosmos::proto::Message;
+        let doc = SignDocInputs {
+            body_bytes: vec![1, 2, 3],
+            auth_info_bytes: vec![4, 5, 6],
+            chain_id: "pole-test".into(),
+            account_number: 42,
+        };
+        let bytes = doc.signing_bytes().unwrap();
+
+        // tag 1 (body_bytes, LEN), tag 2 (auth_info_bytes, LEN),
+        // tag 3 (chain_id, LEN), tag 4 (account_number, VARINT) — in
+        // ascending field order.
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&[0x0A, 0x03, 1, 2, 3]);
+        expected.extend_from_slice(&[0x12, 0x03, 4, 5, 6]);
+        expected.extend_from_slice(&[0x1A, 0x09]);
+        expected.extend_from_slice(b"pole-test");
+        expected.extend_from_slice(&[0x20, 0x2A]);
+        assert_eq!(bytes, expected);
+
+        // Round-trip through the upstream proto type.
+        let parsed = crate::cosmos::proto::SignDoc::decode(bytes.as_slice()).unwrap();
+        assert_eq!(parsed.body_bytes, vec![1, 2, 3]);
+        assert_eq!(parsed.auth_info_bytes, vec![4, 5, 6]);
+        assert_eq!(parsed.chain_id, "pole-test");
+        assert_eq!(parsed.account_number, 42);
     }
 
     #[test]

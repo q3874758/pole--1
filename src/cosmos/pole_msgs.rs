@@ -25,6 +25,9 @@
 //! tripping the missing-field default.
 
 use crate::cosmos::proto::Any;
+use crate::cosmos::wire_types::{
+    PlayHeartbeatWire, PlaySessionWire, RewardRecordWire, WitnessAttestationWire,
+};
 use crate::primitives::{ChallengeKind, ChallengeState};
 use crate::records::{Challenge, ChallengeEvidenceRef};
 
@@ -124,9 +127,8 @@ pub fn encode_msg_claim_reward(claimer_bech32: &str, epoch_id: u64, recipient_be
 ///
 /// `challenge_id`, `target_node`, `challenger_address` (from
 /// `records::Challenge`) and the evidence roots/cid are emitted as
-/// lowercase hex strings 閳?the chain's `GetChallenge` / `GetNode`
-/// lookup keys accept hex form for now (`chain_bridge.rs::challenge_to_json`
-/// uses the same convention).
+/// lowercase hex strings — the chain's `GetChallenge` / `GetNode`
+/// lookup keys accept hex form for now.
 pub fn encode_msg_open_challenge(challenger_bech32: &str, challenge: &Challenge) -> Any {
     let mut buf = Vec::with_capacity(256);
     // Outer field1: challenger (bech32 string).
@@ -641,6 +643,172 @@ fn encode_params_inner(p: &ParamsWire) -> Vec<u8> {
     encode_uint64(22, p.min_verification_count, &mut buf);
     // proto field 23 (uint32): min_player_verifier_share_bps.
     encode_uint32(23, p.min_player_verifier_share_bps, &mut buf);
+    // proto fields 24-31: the mutual-proof / heartbeat / burn parameters.
+    // Omitting them on the wire silently zeroes the chain-side gates that
+    // decide whether a play claim is corroborated.
+    encode_uint64(24, p.min_witness_count, &mut buf);
+    encode_uint32(25, p.min_witness_observation_tolerance_ppm, &mut buf);
+    encode_uint64(26, p.min_distinct_observations, &mut buf);
+    encode_uint32(27, p.session_slash_bps, &mut buf);
+    encode_uint64(28, p.min_heartbeat_count, &mut buf);
+    encode_uint64(29, p.heartbeat_bucket_seconds, &mut buf);
+    encode_uint32(30, p.min_heartbeat_coverage_bps, &mut buf);
+    encode_uint32(31, p.challenge_bond_burn_bps, &mut buf);
+    buf
+}
+
+/// `MsgSubmitPlaySession` — a node's signed claim that it played a mapped
+/// game for N seconds in one slot.
+///
+/// pole.chain.pole.v1.MsgSubmitPlaySession {
+///   string node_address = 1;
+///   PlaySession session = 2;
+/// }
+pub fn encode_msg_submit_play_session(node_address_bech32: &str, session: &PlaySessionWire) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, node_address_bech32, &mut buf);
+    let inner = encode_play_session_inner(session);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSubmitPlaySession".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_play_session_inner(s: &PlaySessionWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(192);
+    encode_string(1, &s.session_id_hex, &mut buf);
+    encode_string(2, &s.node_address, &mut buf);
+    encode_uint32(3, s.app_id, &mut buf);
+    encode_uint64(4, s.epoch_id, &mut buf);
+    encode_uint64(5, s.slot_id, &mut buf);
+    encode_uint64(6, s.play_seconds, &mut buf);
+    encode_string(7, &s.collector_address, &mut buf);
+    encode_string(8, &s.observation_cid, &mut buf);
+    encode_uint64(9, s.observed_players, &mut buf);
+    encode_int64(10, s.submitted_at_height, &mut buf);
+    encode_string(11, &s.session_signature, &mut buf);
+    buf
+}
+
+/// `MsgSubmitPlayHeartbeat` — one signed liveness proof for a session.
+///
+/// pole.chain.pole.v1.MsgSubmitPlayHeartbeat {
+///   string node_address = 1;
+///   PlayHeartbeat heartbeat = 2;
+/// }
+pub fn encode_msg_submit_play_heartbeat(
+    node_address_bech32: &str,
+    heartbeat: &PlayHeartbeatWire,
+) -> Any {
+    let mut buf = Vec::with_capacity(160);
+    encode_string(1, node_address_bech32, &mut buf);
+    let inner = encode_play_heartbeat_inner(heartbeat);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSubmitPlayHeartbeat".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_play_heartbeat_inner(h: &PlayHeartbeatWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(128);
+    encode_string(1, &h.session_id_hex, &mut buf);
+    encode_string(2, &h.node_address, &mut buf);
+    encode_uint64(3, h.bucket_index, &mut buf);
+    encode_int64(4, h.signed_at_millis, &mut buf);
+    encode_string(5, &h.heartbeat_signature, &mut buf);
+    buf
+}
+
+/// `MsgAttestSession` — an independent node corroborating a play session
+/// with its own observation.
+///
+/// pole.chain.pole.v1.MsgAttestSession {
+///   string witness = 1;
+///   WitnessAttestation attestation = 2;
+/// }
+pub fn encode_msg_attest_session(
+    witness_bech32: &str,
+    attestation: &WitnessAttestationWire,
+) -> Any {
+    let mut buf = Vec::with_capacity(256);
+    encode_string(1, witness_bech32, &mut buf);
+    let inner = encode_witness_attestation_inner(attestation);
+    encode_bytes(2, &inner, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgAttestSession".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_witness_attestation_inner(a: &WitnessAttestationWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(192);
+    encode_string(1, &a.session_id_hex, &mut buf);
+    encode_string(2, &a.witness_address, &mut buf);
+    encode_uint64(3, a.observed_play_seconds, &mut buf);
+    encode_string(4, &a.witness_observation_cid, &mut buf);
+    encode_uint64(5, a.observed_players, &mut buf);
+    encode_int64(6, a.attested_at_height, &mut buf);
+    encode_string(7, &a.witness_signature, &mut buf);
+    buf
+}
+
+/// `MsgSettleSession` — asks the chain to evaluate a session. The caller
+/// supplies only the id; the verdict is computed from stored evidence.
+///
+/// pole.chain.pole.v1.MsgSettleSession {
+///   string settler = 1;
+///   string session_id_hex = 2;
+/// }
+pub fn encode_msg_settle_session(settler_bech32: &str, session_id_hex: &str) -> Any {
+    let mut buf = Vec::with_capacity(settler_bech32.len() + session_id_hex.len() + 16);
+    encode_string(1, settler_bech32, &mut buf);
+    encode_string(2, session_id_hex, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSettleSession".to_string(),
+        value: buf,
+    }
+}
+
+/// `MsgSubmitRewardRecords` — the live reward-record submission path.
+///
+/// pole.chain.pole.v1.MsgSubmitRewardRecords {
+///   string proposer = 1;
+///   uint64 epoch_id = 2;
+///   repeated RewardRecord records = 3;
+/// }
+pub fn encode_msg_submit_reward_records(
+    proposer_bech32: &str,
+    epoch_id: u64,
+    records: &[RewardRecordWire],
+) -> Any {
+    let mut buf = Vec::with_capacity(128 + records.len() * 96);
+    encode_string(1, proposer_bech32, &mut buf);
+    encode_uint64(2, epoch_id, &mut buf);
+    // Field 3 is `repeated RewardRecord`; proto3 emits one length-delimited
+    // tag per element (not packed, since the element is a message).
+    for record in records {
+        let inner = encode_reward_record_inner(record);
+        encode_bytes(3, &inner, &mut buf);
+    }
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgSubmitRewardRecords".to_string(),
+        value: buf,
+    }
+}
+
+fn encode_reward_record_inner(r: &RewardRecordWire) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(96);
+    encode_uint64(1, r.epoch_id, &mut buf);
+    encode_string(2, &r.recipient, &mut buf);
+    encode_uint64(3, r.player_reward, &mut buf);
+    encode_uint64(4, r.collect_reward, &mut buf);
+    encode_uint64(5, r.store_reward, &mut buf);
+    encode_uint64(6, r.verify_reward, &mut buf);
+    encode_uint64(7, r.propose_reward, &mut buf);
+    encode_uint64(8, r.slash_debit, &mut buf);
+    encode_uint64(9, r.net_reward, &mut buf);
     buf
 }
 
@@ -1327,21 +1495,165 @@ mod tests {
 
     #[test]
     fn params_wire_matches_go_proto_marshal_golden() {
-        // Cross-language golden: the same 23-field Params marshaled by
+        // Cross-language golden: the same 31-field Params marshaled by
         // Go's gogoproto (chain/x/pole/types Params, proto.Marshal)
         // produced this exact byte string. Any drift in field order,
         // tag, or varint encoding breaks the byte-identical lock.
         let p = full_params_fixture();
         let expected = hex_decode(
-            "08901c106418c0843d20d00f2864300538d83640d00f48c41350c41358c41360c41368a0c21e70c09a0c7880ea308001a08d068801a0f7369001f4039801c0843da00164a80164b00103b8018827",
+            "08901c106418c0843d20d00f2864300538d83640d00f48c41350c41358c41360c41368a0c21e70c09a0c7880ea308001a08d068801a0f7369001f4039801c0843da00164a80164b00103b8018827c00102c801a0c21ed00102d8018827e00102e801ac02f0018827f801c413",
         );
         let inner = encode_params_inner(&p);
         assert_eq!(inner, expected);
-        assert_eq!(inner.len(), 78);
-        // The two verification gates must be present: a Rust-built
-        // MsgUpdateParams must never silently zero them (that would
-        // disable FinalizeEpoch's verification-coverage gates).
-        assert!(inner.ends_with(&[0xB0, 0x01, 0x03, 0xB8, 0x01, 0x88, 0x27]));
+        assert_eq!(inner.len(), 108);
+        // The verification and mutual-proof gates must be present: a
+        // Rust-built MsgUpdateParams must never silently zero them (that
+        // would disable FinalizeEpoch's coverage gates and the session
+        // witness/heartbeat gates).
+        //
+        // Tail: field 22 (0xB0 0x01 + 3), field 23 (0xB8 0x01 + 5000),
+        // then fields 24-31 — min_witness_count(2), tolerance(500000),
+        // min_distinct_observations(2), session_slash_bps(5000),
+        // min_heartbeat_count(2), heartbeat_bucket_seconds(300),
+        // min_heartbeat_coverage_bps(5000), challenge_bond_burn_bps(2500).
+        assert!(inner.ends_with(&[
+            0xB0, 0x01, 0x03, // min_verification_count = 3
+            0xB8, 0x01, 0x88, 0x27, // min_player_verifier_share_bps = 5000
+            0xC0, 0x01, 0x02, // min_witness_count = 2
+            0xC8, 0x01, 0xA0, 0xC2, 0x1E, // min_witness_observation_tolerance_ppm
+            0xD0, 0x01, 0x02, // min_distinct_observations = 2
+            0xD8, 0x01, 0x88, 0x27, // session_slash_bps = 5000
+            0xE0, 0x01, 0x02, // min_heartbeat_count = 2
+            0xE8, 0x01, 0xAC, 0x02, // heartbeat_bucket_seconds = 300
+            0xF0, 0x01, 0x88, 0x27, // min_heartbeat_coverage_bps = 5000
+            0xF8, 0x01, 0xC4, 0x13, // challenge_bond_burn_bps = 2500
+        ]));
+    }
+
+    // --- Mutual-proof messages -----------------------------------------
+
+    fn play_session_fixture() -> PlaySessionWire {
+        PlaySessionWire {
+            session_id_hex: "aa".repeat(32),
+            node_address: "cosmos1player".into(),
+            app_id: 730,
+            epoch_id: 9,
+            slot_id: 3,
+            play_seconds: 600,
+            collector_address: "cosmos1player".into(),
+            observation_cid: "player-observation".into(),
+            observed_players: 1_000,
+            submitted_at_height: 0,
+            session_signature: "deadbeef".into(),
+        }
+    }
+
+    #[test]
+    fn submit_play_session_encodes_expected_wire_bytes() {
+        let session = play_session_fixture();
+        let any = encode_msg_submit_play_session("cosmos1player", &session);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSubmitPlaySession");
+        // field 1 (node_address) tag = (1 << 3) | 2 = 0x0A
+        assert_eq!(any.value[0], 0x0A);
+        // field 2 (session) tag = (2 << 3) | 2 = 0x12
+        assert!(any.value.contains(&0x12));
+        // The nested session must carry app_id 730 (field 3, tag 0x18) and
+        // play_seconds 600 (field 6, tag 0x30 + varint 0xD8 0x04).
+        assert!(
+            any.value.windows(3).any(|w| w == [0x18u8, 0xDA, 0x05]),
+            "expected app_id 730 varint in session, got {:02x?}",
+            any.value
+        );
+    }
+
+    #[test]
+    fn submit_play_heartbeat_encodes_expected_wire_bytes() {
+        let heartbeat = PlayHeartbeatWire {
+            session_id_hex: "bb".repeat(32),
+            node_address: "cosmos1player".into(),
+            bucket_index: 7,
+            signed_at_millis: 1_700_000_000_000,
+            heartbeat_signature: "cafe".into(),
+        };
+        let any = encode_msg_submit_play_heartbeat("cosmos1player", &heartbeat);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSubmitPlayHeartbeat");
+        assert_eq!(any.value[0], 0x0A);
+        // bucket_index 7 at field 3, tag 0x18
+        assert!(
+            any.value.windows(2).any(|w| w == [0x18, 0x07]),
+            "expected bucket_index varint, got {:02x?}",
+            any.value
+        );
+    }
+
+    #[test]
+    fn attest_session_encodes_expected_wire_bytes() {
+        let attestation = WitnessAttestationWire {
+            session_id_hex: "cc".repeat(32),
+            witness_address: "cosmos1witness".into(),
+            observed_play_seconds: 600,
+            witness_observation_cid: "witness-observation-a".into(),
+            observed_players: 1_000,
+            attested_at_height: 0,
+            witness_signature: "beef".into(),
+        };
+        let any = encode_msg_attest_session("cosmos1witness", &attestation);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgAttestSession");
+        assert_eq!(any.value[0], 0x0A);
+        // The witness's own observation CID must survive encoding: it is
+        // what the chain checks for independence.
+        assert!(
+            any.value
+                .windows(b"witness-observation-a".len())
+                .any(|w| w == b"witness-observation-a"),
+            "expected witness observation cid bytes"
+        );
+    }
+
+    #[test]
+    fn settle_session_encodes_expected_wire_bytes() {
+        let any = encode_msg_settle_session("cosmos1settler", "dd".repeat(32).as_str());
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSettleSession");
+        assert_eq!(any.value[0], 0x0A);
+        // field 2 (session_id_hex) tag = 0x12
+        assert!(any.value.contains(&0x12));
+    }
+
+    #[test]
+    fn submit_reward_records_emits_one_tag_per_record() {
+        let records = vec![
+            RewardRecordWire {
+                epoch_id: 9,
+                recipient: "cosmos1a".into(),
+                player_reward: 50,
+                collect_reward: 0,
+                store_reward: 0,
+                verify_reward: 0,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 50,
+            },
+            RewardRecordWire {
+                epoch_id: 9,
+                recipient: "cosmos1b".into(),
+                player_reward: 0,
+                collect_reward: 10,
+                store_reward: 0,
+                verify_reward: 20,
+                propose_reward: 0,
+                slash_debit: 0,
+                net_reward: 30,
+            },
+        ];
+        let any = encode_msg_submit_reward_records("cosmos1proposer", 9, &records);
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgSubmitRewardRecords");
+        assert_eq!(any.value[0], 0x0A);
+        // field 3 is `repeated RewardRecord`: one 0x1A tag per element.
+        let repeated_tags = any.value.windows(1).filter(|w| w[0] == 0x1A).count();
+        assert!(
+            repeated_tags >= 2,
+            "expected at least two field-3 tags, got {repeated_tags}"
+        );
     }
 
     fn full_params_fixture() -> ParamsWire {
@@ -1369,6 +1681,14 @@ mod tests {
             governance_burn_bps: 100,
             min_verification_count: 3,
             min_player_verifier_share_bps: 5_000,
+            min_witness_count: 2,
+            min_witness_observation_tolerance_ppm: 500_000,
+            min_distinct_observations: 2,
+            session_slash_bps: 5_000,
+            min_heartbeat_count: 2,
+            heartbeat_bucket_seconds: 300,
+            min_heartbeat_coverage_bps: 5_000,
+            challenge_bond_burn_bps: 2_500,
         }
     }
 

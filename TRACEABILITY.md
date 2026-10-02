@@ -61,7 +61,10 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | 查询客户端 | `src/cosmos/query_client.rs` | account / sequence / height 查询 |
 | 地址转换 | `src/cosmos/address.rs` | hex ↔ bech32 |
 | EIP-712 | `src/cosmos/eip712.rs` | typed-data 签名 helper |
-| 链桥接口 | `src/chain_bridge.rs` | 桥接层入口 |
+| CLI 提交命令 | `src/cli_client.rs` | submit-batch / submit-epoch / export-tx（真实 proto3 + 广播） |
+| 互证记录构造 | `src/mutual_proof.rs` | PlaySession / PlayHeartbeat / WitnessAttestation 构造与 wire 投影 |
+| 互证 CLI | `src/cli_node.rs` | play-session / play-heartbeat / attest-session / settle-session / submit-reward-records |
+| 互证链上逻辑 | 不适用（链下构造） | `chain/x/pole/keeper/session.go` |
 
 ---
 
@@ -81,6 +84,11 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `Player_Hour_Weight` | `node_rewards.rs` - `effective_player_block_reward` | `types/reward_math.go` |
 | `Effective_Play_Time` | `activity_collector.rs` - `ActivityCollector` | 不适用（链下） |
 | `Game_Weight` | `node_gvs.rs` - `compute_gvs_microunits` | `types/state.pb.go` - `GameWeightEntry` |
+| 游玩声明 | `mutual_proof.rs` - `build_play_session` | `MsgSubmitPlaySession` → `keeper.SettlePlaySession` |
+| 心跳 | `mutual_proof.rs` - `build_play_heartbeat` | `MsgSubmitPlayHeartbeat` → `heartbeatCoverageBPS` |
+| 见证证明 | `mutual_proof.rs` - `build_witness_attestation` | `MsgAttestSession` → `validateWitnessIndependence` |
+| 会话结算 | `mutual_proof.rs` - `session_id_from_parts` | `MsgSettleSession` → `SettlePlaySession` |
+| 有效会话权重 | `node_rewards.rs` - `local_witness_attestation_count` | `session.go` - `ValidSessionWeightUnitsForEpoch` |
 
 ### 3.3 小时奖励分账
 
@@ -89,6 +97,8 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `Player_Hour_Reward` | `node_rewards.rs` - `reward_local_epoch` 公式 | `keeper.CalcPlayerReward` |
 | `Hourly_Reward_Pool` | `tokenomics.rs` - `PLAYER_REWARD_ALLOCATION_BPS` | `x/mint` 模块 |
 | `Total_Hour_Weight` | `node_aggregator.rs` - `aggregate_record_root` | `keeper.ComputeEpochCommitments` |
+| 见证奖励二次分配 | `node_rewards.rs` - `local_witness_attestation_count` | `types/witness_reward.go` - `AllocateWitnessRewards` |
+| 见证信用 | 不适用（链上计） | `session.go` - `WitnessCreditsForEpoch` |
 
 ### 3.4 跨周期调节
 
@@ -131,6 +141,8 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | 证据取回 | `storage_book.rs` - `LocalRetentionBook` | `MsgSubmitReplicaReceipt` |
 | 惩罚机制 | `node_storage_audit.rs` | `MsgResolveChallenge` 带 `slash_fraction_bps` |
 | 挑战验证 | `node_verifier.rs` | `keeper.validateChallengeEvidence` |
+| 虚假游玩惩罚 | `mutual_proof.rs` - `WitnessAttestation` 独立性 | `keeper.SettlePlaySession` + `applyChallengeRewardEffects` |
+| 销毁五通道 | `tokenomics.rs` - 销毁参数 | `chain/x/pole/keeper/burn.go` |
 
 ---
 
@@ -154,6 +166,9 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `Player_Hour_Weight = Effective_Play_Time × Game_Weight` | `node_rewards.rs:adjusted_player_block_reward` | `types/reward_math.go:CalcPlayerWeight` |
 | `Player_Hour_Reward = Hourly_Reward_Pool × Player_Hour_Weight / Total_Hour_Weight` | `node_rewards.rs:reward_local_epoch` | `types/reward_math.go:CalcPlayerReward` |
 | `Next_Period_Player_Reward = Adjust(Base, Target, Previous)` | `node_rewards.rs:adjusted_player_block_reward` | `types/reward_math.go:AdjustReward` |
+| `Annual_Issuance(year) = Annual_Emission_Amount(year) × Activity_Factor` | `tokenomics.rs` - `annual_emission` | `types/emission.go:AnnualAdjustedEmission` |
+| `Witness_Reward = AllocateWitnessRewards(credits, verify_pool)` | `node_rewards.rs` - `local_witness_attestation_count` | `types/witness_reward.go:AllocateWitnessRewards` |
+| `Net Supply Change = Gross Emission − Gross Burn` | 不适用（链上账本） | `chain/app/supply_simulation_test.go` + `keeper/burn.go` |
 
 ---
 
@@ -179,9 +194,9 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `src/governance_runtime.rs` | 治理执行 |
 | `src/wallet/` | 密钥管理和签名 |
 | `src/tokenomics.rs` | 代币经济参数 |
-| `src/params.rs` | 协议参数 |
-| `src/chain_bridge.rs` | Rust→Cosmos 桥接层入口 |
-| `src/cosmos/` | 桥接层：编码 / 签名 / 广播 / 查询 / 地址 |
+| `src/params.rs` | 协议参数（含 `MutualProofParams`） |
+| `src/mutual_proof.rs` | 互证记录：PlaySession / PlayHeartbeat / WitnessAttestation 构造、wire 投影与持久化 |
+| `src/cosmos/` | 链交互：proto3 编码 / 签名 / 广播 / 查询 / 地址 |
 
 ### Cosmos 链文件
 
@@ -191,10 +206,15 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `chain/x/pole/types/tx.proto` | 消息类型 |
 | `chain/x/pole/types/query.proto` | 查询类型 |
 | `chain/x/pole/keeper/keeper.go` | 状态持久化和业务逻辑 |
+| `chain/x/pole/keeper/session.go` | 互证：见证独立性、心跳覆盖、会话结算、见证信用 |
+| `chain/x/pole/keeper/burn.go` | 销毁五通道：奖励池 / 手续费 / 保证金托管与结算 |
+| `chain/x/pole/keeper/emission.go` | 无上限发行：衰减参考曲线 + 活跃度挂钩调节 |
+| `chain/x/pole/types/witness_reward.go` | 见证奖励精确切分（最大余数法 + 字典序 tie-break） |
 | `chain/x/pole/keeper/msg_server.go` | 消息处理器 |
 | `chain/x/pole/keeper/query_server.go` | 查询处理器 |
 | `chain/x/pole/module.go` | 模块集成 |
 | `chain/app/app.go` | 应用连接 |
+| `chain/app/ante.go` | 手续费销毁装饰器（`fee_burn_bps`） |
 | `chain/app/params/encoding.go` | 编码配置 |
 | `chain/cmd/poled/main.go` | CLI 入口 |
 | `chain/cmd/poled/cmd/root.go` | 命令脚手架 |
@@ -212,3 +232,8 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 5. ✅ **跨周期调节:** `node_rewards.rs` 通过 `adjusted_player_block_reward` 实现负反馈
 6. ✅ **GVS 层级:** `node_gvs.rs:classify_tier` 将分数映射到 ppm 范围层级
 7. ✅ **服务奖励分配:** `tokenomics.rs` 定义了 `SERVICE_REWARD_ALLOCATION_BPS`
+8. ✅ **互证判定:** `mutual_proof.rs` 构造声明/心跳/见证，`keeper/session.go:SettlePlaySession` 按心跳覆盖、见证数与独立观测数判定有效性
+9. ✅ **见证独立性:** `session.go:validateWitnessIndependence` 拒绝自证、自采、无自有观测、复用观测载荷与超容差偏离
+10. ✅ **见证奖励切分:** `types/witness_reward.go:AllocateWitnessRewards` 精确耗尽 `verify_pool`，字典序 tie-break 保证共识一致
+11. ✅ **无上限发行:** `keeper/emission.go` 无月度配额与剩余预算截断，`PayoutClaimedReward` 按需补铸精确短缺额
+12. ✅ **长期供给受控:** `chain/app/supply_simulation_test.go` 实测 30 年发行率单调衰减、20 年销毁随活跃度跟进

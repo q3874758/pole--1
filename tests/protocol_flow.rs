@@ -1,9 +1,9 @@
 use pole_protocol_draft::{
     execute_block, BatchCommit, Block, Capability, Challenge, ChallengeEvidenceRef,
     ChallengeResolution, ChallengeResponseTx, ChallengeState, ClaimRewardTx, CommitEpochTx,
-    EpochCommit, FeeParams, GovernanceParams, MerkleCommitment, NodeRegistry, NodeStatus,
-    OpenChallengeTx, ProposeProtocolParamsUpdateTx, ProtocolParams, ProtocolState, ProtocolStore,
-    RewardParams, RewardRecord, SlashingParams, StakeTx, SubmitBatchTx, Transaction,
+    EpochCommit, FeeParams, GovernanceParams, MerkleCommitment, MutualProofParams, NodeRegistry,
+    NodeStatus, OpenChallengeTx, ProposeProtocolParamsUpdateTx, ProtocolParams, ProtocolState,
+    ProtocolStore, RewardParams, RewardRecord, SlashingParams, StakeTx, SubmitBatchTx, Transaction,
     TransitionError, UnbondTx, VoteChoice, VoteTx,
 };
 
@@ -88,6 +88,7 @@ fn test_params() -> ProtocolParams {
             medium_deviation_bps: 500,
             severe_deviation_bps: 2_000,
         },
+        mutual_proof: MutualProofParams::default(),
     }
 }
 

@@ -53,7 +53,7 @@ fn peers_receive_batch_and_receipt_gossip() {
     network
         .publish(
             collector,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     network
@@ -117,7 +117,7 @@ fn bootstrap_peer_registers_subscriptions_and_discovery_view() {
     network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     assert_eq!(network.drain_inbox(listener).unwrap().len(), 1);
@@ -175,7 +175,7 @@ fn bootstrap_topology_registers_multiple_peer_roles() {
         network
             .publish(
                 source,
-                P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+                P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
             )
             .unwrap(),
         2
@@ -285,7 +285,7 @@ fn unsubscribe_and_remove_peer_stop_delivery_and_drop_provider_state() {
     network
         .publish(
             provider,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     assert_eq!(network.drain_inbox(listener).unwrap().len(), 1);
@@ -376,7 +376,7 @@ fn filesystem_network_publishes_and_retrieves_payloads() {
     network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     network
@@ -442,7 +442,7 @@ fn socket_network_publishes_and_retrieves_payloads() {
     source_network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     source_network
@@ -534,7 +534,7 @@ fn socket_network_can_publish_back_to_learned_peer() {
     source_network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
     std::thread::sleep(Duration::from_millis(25));
@@ -667,7 +667,7 @@ fn socket_network_can_learn_peer_from_publish_without_hello() {
     source_network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
 
@@ -711,7 +711,7 @@ fn socket_network_learned_peer_triggers_reverse_profile_announcement() {
     source_network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
 
@@ -855,7 +855,7 @@ fn socket_network_prunes_stale_learned_peer() {
     source_network
         .publish(
             source,
-            P2pMessage::Batch(batch_announcement_from_assembled(&assembled)),
+            P2pMessage::Batch(batch_announcement_from_assembled(&assembled, "")),
         )
         .unwrap();
 

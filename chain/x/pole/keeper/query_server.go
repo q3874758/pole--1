@@ -101,6 +101,22 @@ func (q *queryServer) GameWeight(ctx context.Context, req *types.QueryGameWeight
 	return &types.QueryGameWeightResponse{Entry: &record}, nil
 }
 
+func (q *queryServer) PlaySession(ctx context.Context, req *types.QueryPlaySessionRequest) (*types.QueryPlaySessionResponse, error) {
+	record, err := q.keeper.GetPlaySession(ctx, req.SessionIdHex)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	return &types.QueryPlaySessionResponse{Session: &record}, nil
+}
+
+func (q *queryServer) SessionSettlement(ctx context.Context, req *types.QuerySessionSettlementRequest) (*types.QuerySessionSettlementResponse, error) {
+	record, err := q.keeper.GetSessionSettlement(ctx, req.SessionIdHex)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	return &types.QuerySessionSettlementResponse{Settlement: &record}, nil
+}
+
 func grpcError(err error) error {
 	if errors.Is(err, collections.ErrNotFound) {
 		return status.Error(codes.NotFound, err.Error())

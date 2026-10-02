@@ -8,6 +8,65 @@ once a stable version is published.
 
 ## [Unreleased]
 
+### Changed — Mutual-proof rewards and uncapped on-demand issuance
+
+This batch re-centres the protocol on the whitepaper's mutual-proof model:
+a node proves its own play, other nodes prove it independently, and the
+chain decides validity before any reward weight is counted.
+
+- `src/mutual_proof.rs` (new) — `PlaySession` / `PlayHeartbeat` /
+  `WitnessAttestation` construction, deterministic `session_id_from_parts`
+  (`b"pole-play-session-v1"` domain prefix), wire projections and file
+  persistence. The five CLI commands `play-session`, `play-heartbeat`,
+  `attest-session`, `settle-session` and `submit-reward-records` landed in
+  `src/cli_node.rs`.
+- `chain/x/pole/keeper/session.go` (new) — `validateWitnessIndependence`
+  (a witness may not be the player, may not have collected the session, must
+  hold the `collect` capability, must have its own observation for the
+  epoch, may not reuse the session payload, and must stay within
+  `min_witness_observation_tolerance_ppm`), `heartbeatCoverageBPS`,
+  `SettlePlaySession`, `ValidSessionWeightUnitsForEpoch` and
+  `WitnessCreditsForEpoch`.
+- `chain/x/pole/types/witness_reward.go` (new) — `AllocateWitnessRewards`
+  splits the verify pool by adopted-attestation credit, exhausts the pool
+  exactly via largest-remainder with an address-lexicographic tie-break
+  (consensus-critical determinism), and returns zeroes for degenerate
+  inputs.
+- **D1 — the player is the node.** No separate `player_address` is
+  introduced; `RewardRecord.recipient` remains the node identity.
+- **D2 — no issuance ceiling.** The yearly reference curve keeps minting,
+  and `ClaimReward` tops the pool up by the exact shortfall when confirmed
+  rewards exceed it. There is no monthly quota and no leftover-budget
+  truncation (`MintedThisMonth` is observational only). Long-run
+  constraints are the ±cap square-root feedback, the monotonically decaying
+  curve, and activity-linked burns.
+- **D3 — witness rewards reuse `verify_reward_bps`** (1500 bps = 15% of the
+  service split) shared by adopted attestations, which works out to roughly
+  1.5% of issuance against ~80% for players; this is a flagged,
+  governance-tunable parameter-sensitivity point.
+- Five burn channels, all implemented in `chain/x/pole/keeper/burn.go` and
+  bounded by module balance: `fee_burn_bps` (new `chain/app/ante.go` fee
+  decorator — an outer wrapper is required because the SDK's
+  `ante.NewAnteHandler` decorator slice is hardcoded), `reward_burn_bps`,
+  `governance_burn_bps`, `challenge_bond_burn_bps` and `session_slash_bps`.
+- **`chain_bridge` removed.** `submit-batch` / `submit-epoch` / `export-tx`
+  now build real proto3 `Any` messages via `src/cosmos/pole_msgs.rs` and
+  broadcast with `CosmosClient::submit` instead of base64-wrapping
+  `serde_json`; `src/chain_bridge.rs` and its `lib.rs` export are gone.
+  The broadcast signer is derived from the identity pubkey
+  (`cosmos_account_from_pubkey` → bech32), matching the `GetSigners()`
+  field of each message (`NodeId` is a hash and is not an account).
+- Cosmetic sign-doc fix: `src/cosmos/proto.rs` now serializes a real
+  `SignDoc` proto message (SDK v0.54.0 `direct.GetSignBytes`) instead of
+  concatenating and hashing fields, which was producing `code 4`
+  signature-verification failures. `CosmosClient::submit` also re-reads the
+  account and re-signs on sequence races (`code 19/32`) instead of
+  rebroadcasting identical bytes.
+- Tests: `chain/app/session_test.go` (12 cases),
+  `chain/app/burn_test.go`, `chain/app/supply_simulation_test.go` (20/30-year
+  supply and inflation simulations), `chain/x/pole/types/witness_reward_test.go`;
+  new Rust coverage for peer batch ingestion in `src/node_daemon.rs`.
+
 ### Changed — Unified `pole` executable (maintenance)
 
 - Merged the `pole-genesis` and `pole-sbom` command logic into the
@@ -169,15 +228,17 @@ unused — see the `### Removed` section for the cleanup commits.)
     (mirror of the Rust curve) and `AnnualAdjustedEmission`, which calls
     `AdjustedHourlyReward` (its first real call site).
   - `keeper/emission.go` — `annualEmissionState` (collections.Item[[]byte],
-    no proto regeneration) and `BeginBlockAnnualEmission`: the yearly
-    budget is split into 12 monthly quotas (30-day periods, 360-day
-    protocol year), activity = latest finalized epoch's
-    `TotalNetworkWeightUnits`, time-proportional minting of the monthly
-    quota into the module reward pool with a hard per-month cap.
-  - `PayoutClaimedReward` now pays from the scheme-A pool (rewards no
-    longer mint on demand) and burns the excess above
-    `RewardBurnThreshold` at `RewardBurnBps` (Net Supply = Emission −
-    Burn); `bankKeeper` gained `BurnCoins`.
+    no proto regeneration) and `BeginBlockAnnualEmission`: activity = latest
+    finalized epoch's `TotalNetworkWeightUnits`, time-proportional minting
+    against the yearly reference curve into the module reward pool.
+    (Superseded by the uncapped on-demand issuance entry above: the initial
+    per-month quota cap was removed, `MintedThisMonth` is observational
+    only, and a month-long clock jump is clamped to one month's worth of
+    elapsed time.)
+  - `PayoutClaimedReward` pays from the scheme-A pool and burns the excess
+    above `RewardBurnThreshold` at `RewardBurnBps` (Net Supply = Emission −
+    Burn); `bankKeeper` gained `BurnCoins`. Any confirmed-reward shortfall
+    is now minted on demand (see the uncapped issuance entry above).
   - `module.go BeginBlock` wired to the annual mint.
 - `docs_PoLE_Whitepaper.md` §4.4.5 — activity-linked issuance formula,
   anchor (`TargetNetworkWeightUnits`) and 10% cap, on-chain execution
@@ -220,10 +281,15 @@ unused — see the `### Removed` section for the cleanup commits.)
 
 ### Tests
 - 14 new unit tests across `schema` (10) and `config` (4) modules.
+  (Both modules were later deleted in the `### Removed` cleanup above;
+  this line is kept as a historical record of that pass.)
 - Drift detector (`schema_and_rust_struct_do_not_drift`) caught a
   real `$ref` indirection issue during development; fixed in the
   same pass.
-- Full suite: 327 tests, 0 failures.
+- Full suite: 433 tests collected, 432 passed, 1 ignored, 0 failures
+  (`cargo test --all-targets`: lib 200 + integration binaries 233; the
+  `--features integration` chain-backed scenarios are counted separately
+  and require a built `poled` on `$PATH`).
 
 ### Notes
 - `core2` is the only dependency without a declared license

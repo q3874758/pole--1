@@ -13,7 +13,8 @@ use crate::bin_commands::{
 };
 use crate::{
     aggregate_local_epoch, build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    build_verification_credentials, collect_configured_activity_source,
+    build_play_heartbeat, build_play_session, build_verification_credentials,
+    build_witness_attestation, collect_configured_activity_source,
     cosmos::{
         address as cosmos_address, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
     },
@@ -23,15 +24,17 @@ use crate::{
     is_player_verifier, load_status, load_verification_credentials, maybe_write_payload,
     parse_community_activity_response, parse_current_players_response,
     parse_simulation_topology_args, parse_socket_addr, parse_socket_peer_specs,
-    parse_socket_topics, parse_third_party_activity_response, prepare_local_epoch,
-    print_batch_summary, print_epoch_commit_artifact_roots, prune_retention, reward_local_epoch,
-    run_collect_tick_with_client, run_collect_tick_with_client_and_network,
-    save_verification_credentials, socket_peers_from_config, source_kind_label,
-    summarize_collect_loop_with_client, summarize_collect_loop_with_client_and_network,
-    verify_local_epoch, ActivitySourceKind, BatchBuilder, CollectLoopSummary, CollectTickResult,
-    FilesystemP2pNetwork, HttpTextClient, InMemoryP2pNetwork, LocalNodeProgress,
-    LocalRetentionBook, NodeConfig, P2pNetwork, P2pSimulationConfig, P2pTopic,
-    ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork, SocketPeerProfile,
+    parse_socket_topics, parse_third_party_activity_response, play_heartbeat_to_wire,
+    play_session_path, play_session_to_wire, prepare_local_epoch, print_batch_summary,
+    print_epoch_commit_artifact_roots, prune_retention, reward_local_epoch,
+    run_collect_tick_with_client, run_collect_tick_with_client_and_network, save_play_heartbeat,
+    save_play_session, save_verification_credentials, save_witness_attestation,
+    socket_peers_from_config, source_kind_label, summarize_collect_loop_with_client,
+    summarize_collect_loop_with_client_and_network, verify_local_epoch,
+    witness_attestation_to_wire, ActivitySourceKind, BatchBuilder, CollectLoopSummary,
+    CollectTickResult, FilesystemP2pNetwork, HttpTextClient, InMemoryP2pNetwork, LocalNodeProgress,
+    LocalRetentionBook, NodeConfig, NodeDaemonError, P2pNetwork, P2pSimulationConfig, P2pTopic,
+    PlaySessionInputs, ReqwestHttpTextClient, ServiceManager, SocketP2pNetwork, SocketPeerProfile,
     SteamCurrentPlayersSample,
 };
 type NodeCommandHandler = crate::CommandHandler;
@@ -86,6 +89,11 @@ pub const NODE_USAGE_COMMANDS: &[&str] = &[
     "  pole-node aggregate-epoch <config-path> <epoch-id>",
     "  pole-node reward-epoch <config-path> <epoch-id>",
     "  pole-node verify-epoch <config-path> <epoch-id>",
+    "  pole-node play-session <config-path> <epoch-id> <slot-id> <app-id> <play-seconds> <observation-cid> <observed-players> [collector-node-id-hex] [chain-id]",
+    "  pole-node heartbeat <config-path> <session-id-hex> <bucket-index> [signed-at-millis] [chain-id]",
+    "  pole-node attest-session <config-path> <session-id-hex> <own-observation-cid> <observed-play-seconds> <observed-players> [chain-id]",
+    "  pole-node settle-session <config-path> <session-id-hex> [chain-id]",
+    "  pole-node reward-record-submit <config-path> <epoch-id> [chain-id]",
 ];
 pub const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
     ("init-config", init_config_cmd),
@@ -171,6 +179,11 @@ pub const NODE_COMMANDS: &[(&str, NodeCommandHandler)] = &[
     ("reward-epoch", reward_epoch_cmd),
     ("verify-epoch", verify_epoch_cmd),
     ("verify-batch-submit", verify_batch_submit_cmd),
+    ("play-session", play_session_cmd),
+    ("heartbeat", play_heartbeat_cmd),
+    ("attest-session", attest_session_cmd),
+    ("settle-session", settle_session_cmd),
+    ("reward-record-submit", reward_record_submit_cmd),
 ];
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -1836,6 +1849,304 @@ fn verify_batch_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Er
         Ok::<(), Box<dyn std::error::Error>>(())
     })
 }
+/// Broadcast one already-built [`BridgeMessage`] with the local node identity
+/// as signer. Submission failures are reported, not propagated: the local
+/// artifacts were already persisted, so an offline or unstarted chain must
+/// not discard the node's signed claim.
+async fn submit_bridge_message(
+    chain_id: &str,
+    label: &str,
+    msg: BridgeMessage,
+    identity: &crate::wallet::KeyPair,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let signer = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let client = match CosmosClient::new(CosmosEndpoint::local_pole(chain_id)) {
+        Ok(client) => client,
+        Err(err) => {
+            println!("{label} client_error={err}");
+            return Ok(());
+        }
+    };
+    match client
+        .submit(&msg, &signer, identity, &Default::default())
+        .await
+    {
+        Ok(resp) => println!("{label} code={} log={}", resp.code, resp.log),
+        Err(err) => println!("{label} submit_error={err}"),
+    }
+    Ok(())
+}
+
+/// Build, persist, and submit the node's claim that it played `play-seconds`
+/// of `app-id` during one slot (chain: `MsgSubmitPlaySession`).
+fn play_session_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 9 || args.len() > 11 {
+        return Err(
+            "usage: pole-node play-session <config-path> <epoch-id> <slot-id> <app-id> <play-seconds> <observation-cid> <observed-players> [collector-node-id-hex] [chain-id]"
+                .into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let epoch_id: u64 = args[3].parse()?;
+    let slot_id: u64 = args[4].parse()?;
+    let app_id: u32 = args[5].parse()?;
+    let play_seconds: u64 = args[6].parse()?;
+    let observation_cid = args[7].clone();
+    let observed_players: u64 = args[8].parse()?;
+    let collector_id = match args.get(9) {
+        Some(hex) => decode_hex32(hex, "collector-node-id-hex")?,
+        None => config.node_id()?,
+    };
+    let chain_id = args.get(10).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    let session = build_play_session(
+        &config,
+        &identity,
+        &PlaySessionInputs {
+            app_id,
+            epoch_id,
+            slot_id,
+            play_seconds,
+            collector_id,
+            observation_cid: &observation_cid,
+            observed_players,
+        },
+    )?;
+    save_play_session(&config, &session)?;
+    let session_id_hex = crate::hex_32(session.session_id);
+    println!("session_id_hex={session_id_hex}");
+    println!("node_id={}", config.node_id_hex);
+    println!("play_seconds={play_seconds} app_id={app_id}");
+    println!("observation_cid={observation_cid}");
+
+    let wire = play_session_to_wire(&session)?;
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let node_address = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let msg = BridgeMessage::SubmitPlaySession {
+        node_address,
+        session: wire,
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(submit_bridge_message(
+        &chain_id,
+        &format!("play_session session_id_hex={session_id_hex}"),
+        msg,
+        &identity,
+    ))
+}
+
+/// Build, persist, and submit one signed liveness proof for a stored session
+/// (chain: `MsgSubmitPlayHeartbeat`).
+fn play_heartbeat_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 5 || args.len() > 7 {
+        return Err(
+            "usage: pole-node heartbeat <config-path> <session-id-hex> <bucket-index> [signed-at-millis] [chain-id]"
+                .into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let session_id_hex = args[3].clone();
+    let bucket_index: u64 = args[4].parse()?;
+    let signed_at_millis: u64 = match args.get(5) {
+        Some(value) => value.parse()?,
+        None => current_unix_millis()?,
+    };
+    let chain_id = args.get(6).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    let session = crate::json_file::load_json::<crate::records::PlaySession, NodeDaemonError>(
+        play_session_path(&config, &session_id_hex),
+    )?;
+    let heartbeat =
+        build_play_heartbeat(&config, &identity, &session, bucket_index, signed_at_millis)?;
+    save_play_heartbeat(&config, &heartbeat)?;
+    println!("session_id_hex={session_id_hex}");
+    println!("bucket_index={bucket_index} signed_at_millis={signed_at_millis}");
+
+    let wire = play_heartbeat_to_wire(&heartbeat)?;
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let node_address = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let msg = BridgeMessage::SubmitPlayHeartbeat {
+        node_address,
+        heartbeat: wire,
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(submit_bridge_message(
+        &chain_id,
+        &format!("play_heartbeat bucket_index={bucket_index}"),
+        msg,
+        &identity,
+    ))
+}
+
+/// Build, persist, and submit this node's corroboration of another node's
+/// session, carrying its own observation (chain: `MsgAttestSession`).
+fn attest_session_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 7 || args.len() > 8 {
+        return Err(
+            "usage: pole-node attest-session <config-path> <session-id-hex> <own-observation-cid> <observed-play-seconds> <observed-players> [chain-id]"
+                .into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let session_id_hex = args[3].clone();
+    let own_observation_cid = args[4].clone();
+    let observed_play_seconds: u64 = args[5].parse()?;
+    let observed_players: u64 = args[6].parse()?;
+    let chain_id = args.get(7).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    let session = crate::json_file::load_json::<crate::records::PlaySession, NodeDaemonError>(
+        play_session_path(&config, &session_id_hex),
+    )?;
+    let attestation = build_witness_attestation(
+        &config,
+        &identity,
+        &session,
+        &own_observation_cid,
+        observed_play_seconds,
+        observed_players,
+    )?;
+    save_witness_attestation(&config, &attestation)?;
+    println!("session_id_hex={session_id_hex}");
+    println!("witness_node_id={}", config.node_id_hex);
+    println!("witness_observation_cid={own_observation_cid}");
+
+    let wire = witness_attestation_to_wire(&attestation)?;
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let witness = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let msg = BridgeMessage::AttestSession {
+        witness,
+        attestation: wire,
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(submit_bridge_message(
+        &chain_id,
+        &format!("attest_session session_id_hex={session_id_hex}"),
+        msg,
+        &identity,
+    ))
+}
+
+/// Ask the chain to evaluate a session and write its settlement
+/// (chain: `MsgSettleSession`; the settler needs the `verify` capability).
+fn settle_session_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 4 || args.len() > 5 {
+        return Err(
+            "usage: pole-node settle-session <config-path> <session-id-hex> [chain-id]".into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let session_id_hex = args[3].clone();
+    let chain_id = args.get(4).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    println!("session_id_hex={session_id_hex}");
+    println!("settler_node_id={}", config.node_id_hex);
+
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let settler = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let msg = BridgeMessage::SettleSession {
+        settler,
+        session_id_hex: session_id_hex.clone(),
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(submit_bridge_message(
+        &chain_id,
+        &format!("settle_session session_id_hex={session_id_hex}"),
+        msg,
+        &identity,
+    ))
+}
+
+/// Submit the local epoch reward artifact's records as the chain-verifiable
+/// claim backing the committed rewards root (chain: `MsgSubmitRewardRecords`;
+/// the proposer needs the `propose` capability).
+fn reward_record_submit_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 4 || args.len() > 5 {
+        return Err(
+            "usage: pole-node reward-record-submit <config-path> <epoch-id> [chain-id]".into(),
+        );
+    }
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let epoch_id: u64 = args[3].parse()?;
+    let chain_id = args.get(4).cloned().unwrap_or_else(|| "pole".to_string());
+
+    let identity = config.identity_keypair()?;
+    let artifact = reward_local_epoch(&config, epoch_id)?;
+    if artifact.records.is_empty() {
+        println!("reward_records=0 epoch={epoch_id}");
+        return Ok(());
+    }
+
+    // Wire amounts are u64; refuse rather than silently truncating a u128.
+    fn narrow_amount(value: crate::Amount, field: &str) -> Result<u64, Box<dyn std::error::Error>> {
+        u64::try_from(value)
+            .map_err(|_| format!("{field} value {value} exceeds the u64 wire range").into())
+    }
+
+    let mut records = Vec::with_capacity(artifact.records.len());
+    for entry in &artifact.records {
+        let record = &entry.reward;
+        let node_id = decode_hex32(&entry.node_id_hex, "reward entry node_id_hex")?;
+        let recipient = cosmos_address::node_id_to_bech32("cosmos", &node_id)?;
+        records.push(crate::cosmos::wire_types::RewardRecordWire {
+            epoch_id: record.epoch_id,
+            recipient,
+            player_reward: narrow_amount(record.player_reward, "player_reward")?,
+            collect_reward: narrow_amount(record.collect_reward, "collect_reward")?,
+            store_reward: narrow_amount(record.store_reward, "store_reward")?,
+            verify_reward: narrow_amount(record.verify_reward, "verify_reward")?,
+            propose_reward: narrow_amount(record.propose_reward, "propose_reward")?,
+            slash_debit: narrow_amount(record.slash_debit, "slash_debit")?,
+            net_reward: narrow_amount(record.net_reward, "net_reward")?,
+        });
+    }
+    println!("reward_records={} epoch={epoch_id}", records.len());
+    println!("reward_root_hex={}", artifact.reward_root_hex);
+
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32("cosmos", &account)?;
+    let proposer = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    let msg = BridgeMessage::SubmitRewardRecords {
+        proposer,
+        epoch_id,
+        records,
+    };
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(submit_bridge_message(
+        &chain_id,
+        &format!("reward_record_submit epoch_id={epoch_id}"),
+        msg,
+        &identity,
+    ))
+}
+
 fn issue_replica_receipt(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 6 {
         return Err(

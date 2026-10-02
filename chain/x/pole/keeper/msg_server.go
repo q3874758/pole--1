@@ -259,6 +259,12 @@ func (m *msgServer) OpenChallenge(ctx context.Context, msg *types.MsgOpenChallen
 	if _, err := m.requireNodeCapability(ctx, msg.Challenger, "verify"); err != nil {
 		return nil, err
 	}
+	// Escrow the bond while the challenge is open. A losing challenge is
+	// forfeited along the challenge_bond_burn_bps channel; a zero bond is a
+	// no-op so bond-less challenges stay valid.
+	if err := m.keeper.EscrowChallengeBond(ctx, msg.Challenger, challenge.BondAmount); err != nil {
+		return nil, err
+	}
 	if err := m.keeper.SetChallenge(ctx, challenge); err != nil {
 		return nil, err
 	}
@@ -314,6 +320,11 @@ func (m *msgServer) ResolveChallenge(ctx context.Context, msg *types.MsgResolveC
 		}
 	}
 	if err := m.keeper.ApplyValidatorSlash(ctx, challenge.TargetConsAddress, msg.SlashFractionBps, msg.JailValidator); err != nil {
+		return nil, err
+	}
+	// Settle the escrowed bond. A rejected challenge forfeits the bond along
+	// the challenge_bond_burn_bps channel; an upheld challenge returns it.
+	if _, err := m.settleChallengeBond(ctx, &challenge); err != nil {
 		return nil, err
 	}
 	if err := m.applyChallengeRewardEffects(ctx, &challenge); err != nil {
@@ -488,6 +499,241 @@ func (m *msgServer) String() string {
 	return fmt.Sprintf("pole-msg-server<authority=%s>", m.keeper.GetAuthority())
 }
 
+// SubmitPlaySession records a node's signed claim that it played a mapped
+// game for N seconds in one slot. The chain validates the claim's internal
+// consistency and identity binding; whether the claim is *true* is decided
+// later by witness attestations and heartbeats (see AttestSession and
+// SettleSession), not by the claim itself.
+func (m *msgServer) SubmitPlaySession(ctx context.Context, msg *types.MsgSubmitPlaySession) (*types.MsgSubmitPlaySessionResponse, error) {
+	if msg == nil || msg.Session == nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session is required")
+	}
+	if msg.NodeAddress == "" || msg.Session.NodeAddress == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "node_address is required")
+	}
+	// The signer must be the node making the claim: a node cannot submit
+	// play time on another node's behalf.
+	if msg.NodeAddress != msg.Session.NodeAddress {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "node_address must match session.node_address")
+	}
+	if msg.Session.SessionIdHex == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session_id_hex is required")
+	}
+	if msg.Session.PlaySeconds == 0 {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "play_seconds must be greater than 0")
+	}
+
+	node, err := m.keeper.GetNode(ctx, msg.NodeAddress)
+	if err != nil {
+		return nil, err
+	}
+	if !node.Active {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "node is not active")
+	}
+
+	// A claim cannot exceed the slot it belongs to.
+	params, err := m.keeper.GetParams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	slotSeconds := params.RewardBlockDurationSeconds
+	if slotSeconds > 0 && msg.Session.PlaySeconds > slotSeconds {
+		return nil, errorsmod.Wrapf(
+			sdkerrors.ErrInvalidRequest,
+			"play_seconds %d exceeds slot duration %d",
+			msg.Session.PlaySeconds, slotSeconds,
+		)
+	}
+
+	session := *msg.Session
+	session.SubmittedAtHeight = sdk.UnwrapSDKContext(ctx).BlockHeight()
+	if err := m.keeper.SetPlaySession(ctx, session); err != nil {
+		return nil, err
+	}
+	return &types.MsgSubmitPlaySessionResponse{}, nil
+}
+
+// SubmitPlayHeartbeat records one signed liveness proof for a session.
+// Heartbeats are what make "I played for N seconds" checkable: settlement
+// requires them to cover the declared window.
+func (m *msgServer) SubmitPlayHeartbeat(ctx context.Context, msg *types.MsgSubmitPlayHeartbeat) (*types.MsgSubmitPlayHeartbeatResponse, error) {
+	if msg == nil || msg.Heartbeat == nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "heartbeat is required")
+	}
+	if msg.NodeAddress == "" || msg.Heartbeat.NodeAddress == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "node_address is required")
+	}
+	if msg.NodeAddress != msg.Heartbeat.NodeAddress {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "node_address must match heartbeat.node_address")
+	}
+	if msg.Heartbeat.SessionIdHex == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session_id_hex is required")
+	}
+
+	// A heartbeat must belong to a session the same node declared, and a
+	// session already settled cannot accumulate more evidence.
+	session, err := m.keeper.GetPlaySession(ctx, msg.Heartbeat.SessionIdHex)
+	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			return nil, errorsmod.Wrap(sdkerrors.ErrNotFound, "play session not found")
+		}
+		return nil, err
+	}
+	if session.NodeAddress != msg.NodeAddress {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "heartbeat node does not own the session")
+	}
+	if settled, err := m.keeper.SessionSettlements.Has(ctx, msg.Heartbeat.SessionIdHex); err != nil {
+		return nil, err
+	} else if settled {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session is already settled")
+	}
+
+	heartbeat := *msg.Heartbeat
+	if err := m.keeper.SetPlayHeartbeat(ctx, heartbeat); err != nil {
+		return nil, err
+	}
+	return &types.MsgSubmitPlayHeartbeatResponse{}, nil
+}
+
+// AttestSession records an independent node's corroboration of a play
+// session. This is the "mutual proof" step: the witness must hold its own
+// observation of the same app/slot and its data must agree with the claim
+// within tolerance. A witness cannot attest its own session, a session it
+// collected, or one it has no observation of.
+func (m *msgServer) AttestSession(ctx context.Context, msg *types.MsgAttestSession) (*types.MsgAttestSessionResponse, error) {
+	if msg == nil || msg.Attestation == nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "attestation is required")
+	}
+	if msg.Witness == "" || msg.Attestation.WitnessAddress == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "witness address is required")
+	}
+	if msg.Witness != msg.Attestation.WitnessAddress {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "witness must match attestation.witness_address")
+	}
+	if msg.Attestation.SessionIdHex == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session_id_hex is required")
+	}
+
+	session, err := m.keeper.GetPlaySession(ctx, msg.Attestation.SessionIdHex)
+	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			return nil, errorsmod.Wrap(sdkerrors.ErrNotFound, "play session not found")
+		}
+		return nil, err
+	}
+	if settled, err := m.keeper.SessionSettlements.Has(ctx, msg.Attestation.SessionIdHex); err != nil {
+		return nil, err
+	} else if settled {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session is already settled")
+	}
+
+	params, err := m.keeper.GetParams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.keeper.validateWitnessIndependence(ctx, session, *msg.Attestation, params); err != nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, err.Error())
+	}
+
+	attestation := *msg.Attestation
+	attestation.AttestedAtHeight = sdk.UnwrapSDKContext(ctx).BlockHeight()
+	if err := m.keeper.SetWitnessAttestation(ctx, attestation); err != nil {
+		return nil, err
+	}
+	return &types.MsgAttestSessionResponse{}, nil
+}
+
+// SettleSession asks the chain to evaluate a play session. The settlement
+// is computed from stored evidence; the caller supplies only the id, so a
+// proposer cannot assert a session valid that the evidence contradicts.
+func (m *msgServer) SettleSession(ctx context.Context, msg *types.MsgSettleSession) (*types.MsgSettleSessionResponse, error) {
+	if msg == nil || msg.SessionIdHex == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "session_id_hex is required")
+	}
+	if msg.Settler == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "settler address is required")
+	}
+	if _, err := m.requireNodeCapability(ctx, msg.Settler, "verify"); err != nil {
+		return nil, err
+	}
+	settlement, err := m.keeper.SettlePlaySession(ctx, msg.SessionIdHex)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgSettleSessionResponse{Settlement: &settlement}, nil
+}
+
+// SubmitRewardRecords is the live reward-record submission path. Without
+// it, reward records only ever entered the store via genesis or challenge
+// resolution, so a claim against a proposer-committed reward root could
+// never find its record and always failed. The chain recomputes the
+// rewards root from the submitted records and requires it to match the
+// committed root, which turns "the proposer promised these rewards" into
+// "the chain holds the records backing that promise".
+func (m *msgServer) SubmitRewardRecords(ctx context.Context, msg *types.MsgSubmitRewardRecords) (*types.MsgSubmitRewardRecordsResponse, error) {
+	if msg == nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "message is required")
+	}
+	if msg.Proposer == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "proposer address is required")
+	}
+	if len(msg.Records) == 0 {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "records must not be empty")
+	}
+	if _, err := m.requireNodeCapability(ctx, msg.Proposer, "propose"); err != nil {
+		return nil, err
+	}
+
+	commit, err := m.keeper.GetEpochCommit(ctx, msg.EpochId)
+	if err != nil {
+		return nil, err
+	}
+	if commit.Finalized {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "epoch is already finalized")
+	}
+
+	records := make([]types.RewardRecord, 0, len(msg.Records))
+	for _, record := range msg.Records {
+		if record == nil {
+			return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "reward record must not be nil")
+		}
+		if record.EpochId != msg.EpochId {
+			return nil, errorsmod.Wrapf(
+				sdkerrors.ErrInvalidRequest,
+				"reward record epoch %d does not match message epoch %d",
+				record.EpochId, msg.EpochId,
+			)
+		}
+		if record.Recipient == "" {
+			return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "reward record recipient is required")
+		}
+		records = append(records, *record)
+	}
+
+	// Bind the submitted set to the proposer's commitment: the root the
+	// chain derives from these records must equal the committed root. This
+	// is what stops a proposer from committing one root and later
+	// submitting a different record set.
+	root, leafCount, err := types.MerkleRootHexForRecords(records)
+	if err != nil {
+		return nil, err
+	}
+	if commit.Rewards != nil && (commit.Rewards.Root != root || commit.Rewards.LeafCount != leafCount) {
+		return nil, errorsmod.Wrapf(
+			sdkerrors.ErrInvalidRequest,
+			"reward records root %s (%d leaves) does not match committed root %s (%d leaves)",
+			root, leafCount, commit.Rewards.Root, commit.Rewards.LeafCount,
+		)
+	}
+
+	for _, record := range records {
+		if err := m.keeper.SetRewardRecord(ctx, record); err != nil {
+			return nil, err
+		}
+	}
+	return &types.MsgSubmitRewardRecordsResponse{RewardRootHex: root, LeafCount: leafCount}, nil
+}
+
 func (m *msgServer) validateChallengeEvidence(ctx context.Context, challenge types.Challenge) error {
 	if challenge.Evidence == nil {
 		return nil
@@ -625,6 +871,10 @@ func (m *msgServer) applyChallengeRewardEffects(ctx context.Context, challenge *
 	if challenge == nil {
 		return nil
 	}
+	params, err := m.keeper.GetParams(ctx)
+	if err != nil {
+		return err
+	}
 
 	if challenge.TargetAddress != "" && challenge.SlashAmount > 0 {
 		targetRecord, err := m.keeper.GetRewardRecord(ctx, challenge.EpochId, challenge.TargetAddress)
@@ -640,6 +890,36 @@ func (m *msgServer) applyChallengeRewardEffects(ctx context.Context, challenge *
 		}
 		targetRecord.SlashDebit += slashApplied
 		targetRecord.NetReward -= slashApplied
+
+		// Governance penalty channel: a share of the actually-applied slash is
+		// destroyed rather than recycled into the pool. Bounded by the pool
+		// balance, so the channel can never over-burn.
+		if params.GovernanceBurnBps > 0 {
+			burn := slashApplied * uint64(params.GovernanceBurnBps) / 10_000
+			if _, err := m.keeper.BurnFromRewardPool(ctx, burn); err != nil {
+				return err
+			}
+		}
+
+		// False-play channel: when a challenge invalidates a play session
+		// (bad reward / fabricated engagement), the session's player reward is
+		// slashed and destroyed. This is what makes a fake claim cost more than
+		// it earns.
+		if challenge.Kind == types.ChallengeKindBadReward && params.SessionSlashBps > 0 {
+			slashBase := targetRecord.PlayerReward
+			if slashBase > targetRecord.NetReward {
+				slashBase = targetRecord.NetReward
+			}
+			slashed := slashBase * uint64(params.SessionSlashBps) / 10_000
+			if slashed > 0 {
+				targetRecord.SlashDebit += slashed
+				targetRecord.NetReward -= slashed
+				if _, err := m.keeper.BurnFromRewardPool(ctx, slashed); err != nil {
+					return err
+				}
+			}
+		}
+
 		if err := m.keeper.SetRewardRecord(ctx, targetRecord); err != nil {
 			return err
 		}
@@ -661,4 +941,20 @@ func (m *msgServer) applyChallengeRewardEffects(ctx context.Context, challenge *
 	}
 
 	return nil
+}
+
+// settleChallengeBond resolves the escrowed challenge bond along the
+// challenge_bond_burn_bps channel. A REJECTED challenge means the challenger
+// was wrong, so the bond is forfeited and the configured share destroyed; any
+// other final state returns the bond intact.
+func (m *msgServer) settleChallengeBond(ctx context.Context, challenge *types.Challenge) (uint64, error) {
+	if challenge == nil || challenge.BondAmount == 0 || challenge.Challenger == "" {
+		return 0, nil
+	}
+	params, err := m.keeper.GetParams(ctx)
+	if err != nil {
+		return 0, err
+	}
+	forfeit := challenge.State == types.ChallengeStateRejected
+	return m.keeper.SettleChallengeBond(ctx, challenge.Challenger, challenge.BondAmount, params.ChallengeBondBurnBps, forfeit)
 }

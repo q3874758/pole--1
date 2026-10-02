@@ -603,6 +603,28 @@ impl NodeConfig {
         Ok(store.keypair)
     }
 
+    /// Bech32 account address of this node's identity
+    /// (`sha256(pubkey)[..20]`), i.e. the address the chain keys `GetNode`,
+    /// `isPlayerCollector` and every `GetSigners()` check on.
+    ///
+    /// This is a **different** value from `node_id_hex` /
+    /// [`Self::node_id`]: the node id is `stable_hash32(public_key)`, an
+    /// irreversible 32-byte digest, so the account address can never be
+    /// recovered from it. Any code that needs to name this node on-chain
+    /// must derive the address from the identity, or carry it alongside the
+    /// node id.
+    pub fn identity_account_bech32(&self) -> Result<String, NodeConfigError> {
+        let identity = self.identity_keypair()?;
+        crate::cosmos::address::encode_bech32(
+            crate::cosmos::address::DEFAULT_BECH32_PREFIX,
+            &crate::cosmos::address::cosmos_account_from_pubkey(&identity.public),
+        )
+        .map_err(|err| NodeConfigError::InvalidValue {
+            field: "identity",
+            reason: err.to_string(),
+        })
+    }
+
     pub fn inline_verify_enabled(&self) -> bool {
         self.capabilities.verify && !self.runtime.low_impact_mode
     }

@@ -125,6 +125,65 @@ pub struct BatchCommitWire {
     pub submitted_at_height: i64,
 }
 
+// --- PlaySession / PlayHeartbeat / WitnessAttestation --------------------
+
+/// `pole.chain.pole.v1.PlaySession` — a node's signed claim that it played
+/// a mapped game for `play_seconds` during one slot. `submitted_at_height`
+/// is overwritten by the chain from `ctx.BlockHeight()`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaySessionWire {
+    pub session_id_hex: String,
+    pub node_address: String,
+    pub app_id: u32,
+    pub epoch_id: u64,
+    pub slot_id: u64,
+    pub play_seconds: u64,
+    pub collector_address: String,
+    pub observation_cid: String,
+    pub observed_players: u64,
+    pub submitted_at_height: i64,
+    pub session_signature: String,
+}
+
+/// `pole.chain.pole.v1.PlayHeartbeat` — one signed liveness proof.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayHeartbeatWire {
+    pub session_id_hex: String,
+    pub node_address: String,
+    pub bucket_index: u64,
+    pub signed_at_millis: i64,
+    pub heartbeat_signature: String,
+}
+
+/// `pole.chain.pole.v1.WitnessAttestation` — an independent node's
+/// corroboration, carrying the witness's own observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WitnessAttestationWire {
+    pub session_id_hex: String,
+    pub witness_address: String,
+    pub observed_play_seconds: u64,
+    pub witness_observation_cid: String,
+    pub observed_players: u64,
+    pub attested_at_height: i64,
+    pub witness_signature: String,
+}
+
+/// `pole.chain.pole.v1.RewardRecord` — the wire form of a reward record, as
+/// submitted by `MsgSubmitRewardRecords`. The chain recomputes the rewards
+/// root from these and requires it to match the committed root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewardRecordWire {
+    pub epoch_id: u64,
+    pub recipient: String,
+    pub player_reward: u64,
+    pub collect_reward: u64,
+    pub store_reward: u64,
+    pub verify_reward: u64,
+    pub propose_reward: u64,
+    pub slash_debit: u64,
+    pub net_reward: u64,
+}
+
 // --- ReplicaReceipt ------------------------------------------------------
 
 /// `pole.chain.pole.v1.ReplicaReceipt` — 6 fields.
@@ -210,6 +269,36 @@ pub struct ParamsWire {
     /// that must come from player verifiers (proto field 23).
     #[serde(default)]
     pub min_player_verifier_share_bps: u32,
+    /// Minimum distinct witness attestations a play session needs before the
+    /// chain accepts the claimed play time (proto field 24).
+    #[serde(default)]
+    pub min_witness_count: u64,
+    /// Maximum relative deviation (ppm) tolerated between a play session's
+    /// observed player count and a witness's own observation (proto field 25).
+    #[serde(default)]
+    pub min_witness_observation_tolerance_ppm: u32,
+    /// Minimum distinct witness observation payloads backing a session
+    /// (proto field 26). Defeats N witnesses copying one observation.
+    #[serde(default)]
+    pub min_distinct_observations: u64,
+    /// Share (bps) of a session's player reward burned when a challenge
+    /// resolves the session invalid (proto field 27).
+    #[serde(default)]
+    pub session_slash_bps: u32,
+    /// Minimum signed play heartbeats a session needs (proto field 28).
+    #[serde(default)]
+    pub min_heartbeat_count: u64,
+    /// Length of one heartbeat bucket in seconds (proto field 29).
+    #[serde(default)]
+    pub heartbeat_bucket_seconds: u64,
+    /// Minimum share (bps) of the declared play window heartbeats must
+    /// cover (proto field 30).
+    #[serde(default)]
+    pub min_heartbeat_coverage_bps: u32,
+    /// Share (bps) of a challenge bond burned when a challenge fails
+    /// (proto field 31).
+    #[serde(default)]
+    pub challenge_bond_burn_bps: u32,
 }
 
 impl Default for ParamsWire {
@@ -240,6 +329,14 @@ impl Default for ParamsWire {
             governance_burn_bps: 0,
             min_verification_count: 0,
             min_player_verifier_share_bps: 0,
+            min_witness_count: 0,
+            min_witness_observation_tolerance_ppm: 0,
+            min_distinct_observations: 0,
+            session_slash_bps: 0,
+            min_heartbeat_count: 0,
+            heartbeat_bucket_seconds: 0,
+            min_heartbeat_coverage_bps: 0,
+            challenge_bond_burn_bps: 0,
         }
     }
 }

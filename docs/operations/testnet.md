@@ -4,8 +4,9 @@
 
 当前仓库里真正可跑通的多节点互联测试网后端是 `socket` 模式。
 
-- `real-libp2p` 目前可用于配置诊断与骨架验证
-- 实际多节点采集闭环使用 `watch-p2p-socket` / `run-loop-p2p-socket`
+- 实际多节点采集闭环使用 `run-once-p2p-socket` / `run-loop-p2p-socket`，
+  在客户端侧用 `watch-p2p-socket` 观察
+- `fs` / `sim` 模式仅用于离线诊断与夹具测试（无真实网络传输）
 
 ## 1. 初始化两个节点
 

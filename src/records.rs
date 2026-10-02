@@ -120,6 +120,106 @@ pub struct DelegationRecord {
     pub amount: Amount,
 }
 
+/// A node's signed claim that it played a mapped game for `play_seconds`
+/// during one slot. This is the object the mutual-proof flow proves: other
+/// nodes corroborate it with their own independent observations, and the
+/// chain only counts the claimed play time once enough of them agree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PlaySession {
+    pub session_id: Hash32,
+    /// The playing node. Under the player==node model this is also the
+    /// reward recipient.
+    pub node_address: Address,
+    pub app_id: AppId,
+    pub epoch_id: EpochId,
+    pub slot_id: SlotId,
+    pub play_seconds: u64,
+    /// Node that collected the observation backing the claim. May equal
+    /// `node_address` (self-collection); a witness may never equal it.
+    pub collector_address: Address,
+    pub observation_cid: ContentId,
+    pub observed_players: u64,
+    pub submitted_at_height: Height,
+    pub session_signature: SignatureBytes,
+}
+
+/// A periodic signed liveness proof emitted while the node is playing.
+/// Heartbeats are what make "I played for N seconds" checkable: settlement
+/// requires them to cover the declared window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PlayHeartbeat {
+    pub session_id: Hash32,
+    pub node_address: Address,
+    pub bucket_index: u64,
+    pub signed_at_millis: UnixMillis,
+    pub heartbeat_signature: SignatureBytes,
+}
+
+/// An independent node's corroboration of a play session, carrying the
+/// witness's OWN observation. The chain rejects a witness with no
+/// observation of its own, one reusing the session's observation CID, or
+/// one whose observed player count deviates beyond tolerance — so this is
+/// corroboration rather than a rubber stamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct WitnessAttestation {
+    pub session_id: Hash32,
+    pub witness_address: Address,
+    pub observed_play_seconds: u64,
+    /// CID of the witness's own observation; must differ from the session's.
+    pub witness_observation_cid: ContentId,
+    pub observed_players: u64,
+    pub attested_at_height: Height,
+    pub witness_signature: SignatureBytes,
+}
+
+/// The chain's verdict on a play session, computed from stored evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct SessionSettlement {
+    pub session_id: Hash32,
+    pub epoch_id: EpochId,
+    pub app_id: AppId,
+    pub node_address: Address,
+    pub valid: bool,
+    pub play_seconds: u64,
+    pub game_weight_ppm: u32,
+    pub player_weight_units: u64,
+    pub witness_count: u64,
+    pub distinct_observation_count: u64,
+    pub heartbeat_count: u64,
+    pub heartbeat_coverage_bps: u32,
+    pub settled_at_height: Height,
+    pub invalid_reason: String,
+}
+
+impl PlaySession {
+    /// Canonical bytes signed by the playing node. The signature field is
+    /// excluded so the payload is stable before and after signing (same
+    /// discipline as [`ObservationRecord::signing_payload`]).
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut copy = self.clone();
+        copy.session_signature = Vec::new();
+        borsh::to_vec(&copy).expect("play session borsh encoding")
+    }
+}
+
+impl PlayHeartbeat {
+    /// Canonical bytes signed by the playing node for one heartbeat.
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut copy = self.clone();
+        copy.heartbeat_signature = Vec::new();
+        borsh::to_vec(&copy).expect("play heartbeat borsh encoding")
+    }
+}
+
+impl WitnessAttestation {
+    /// Canonical bytes signed by the witnessing node.
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut copy = self.clone();
+        copy.witness_signature = Vec::new();
+        borsh::to_vec(&copy).expect("witness attestation borsh encoding")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct UnbondingRecord {
     pub delegator: Address,

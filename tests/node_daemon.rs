@@ -5,21 +5,21 @@ use std::sync::{Mutex, OnceLock};
 use pole_protocol_draft::{
     aggregate_local_epoch, audit_local_retention, batch_artifact_path,
     build_epoch_commit_from_local_data, build_inmemory_simulation_network,
-    effective_collect_interval_secs, epoch_aggregation_artifact_path, epoch_commit_artifact_path,
-    epoch_preparation_artifact_path, epoch_reward_artifact_path, epoch_settlement_artifact_path,
-    epoch_verification_artifact_path, inmemory_simulation_listener_peer_ids,
-    inmemory_simulation_retrieval_peer_id, load_status, local_chain_runtime_path,
-    node_daemon::local_chain_store_path, payload_path, player_reward_tick_artifact_path,
-    prepare_local_epoch, progress_path, prune_retention, retention_audit_artifact_path,
-    retention_book_path, reward_adjustment_artifact_path, reward_adjustment_index_path,
-    reward_adjustment_summary_path, run_collect_loop_with_client, run_collect_tick_with_client,
-    run_collect_tick_with_client_and_network, settle_local_epoch, summarize_auto_settlement,
-    verify_local_epoch, ActivitySourceKind, BatchBuilder, CapabilityConfig, CollectConfig,
-    CollectTickArtifact, HttpTextClient, InMemoryP2pNetwork, LocalNodeProgress, LocalRetentionBook,
-    NodeConfig, ObservationRecord, P2pMessage, P2pSimulationConfig, P2pTopic, PersistentStoreStub,
-    ProtocolParams, ProtocolStore, RewardAdjustmentArtifact, RewardAdjustmentArtifactIndex,
-    RewardAdjustmentArtifactSummary, RewardConfig, RewardGameMapping, RuntimeConfig,
-    SteamCollectorError, StorageConfig,
+    build_verification_credentials, effective_collect_interval_secs,
+    epoch_aggregation_artifact_path, epoch_commit_artifact_path, epoch_preparation_artifact_path,
+    epoch_reward_artifact_path, epoch_settlement_artifact_path, epoch_verification_artifact_path,
+    inmemory_simulation_listener_peer_ids, inmemory_simulation_retrieval_peer_id, load_status,
+    local_chain_runtime_path, node_daemon::local_chain_store_path, payload_path,
+    player_reward_tick_artifact_path, prepare_local_epoch, progress_path, prune_retention,
+    retention_audit_artifact_path, retention_book_path, reward_adjustment_artifact_path,
+    reward_adjustment_index_path, reward_adjustment_summary_path, run_collect_loop_with_client,
+    run_collect_tick_with_client, run_collect_tick_with_client_and_network, settle_local_epoch,
+    summarize_auto_settlement, verify_local_epoch, ActivitySourceKind, BatchBuilder,
+    CapabilityConfig, CollectConfig, CollectTickArtifact, HttpTextClient, InMemoryP2pNetwork,
+    LocalNodeProgress, LocalRetentionBook, NodeConfig, ObservationRecord, P2pMessage,
+    P2pSimulationConfig, P2pTopic, PersistentStoreStub, ProtocolParams, ProtocolStore,
+    RewardAdjustmentArtifact, RewardAdjustmentArtifactIndex, RewardAdjustmentArtifactSummary,
+    RewardConfig, RewardGameMapping, RuntimeConfig, SteamCollectorError, StorageConfig,
 };
 
 struct FixedHttpClient;
@@ -210,6 +210,13 @@ fn persist_manual_batch(
     builder.push(observation).unwrap();
     let assembled = builder.finalize(0).unwrap();
 
+    // A witness can only learn the collector's on-chain address from the
+    // artifact, so the fixture must carry one. Derive a deterministic
+    // account address from the fake collector byte.
+    let collector_address =
+        pole_protocol_draft::cosmos::address::encode_bech32("cosmos", &[collector_byte; 20])
+            .unwrap();
+
     let payload_file = payload_path(config, &assembled.payload_cid);
     std::fs::create_dir_all(payload_file.parent().unwrap()).unwrap();
     std::fs::write(&payload_file, &assembled.payload_bytes).unwrap();
@@ -221,6 +228,7 @@ fn persist_manual_batch(
         payload_hash_hex: pole_protocol_draft::hex_32(assembled.payload_hash),
         batch_root_hex: pole_protocol_draft::hex_32(assembled.batch_commit.batch.root),
         obs_count: assembled.batch_commit.obs_count,
+        collector_address,
         player_reward_block_count: 0,
         player_reward_total: 0,
         reward_process_name: None,
@@ -1262,6 +1270,163 @@ fn storage_challenge_with_no_challenge_subscribers_records_zero_recipient_stats(
 }
 
 #[test]
+fn collect_tick_ingests_peer_batch_announcement_into_local_store() {
+    // Without inbox draining a node never learns about other collectors'
+    // batches, so it can neither aggregate them nor witness them on chain.
+    // The tick must consume its own inbox and persist a verified peer batch
+    // into `batches/` + `payloads/` + the retention book.
+    let mut config = test_config("daemon-peer-ingest");
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    if data_dir.exists() {
+        std::fs::remove_dir_all(&data_dir).unwrap();
+    }
+    write_test_identity(&mut config);
+
+    let client = FixedHttpClient;
+    let mut progress = LocalNodeProgress::default_from_config(&config);
+    let local_node_id = config.node_id().unwrap();
+    let remote_node_id = [0x62u8; 32];
+
+    let mut network = InMemoryP2pNetwork::default();
+    network.register_peer(local_node_id);
+    network.register_peer(remote_node_id);
+    network.subscribe(local_node_id, P2pTopic::Batches).unwrap();
+
+    let observation = ObservationRecord {
+        epoch_id: 1,
+        slot_id: 1,
+        app_id: 730,
+        source_kind: ActivitySourceKind::Steam,
+        source_confidence_ppm: 1_000_000,
+        observed_players: 111_111,
+        observed_at_millis: 1_700_000_000_000,
+        collector_id: remote_node_id,
+        raw_body_cid: "cid://remote/1".into(),
+        raw_body_hash: pole_protocol_draft::stable_hash32(b"remote-1"),
+        collector_signature: vec![0x62; 32],
+    };
+    let mut builder = BatchBuilder::new(1, remote_node_id);
+    builder.push(observation).unwrap();
+    let remote_batch = builder.finalize(0).unwrap();
+
+    network
+        .advertise_payload(
+            remote_node_id,
+            remote_batch.payload_cid.clone(),
+            remote_batch.payload_hash,
+            remote_batch.payload_bytes.clone(),
+        )
+        .unwrap();
+    network
+        .publish(
+            remote_node_id,
+            P2pMessage::Batch(pole_protocol_draft::batch_announcement_from_assembled(
+                &remote_batch,
+                "cosmos1remotecollector",
+            )),
+        )
+        .unwrap();
+
+    let result =
+        run_collect_tick_with_client_and_network(&config, &mut progress, &client, &mut network)
+            .unwrap();
+
+    assert_eq!(result.peer_batch_ingestion.accepted, 1);
+    assert_eq!(result.peer_batch_ingestion.rejected, 0);
+    assert!(batch_artifact_path(&config, 1, 1, &remote_batch.payload_cid).exists());
+    assert!(payload_path(&config, &remote_batch.payload_cid).exists());
+
+    // The ingested batch is a first-class local batch for verification...
+    let report = verify_local_epoch(&config, 1).unwrap();
+    assert_eq!(report.batch_count, 2);
+    assert!(report.all_valid, "{report:?}");
+
+    // ...and it keeps its real collector id, so uniqueness accounting and
+    // the resulting witness credential name the remote node, not us.
+    let batches = pole_protocol_draft::load_batches_for_epoch(&config, 1).unwrap();
+    let remote = batches
+        .iter()
+        .find(|batch| batch.payload_cid == remote_batch.payload_cid)
+        .expect("ingested batch must be listed");
+    assert_eq!(remote.batch_commit.collector_id, remote_node_id);
+
+    let credentials =
+        build_verification_credentials(&config, 1, &config.identity_keypair().unwrap()).unwrap();
+    assert!(credentials.iter().any(|credential| {
+        credential.target_collector_hex == pole_protocol_draft::hex_32(remote_node_id)
+    }));
+
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+fn collect_tick_rejects_peer_announcement_that_does_not_match_payload() {
+    let mut config = test_config("daemon-peer-ingest-reject");
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    if data_dir.exists() {
+        std::fs::remove_dir_all(&data_dir).unwrap();
+    }
+    write_test_identity(&mut config);
+
+    let client = FixedHttpClient;
+    let mut progress = LocalNodeProgress::default_from_config(&config);
+    let local_node_id = config.node_id().unwrap();
+    let remote_node_id = [0x63u8; 32];
+
+    let mut network = InMemoryP2pNetwork::default();
+    network.register_peer(local_node_id);
+    network.register_peer(remote_node_id);
+    network.subscribe(local_node_id, P2pTopic::Batches).unwrap();
+
+    let observation = ObservationRecord {
+        epoch_id: 1,
+        slot_id: 1,
+        app_id: 730,
+        source_kind: ActivitySourceKind::Steam,
+        source_confidence_ppm: 1_000_000,
+        observed_players: 222_222,
+        observed_at_millis: 1_700_000_000_000,
+        collector_id: remote_node_id,
+        raw_body_cid: "cid://remote/2".into(),
+        raw_body_hash: pole_protocol_draft::stable_hash32(b"remote-2"),
+        collector_signature: vec![0x63; 32],
+    };
+    let mut builder = BatchBuilder::new(1, remote_node_id);
+    builder.push(observation).unwrap();
+    let remote_batch = builder.finalize(0).unwrap();
+
+    network
+        .advertise_payload(
+            remote_node_id,
+            remote_batch.payload_cid.clone(),
+            remote_batch.payload_hash,
+            remote_batch.payload_bytes.clone(),
+        )
+        .unwrap();
+    let mut forged = pole_protocol_draft::batch_announcement_from_assembled(
+        &remote_batch,
+        "cosmos1remotecollector",
+    );
+    forged.obs_count = remote_batch.batch_commit.obs_count + 7;
+    network
+        .publish(remote_node_id, P2pMessage::Batch(forged))
+        .unwrap();
+
+    let result =
+        run_collect_tick_with_client_and_network(&config, &mut progress, &client, &mut network)
+            .unwrap();
+
+    assert_eq!(result.peer_batch_ingestion.accepted, 0);
+    assert_eq!(result.peer_batch_ingestion.rejected, 1);
+    assert!(!batch_artifact_path(&config, 1, 1, &remote_batch.payload_cid).exists());
+
+    let report = verify_local_epoch(&config, 1).unwrap();
+    assert_eq!(report.batch_count, 1);
+
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
 fn verify_epoch_reports_local_data_as_valid() {
     let mut config = test_config("daemon-verify");
     let data_dir = PathBuf::from(&config.runtime.data_dir);
@@ -1284,6 +1449,104 @@ fn verify_epoch_reports_local_data_as_valid() {
     assert!(report.reports[0].obs_count_matches);
     assert!(report.reports[0].retention_record_present);
     assert!(report.reports[0].retention_hash_matches);
+
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+fn verification_credential_targets_the_real_collector_not_the_verifier() {
+    // Regression: the credential used to name the verifier itself as the
+    // attested collector, so the chain rejected every submission with
+    // "verifier cannot attest its own batch". The credential must instead
+    // name the batch's actual collector.
+    let mut config = test_config("daemon-credential-target");
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    if data_dir.exists() {
+        std::fs::remove_dir_all(&data_dir).unwrap();
+    }
+    write_test_identity(&mut config);
+
+    // A batch collected by a DIFFERENT node.
+    let remote_collector_byte = 0x77u8;
+    persist_manual_batch(&config, 1, 1, remote_collector_byte, 730, 500_000, 1_000);
+
+    let identity = config.identity_keypair().unwrap();
+    let credentials = build_verification_credentials(&config, 1, &identity).unwrap();
+    assert_eq!(credentials.len(), 1, "expected one witnessable credential");
+
+    let expected_collector = pole_protocol_draft::hex_32([remote_collector_byte; 32]);
+    assert_eq!(
+        credentials[0].target_collector_hex, expected_collector,
+        "credential must target the batch's collector"
+    );
+    assert_ne!(
+        credentials[0].target_collector_hex, config.node_id_hex,
+        "credential must not target the verifier itself"
+    );
+    assert_ne!(
+        credentials[0].target_collector_address, credentials[0].verifier_address,
+        "attested collector address must differ from the verifier address"
+    );
+
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+fn verification_credentials_skip_own_batches() {
+    // A node must not build a witness credential for a batch it collected
+    // itself: the chain rejects self-attestation, so emitting one would
+    // only produce a transaction guaranteed to fail.
+    let mut config = test_config("daemon-credential-own-batch");
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    if data_dir.exists() {
+        std::fs::remove_dir_all(&data_dir).unwrap();
+    }
+    write_test_identity(&mut config);
+
+    let own_id = config.node_id().unwrap();
+    let mut builder = BatchBuilder::new(1, own_id);
+    let observation = ObservationRecord {
+        epoch_id: 1,
+        slot_id: 1,
+        app_id: 730,
+        source_kind: ActivitySourceKind::Steam,
+        source_confidence_ppm: 1_000_000,
+        observed_players: 500_000,
+        observed_at_millis: 1_000,
+        collector_id: own_id,
+        raw_body_cid: "cid://own/1".into(),
+        raw_body_hash: pole_protocol_draft::stable_hash32(b"own"),
+        collector_signature: vec![0x11; 32],
+    };
+    builder.push(observation).unwrap();
+    let assembled = builder.finalize(0).unwrap();
+    let payload_file = payload_path(&config, &assembled.payload_cid);
+    std::fs::create_dir_all(payload_file.parent().unwrap()).unwrap();
+    std::fs::write(&payload_file, &assembled.payload_bytes).unwrap();
+    CollectTickArtifact {
+        epoch_id: 1,
+        slot_id: 1,
+        payload_cid: assembled.payload_cid.clone(),
+        payload_hash_hex: pole_protocol_draft::hex_32(assembled.payload_hash),
+        batch_root_hex: pole_protocol_draft::hex_32(assembled.batch_commit.batch.root),
+        obs_count: assembled.batch_commit.obs_count,
+        collector_address: String::new(),
+        player_reward_block_count: 0,
+        player_reward_total: 0,
+        reward_process_name: None,
+        stored_payload_cid: None,
+        retention_until_epoch: None,
+    }
+    .save_json(batch_artifact_path(&config, 1, 1, &assembled.payload_cid))
+    .unwrap();
+
+    let identity = config.identity_keypair().unwrap();
+    let credentials = build_verification_credentials(&config, 1, &identity).unwrap();
+    assert!(
+        credentials.is_empty(),
+        "own batches must not produce self-attestation credentials, got {}",
+        credentials.len()
+    );
 
     std::fs::remove_dir_all(data_dir).unwrap();
 }
@@ -1503,6 +1766,7 @@ fn load_status_uses_activated_protocol_reward_tuning() {
             medium_deviation_bps: 500,
             severe_deviation_bps: 2_000,
         },
+        mutual_proof: pole_protocol_draft::MutualProofParams::default(),
     };
     params.validate().unwrap();
     store.insert_params_update_proposal(

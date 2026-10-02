@@ -18,4 +18,8 @@ message GenesisState {
   repeated ClaimedReward claimed_rewards = 9;
   repeated ReplicaReceipt replica_receipts = 10;
   repeated NodeRecord nodes = 11;
+  repeated PlaySession play_sessions = 12;
+  repeated PlayHeartbeat play_heartbeats = 13;
+  repeated WitnessAttestation witness_attestations = 14;
+  repeated SessionSettlement session_settlements = 15;
 }

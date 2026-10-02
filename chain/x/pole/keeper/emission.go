@@ -12,13 +12,11 @@ import (
 	"pole/chain/x/pole/types"
 )
 
-// annualEmissionState tracks the scheme-A issuance budget. Budgets are
-// settled monthly (30-day periods, 12 per 360-day protocol year): each
-// month gets YearlyBudget / 12, and the minted quota resets every 30
-// days. The state is stored as a JSON blob under a
-// collections.Item[[]byte] so no proto regeneration is needed, and is
-// fully re-derivable from genesis block time (not exported into
-// GenesisState).
+// annualEmissionState tracks the scheme-A issuance reference curve. The
+// 30-day window remains for observability, while issuance itself has no
+// monthly or annual hard ceiling. The state is stored as a JSON blob under
+// a collections.Item[[]byte] so no proto regeneration is needed, and is
+// fully re-derivable from genesis block time (not exported into GenesisState).
 type annualEmissionState struct {
 	YearIndex       uint64 `json:"year_index"`
 	YearStartUnix   int64  `json:"year_start_unix"`
@@ -91,11 +89,11 @@ func (k Keeper) latestFinalizedEpochWeight(ctx context.Context) uint64 {
 	return bestWeight
 }
 
-// BeginBlockAnnualEmission mints the scheme-A activity-linked budget
-// into the module account proportionally to elapsed block time. The
-// yearly budget (nominal curve × activity factor, ±capBps) is split into
-// 12 monthly quotas; each 30-day period resets the minted quota. It is
-// the on-chain execution of the whitepaper emission curve (4.4) plus the
+// BeginBlockAnnualEmission mints the scheme-A activity-linked reference
+// rate into the module account proportionally to elapsed block time. The
+// adjusted annual value is a rate-control curve, not an issuance ceiling;
+// confirmed claims can also mint an exact shortfall on demand. It is the
+// on-chain execution of the whitepaper emission curve (4.4) plus the
 // activity adjustment anchored on TargetNetworkWeightUnits.
 func (k Keeper) BeginBlockAnnualEmission(ctx context.Context) error {
 	if k.bankKeeper == nil {
@@ -113,8 +111,9 @@ func (k Keeper) BeginBlockAnnualEmission(ctx context.Context) error {
 		return err
 	}
 
-	// Advance the protocol year (360 days) and its monthly periods (30
-	// days) based on elapsed wall-clock time; each month resets the quota.
+	// Advance the protocol year (360 days) and its monthly observation
+	// periods (30 days) based on elapsed wall-clock time; period rollover
+	// never gates issuance.
 	if yearsElapsed := (blockUnix - st.YearStartUnix) / types.SecondsPerYear; yearsElapsed > 0 {
 		st.YearIndex += uint64(yearsElapsed)
 		st.YearStartUnix += yearsElapsed * types.SecondsPerYear
@@ -137,10 +136,11 @@ func (k Keeper) BeginBlockAnnualEmission(ctx context.Context) error {
 		st.PrevEpochWeight,
 		types.AnnualEmissionCapBps,
 	)
-	monthlyBudget := yearlyBudget / types.PeriodsPerYear
-
-	// Time-proportional share of the month's budget, never exceeding the
-	// remaining monthly quota. A clock jump mints at most one month's share.
+	// Time-proportional reference rate. There is deliberately no monthly
+	// quota or remaining-budget clamp: the activity-adjusted curve controls
+	// unit economics, while confirmed claims remain payable without a hard
+	// issuance ceiling. Limit one block's catch-up interval to one month so
+	// a long clock jump does not create an accidental burst.
 	elapsed := blockUnix - st.LastMintUnix
 	if elapsed <= 0 {
 		elapsed = 1
@@ -148,15 +148,7 @@ func (k Keeper) BeginBlockAnnualEmission(ctx context.Context) error {
 	if elapsed > types.SecondsPerMonth {
 		elapsed = types.SecondsPerMonth
 	}
-	var mint uint64
-	if st.MintedThisMonth >= monthlyBudget {
-		mint = 0
-	} else {
-		mint = monthlyBudget * uint64(elapsed) / uint64(types.SecondsPerMonth)
-	}
-	if remaining := monthlyBudget - st.MintedThisMonth; mint > remaining {
-		mint = remaining
-	}
+	mint := yearlyBudget * uint64(elapsed) / uint64(types.SecondsPerYear)
 
 	if mint > 0 {
 		coins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(mint)))

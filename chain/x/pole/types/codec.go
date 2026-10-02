@@ -22,6 +22,11 @@ func RegisterInterfaces(registry types.InterfaceRegistry) {
 		&MsgClaimReward{},
 		&MsgUpsertGameWeight{},
 		&MsgUpdateParams{},
+		&MsgSubmitPlaySession{},
+		&MsgSubmitPlayHeartbeat{},
+		&MsgAttestSession{},
+		&MsgSettleSession{},
+		&MsgSubmitRewardRecords{},
 	)
 
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)

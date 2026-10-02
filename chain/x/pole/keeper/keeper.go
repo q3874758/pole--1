@@ -12,6 +12,7 @@ import (
 	sdkcodec "github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"pole/chain/x/pole/types"
@@ -24,24 +25,30 @@ type Keeper struct {
 	stakingKeeper  stakingKeeper
 	slashingKeeper slashingKeeper
 
-	Schema            collections.Schema
-	Params            collections.Item[types.Params]
-	Nodes             collections.Map[string, types.NodeRecord]
-	BatchCommits      collections.Map[collections.Triple[uint64, string, string], types.BatchCommit]
-	EpochCommits      collections.Map[uint64, types.EpochCommit]
-	RewardRecords     collections.Map[collections.Pair[uint64, string], types.RewardRecord]
-	AggregateRecords  collections.Map[collections.Pair[uint64, uint64], types.AggregateRecord]
-	Challenges        collections.Map[string, types.Challenge]
-	Availability      collections.Map[collections.Triple[uint64, string, string], types.AvailabilityRecord]
-	GameWeightEntries collections.Map[collections.Pair[uint64, uint64], types.GameWeightEntry]
-	ClaimedRewards    collections.Map[collections.Pair[uint64, string], types.ClaimedReward]
-	ReplicaReceipts   collections.Map[collections.Triple[uint64, string, string], types.ReplicaReceipt]
+	Schema              collections.Schema
+	Params              collections.Item[types.Params]
+	Nodes               collections.Map[string, types.NodeRecord]
+	BatchCommits        collections.Map[collections.Triple[uint64, string, string], types.BatchCommit]
+	EpochCommits        collections.Map[uint64, types.EpochCommit]
+	RewardRecords       collections.Map[collections.Pair[uint64, string], types.RewardRecord]
+	AggregateRecords    collections.Map[collections.Pair[uint64, uint64], types.AggregateRecord]
+	Challenges          collections.Map[string, types.Challenge]
+	Availability        collections.Map[collections.Triple[uint64, string, string], types.AvailabilityRecord]
+	GameWeightEntries   collections.Map[collections.Pair[uint64, uint64], types.GameWeightEntry]
+	ClaimedRewards      collections.Map[collections.Pair[uint64, string], types.ClaimedReward]
+	ReplicaReceipts     collections.Map[collections.Triple[uint64, string, string], types.ReplicaReceipt]
 	VerificationRecords collections.Map[collections.Triple[uint64, string, string], types.VerificationRecord]
-	AnnualEmission   collections.Item[[]byte]
+	AnnualEmission      collections.Item[[]byte]
+	PlaySessions        collections.Map[string, types.PlaySession]
+	PlayHeartbeats      collections.Map[collections.Pair[string, uint64], types.PlayHeartbeat]
+	WitnessAttestations collections.Map[collections.Pair[string, string], types.WitnessAttestation]
+	SessionSettlements  collections.Map[string, types.SessionSettlement]
 }
 
 type bankKeeper interface {
+	GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
 	MintCoins(ctx context.Context, moduleName string, amounts sdk.Coins) error
+	SendCoinsFromAccountToModule(ctx context.Context, senderAddr sdk.AccAddress, recipientModule string, amt sdk.Coins) error
 	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
 	BurnCoins(ctx context.Context, moduleName string, amounts sdk.Coins) error
 }
@@ -204,6 +211,44 @@ func NewKeeper(storeService store.KVStoreService, authority string) (Keeper, err
 			types.AnnualEmissionKeyPrefix,
 			"annual_emission",
 			collections.BytesValue,
+		),
+		PlaySessions: collections.NewMap(
+			sb,
+			types.PlaySessionsKeyPrefix,
+			"play_sessions",
+			collections.StringKey,
+			sdkcodec.CollValue[types.PlaySession](protoCodec),
+		),
+		PlayHeartbeats: collections.NewMap(
+			sb,
+			types.PlayHeartbeatsKeyPrefix,
+			"play_heartbeats",
+			collections.NamedPairKeyCodec(
+				"session_id_hex",
+				collections.StringKey,
+				"bucket_index",
+				collections.Uint64Key,
+			),
+			sdkcodec.CollValue[types.PlayHeartbeat](protoCodec),
+		),
+		WitnessAttestations: collections.NewMap(
+			sb,
+			types.WitnessAttestationsKeyPrefix,
+			"witness_attestations",
+			collections.NamedPairKeyCodec(
+				"session_id_hex",
+				collections.StringKey,
+				"witness_address",
+				collections.StringKey,
+			),
+			sdkcodec.CollValue[types.WitnessAttestation](protoCodec),
+		),
+		SessionSettlements: collections.NewMap(
+			sb,
+			types.SessionSettlementsKeyPrefix,
+			"session_settlements",
+			collections.StringKey,
+			sdkcodec.CollValue[types.SessionSettlement](protoCodec),
 		),
 	}
 
@@ -480,6 +525,38 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) er
 			return err
 		}
 	}
+	for _, session := range genesis.PlaySessions {
+		if session == nil {
+			continue
+		}
+		if err := k.SetPlaySession(ctx, *session); err != nil {
+			return err
+		}
+	}
+	for _, heartbeat := range genesis.PlayHeartbeats {
+		if heartbeat == nil {
+			continue
+		}
+		if err := k.SetPlayHeartbeat(ctx, *heartbeat); err != nil {
+			return err
+		}
+	}
+	for _, attestation := range genesis.WitnessAttestations {
+		if attestation == nil {
+			continue
+		}
+		if err := k.SetWitnessAttestation(ctx, *attestation); err != nil {
+			return err
+		}
+	}
+	for _, settlement := range genesis.SessionSettlements {
+		if settlement == nil {
+			continue
+		}
+		if err := k.SessionSettlements.Set(ctx, settlement.SessionIdHex, *settlement); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -530,19 +607,39 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	if err != nil {
 		return nil, err
 	}
+	playSessions, err := valuesFromMap(k.PlaySessions, ctx)
+	if err != nil {
+		return nil, err
+	}
+	playHeartbeats, err := valuesFromMap(k.PlayHeartbeats, ctx)
+	if err != nil {
+		return nil, err
+	}
+	witnessAttestations, err := valuesFromMap(k.WitnessAttestations, ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessionSettlements, err := valuesFromMap(k.SessionSettlements, ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return &types.GenesisState{
-		Params:            &params,
-		Nodes:             pointerSlice(nodes),
-		BatchCommits:      pointerSlice(batchCommits),
-		EpochCommits:      pointerSlice(epochCommits),
-		RewardRecords:     pointerSlice(rewardRecords),
-		AggregateRecords:  pointerSlice(aggregateRecords),
-		Challenges:        pointerSlice(challenges),
-		Availability:      pointerSlice(availability),
-		GameWeightEntries: pointerSlice(gameWeightEntries),
-		ClaimedRewards:    pointerSlice(claimedRewards),
-		ReplicaReceipts:   pointerSlice(replicaReceipts),
+		Params:              &params,
+		Nodes:               pointerSlice(nodes),
+		BatchCommits:        pointerSlice(batchCommits),
+		EpochCommits:        pointerSlice(epochCommits),
+		RewardRecords:       pointerSlice(rewardRecords),
+		AggregateRecords:    pointerSlice(aggregateRecords),
+		Challenges:          pointerSlice(challenges),
+		Availability:        pointerSlice(availability),
+		GameWeightEntries:   pointerSlice(gameWeightEntries),
+		ClaimedRewards:      pointerSlice(claimedRewards),
+		ReplicaReceipts:     pointerSlice(replicaReceipts),
+		PlaySessions:        pointerSlice(playSessions),
+		PlayHeartbeats:      pointerSlice(playHeartbeats),
+		WitnessAttestations: pointerSlice(witnessAttestations),
+		SessionSettlements:  pointerSlice(sessionSettlements),
 	}, nil
 }
 
@@ -594,6 +691,21 @@ func (k Keeper) FinalizeEpoch(ctx context.Context, epochId uint64) error {
 	if hasOpenChallenges {
 		return fmt.Errorf("epoch %d still has open challenges", epochId)
 	}
+
+	// Every play claim in the epoch must be settled before the epoch can
+	// close. Otherwise an epoch could finalize with unproven sessions
+	// outstanding, and the reward root would be committed without the
+	// evidence that backs it.
+	unsettled, err := k.UnsettledSessionsForEpoch(ctx, epochId)
+	if err != nil {
+		return err
+	}
+	if len(unsettled) > 0 {
+		return fmt.Errorf(
+			"epoch %d has %d unsettled play session(s)", epochId, len(unsettled),
+		)
+	}
+
 	if err := k.ValidateEpochRoots(ctx, epochId, commit); err != nil {
 		return err
 	}
@@ -647,20 +759,17 @@ func (k Keeper) ValidateEpochRoots(ctx context.Context, epochId uint64, commit t
 	if commit.Rewards == nil {
 		return fmt.Errorf("epoch %d missing rewards commitment", epochId)
 	}
-	// The rewards commitment is verified against the chain's reward
-	// records only when the chain actually holds any for the epoch.
-	// Reward records enter the store exclusively via genesis or
-	// challenge resolutions — there is no live reward-record submission
-	// path — so a proposer's commitment over its own computed reward set
-	// legitimately differs from an empty (or challenge-only) on-chain
-	// set. In that case the committed rewards root stands as the
-	// proposer's commitment and remains the anchor for BadReward
-	// challenge proofs; the aggregates and total-weight checks below are
-	// always enforced because those records ARE submitted on-chain.
-	if len(rewardRecords) > 0 {
-		if commit.Rewards.Root != rewardRoot || commit.Rewards.LeafCount != rewardLeafCount {
-			return fmt.Errorf("epoch %d reward root mismatch", epochId)
-		}
+	// The rewards commitment is checked unconditionally. It used to be
+	// skipped when the chain held no reward records, because records could
+	// only arrive via genesis or challenge resolution — which also meant a
+	// claim against a proposer-committed root could never find its record
+	// and always failed. MsgSubmitRewardRecords is now the live path, so
+	// the chain must hold the records backing the committed root.
+	if commit.Rewards.Root != rewardRoot || commit.Rewards.LeafCount != rewardLeafCount {
+		return fmt.Errorf(
+			"epoch %d reward root mismatch (committed %s/%d, derived %s/%d)",
+			epochId, commit.Rewards.Root, commit.Rewards.LeafCount, rewardRoot, rewardLeafCount,
+		)
 	}
 	if commit.Aggregates == nil {
 		return fmt.Errorf("epoch %d missing aggregates commitment", epochId)
@@ -752,6 +861,20 @@ func (k Keeper) ApplyValidatorSlash(ctx context.Context, consAddress string, sla
 	return k.slashingKeeper.Slash(ctx, consAddr, fraction, power, distributionHeight)
 }
 
+// ensureRewardPool mints exactly the module-account shortfall needed for a
+// confirmed payout. Supply is stabilized by the protocol's burn channels,
+// while the activity-adjusted annual curve continues to regulate unit value.
+func (k Keeper) ensureRewardPool(ctx context.Context, payout uint64) error {
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
+	balance := k.bankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+	needed := sdkmath.NewIntFromUint64(payout)
+	if balance.Amount.GTE(needed) {
+		return nil
+	}
+	shortfall := needed.Sub(balance.Amount)
+	return k.bankKeeper.MintCoins(ctx, types.ModuleName, sdk.NewCoins(sdk.NewCoin(types.BaseDenom, shortfall)))
+}
+
 func (k Keeper) PayoutClaimedReward(ctx context.Context, claim types.ClaimedReward) error {
 	if k.bankKeeper == nil {
 		return fmt.Errorf("bank keeper is not configured")
@@ -780,9 +903,12 @@ func (k Keeper) PayoutClaimedReward(ctx context.Context, claim types.ClaimedRewa
 
 	if payout > 0 {
 		coins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(payout)))
-		// Rewards are paid from the scheme-A annual emission pool minted
-		// by BeginBlock; an exhausted pool fails the claim (the yearly
-		// budget is the hard issuance cap).
+		// The activity-adjusted curve is a rate-control mechanism, not a
+		// hard issuance cap. Mint only the exact module-account shortfall
+		// before paying a confirmed claim.
+		if err := k.ensureRewardPool(ctx, claim.Amount); err != nil {
+			return err
+		}
 		if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, recipient, coins); err != nil {
 			return err
 		}

@@ -63,6 +63,14 @@ pub struct ObservationAnnouncement {
 pub struct BatchAnnouncement {
     pub epoch_id: EpochId,
     pub collector_id: NodeId,
+    /// Bech32 account address of the collecting node's identity
+    /// (`sha256(pubkey)[..20]`). This is the only way a witness can learn the
+    /// collector's *on-chain* address: `collector_id` is an irreversible
+    /// hash, and the chain keys `GetNode` / player classification on the
+    /// account address, not the node id. Empty when the publisher had no
+    /// identity available.
+    #[serde(default)]
+    pub collector_address: String,
     pub payload_cid: ContentId,
     pub payload_hash: Hash32,
     pub payload_size_bytes: u64,
@@ -1555,10 +1563,14 @@ fn decode_nibble(byte: u8) -> Result<u8, P2pError> {
     }
 }
 
-pub fn batch_announcement_from_assembled(batch: &AssembledBatch) -> BatchAnnouncement {
+pub fn batch_announcement_from_assembled(
+    batch: &AssembledBatch,
+    collector_address: &str,
+) -> BatchAnnouncement {
     BatchAnnouncement {
         epoch_id: batch.batch_commit.epoch_id,
         collector_id: batch.batch_commit.collector_id,
+        collector_address: collector_address.to_string(),
         payload_cid: batch.payload_cid.clone(),
         payload_hash: batch.payload_hash,
         payload_size_bytes: batch.payload_bytes.len() as u64,

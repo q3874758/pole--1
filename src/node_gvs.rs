@@ -230,6 +230,7 @@ mod tests {
                 medium_deviation_bps: 500,
                 severe_deviation_bps: 2_000,
             },
+            mutual_proof: crate::MutualProofParams::default(),
         };
         store.insert_params_update_proposal(
             [0xaa; 32],

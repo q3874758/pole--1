@@ -22,6 +22,11 @@ service Msg {
   rpc ClaimReward(MsgClaimReward) returns (MsgClaimRewardResponse);
   rpc UpsertGameWeight(MsgUpsertGameWeight) returns (MsgUpsertGameWeightResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+  rpc SubmitPlaySession(MsgSubmitPlaySession) returns (MsgSubmitPlaySessionResponse);
+  rpc SubmitPlayHeartbeat(MsgSubmitPlayHeartbeat) returns (MsgSubmitPlayHeartbeatResponse);
+  rpc AttestSession(MsgAttestSession) returns (MsgAttestSessionResponse);
+  rpc SettleSession(MsgSettleSession) returns (MsgSettleSessionResponse);
+  rpc SubmitRewardRecords(MsgSubmitRewardRecords) returns (MsgSubmitRewardRecordsResponse);
 }
 
 message MsgUpsertNode {
@@ -145,3 +150,61 @@ message MsgUpdateParams {
 }
 
 message MsgUpdateParamsResponse {}
+
+message MsgSubmitPlaySession {
+  option (cosmos.msg.v1.signer) = "node_address";
+
+  string node_address = 1;
+  PlaySession session = 2;
+}
+
+message MsgSubmitPlaySessionResponse {}
+
+message MsgSubmitPlayHeartbeat {
+  option (cosmos.msg.v1.signer) = "node_address";
+
+  string node_address = 1;
+  PlayHeartbeat heartbeat = 2;
+}
+
+message MsgSubmitPlayHeartbeatResponse {}
+
+message MsgAttestSession {
+  option (cosmos.msg.v1.signer) = "witness";
+
+  string witness = 1;
+  WitnessAttestation attestation = 2;
+}
+
+message MsgAttestSessionResponse {}
+
+message MsgSettleSession {
+  option (cosmos.msg.v1.signer) = "settler";
+
+  string settler = 1;
+  string session_id_hex = 2;
+}
+
+message MsgSettleSessionResponse {
+  SessionSettlement settlement = 1;
+}
+
+// MsgSubmitRewardRecords is the live reward-record submission path. Before
+// it, reward records entered the store only via genesis or challenge
+// resolution, so a claim against a proposer-committed reward root could
+// never find its record and always failed. The proposer submits the
+// epoch's reward records; the chain recomputes the rewards root from them
+// and requires it to match the committed root, which closes the
+// "commitment with no backing records" gap.
+message MsgSubmitRewardRecords {
+  option (cosmos.msg.v1.signer) = "proposer";
+
+  string proposer = 1;
+  uint64 epoch_id = 2;
+  repeated RewardRecord records = 3;
+}
+
+message MsgSubmitRewardRecordsResponse {
+  string reward_root_hex = 1;
+  uint32 leaf_count = 2;
+}

@@ -44,6 +44,7 @@ pub use tx_signer::{sign_with_keypair, SignDocInputs, SignedTx};
 pub const HARNESS_FEATURE_NAME_FOR_TEST: &str = "integration";
 
 use crate::wallet::KeyPair;
+use std::time::Duration;
 
 /// Connection parameters for the bridge. Constructed once at startup and
 /// shared by every `CosmosClient`.
@@ -125,8 +126,32 @@ impl CosmosClient {
         self.rpc.broadcast_tx_sync(&bytes, opts).await
     }
 
+    /// Codes returned by `CheckTx` when the account sequence we signed
+    /// against no longer matches chain state.
+    ///
+    /// `broadcast_tx_sync` only guarantees *mempool admission*; the
+    /// account query for the next transaction can therefore still read
+    /// the sequence from before the previous tx committed. That race is
+    /// recoverable by re-reading the account and re-signing, which is
+    /// deliberately different from [`rpc_client::TendermintRpc`]'s
+    /// retriable set — that one re-sends the *same* bytes, which can
+    /// never fix a stale sequence.
+    fn is_sequence_race(code: u32) -> bool {
+        // 19: tx already in mempool (the predecessor is still pending)
+        // 32: incorrect account sequence (`sdkerrors.ErrWrongSequence`)
+        matches!(code, 19 | 32)
+    }
+
     /// End-to-end: lookup account → build → sign → broadcast.
+    ///
     /// `signer` must be the bech32 address derived from `keypair`.
+    ///
+    /// When the chain reports a sequence race, the account is re-read
+    /// and the message re-signed with the fresh sequence. Because a
+    /// `broadcast_tx_sync` response says nothing about when the
+    /// predecessor commits, a retry is only useful once the account's
+    /// sequence has actually advanced, so that is what we wait for
+    /// (bounded by `opts.request_timeout`).
     pub async fn submit(
         &self,
         msg: &BridgeMessage,
@@ -134,17 +159,59 @@ impl CosmosClient {
         keypair: &KeyPair,
         opts: &BroadcastOptions,
     ) -> Result<BroadcastTxResponse> {
-        let info = self.account(&signer.bech32).await?;
-        let account_number: u64 = info
-            .account_number
-            .parse()
-            .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
-        let sequence: u64 = info
-            .sequence
-            .parse()
-            .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
-        let builder = self.builder(account_number, sequence);
-        let signed = builder.build(msg, signer, keypair)?;
-        self.broadcast(&signed, opts).await
+        let attempts = opts.max_retries.max(1);
+        let mut last: Option<BroadcastTxResponse> = None;
+        for attempt in 1..=attempts {
+            let info = self.account(&signer.bech32).await?;
+            let account_number: u64 = info
+                .account_number
+                .parse()
+                .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
+            let sequence: u64 = info
+                .sequence
+                .parse()
+                .map_err(|e: std::num::ParseIntError| CosmosError::Decode(e.to_string()))?;
+            let builder = self.builder(account_number, sequence);
+            let signed = builder.build(msg, signer, keypair)?;
+            let resp = self.broadcast(&signed, opts).await?;
+            if resp.is_ok() || !Self::is_sequence_race(resp.code) {
+                return Ok(resp);
+            }
+            last = Some(resp);
+            if attempt < attempts {
+                self.wait_for_sequence_above(&signer.bech32, sequence, opts.request_timeout)
+                    .await;
+            }
+        }
+        // Exhausted the retries: surface the final CheckTx response so
+        // the caller can inspect `code`/`log` (this mirrors the
+        // pre-retry contract of returning a non-ok response rather
+        // than an error).
+        Ok(last.expect("attempts >= 1 always produces a response"))
+    }
+
+    /// Poll `address` until its on-chain sequence differs from
+    /// `stale_sequence`, or `timeout` elapses. A lookup error is
+    /// treated as "not yet" — the REST gateway can also be briefly
+    /// unavailable during a commit.
+    async fn wait_for_sequence_above(&self, address: &str, stale_sequence: u64, timeout: Duration) {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let poll = Duration::from_millis(250).min(timeout);
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return;
+            }
+            if let Ok(info) = self.account(address).await {
+                match info.sequence.parse::<u64>() {
+                    // Sequence advanced: the predecessor committed, so
+                    // re-signing with a fresh read will be accepted.
+                    Ok(seq) if seq != stale_sequence => return,
+                    // Either still stale, or an unparseable payload;
+                    // keep polling until the deadline.
+                    _ => {}
+                }
+            }
+            tokio::time::sleep(poll).await;
+        }
     }
 }

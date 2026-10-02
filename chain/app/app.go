@@ -82,7 +82,7 @@ var ModuleBasics = module.NewBasicManager(
 )
 
 var moduleAccountPermissions = map[string][]string{
-	authtypes.FeeCollectorName:     nil,
+	authtypes.FeeCollectorName:     {authtypes.Burner},
 	govtypes.ModuleName:            {authtypes.Burner},
 	poletypes.ModuleName:           {authtypes.Minter, authtypes.Burner},
 	stakingtypes.BondedPoolName:    {authtypes.Burner, authtypes.Staking},
@@ -318,6 +318,12 @@ func New(logger log.Logger, db dbm.DB, baseAppOptions ...func(*baseapp.BaseApp))
 	bApp.SetInitChainer(app.InitChainer)
 	bApp.SetBeginBlocker(app.BeginBlocker)
 	bApp.SetEndBlocker(app.EndBlocker)
+
+	appAnteHandler, err := NewAppAnteHandler(accountKeeper, bankKeeper, poleKeeper, txConfig.SignModeHandler())
+	if err != nil {
+		return nil, fmt.Errorf("build ante handler: %w", err)
+	}
+	bApp.SetAnteHandler(appAnteHandler)
 
 	if err := bApp.LoadLatestVersion(); err != nil {
 		return nil, fmt.Errorf("load latest version: %w", err)

@@ -3,7 +3,6 @@
 pub mod activity_collector;
 pub mod app_paths;
 pub mod bin_commands;
-pub mod chain_bridge;
 pub mod cli_client;
 pub mod cli_commands;
 pub mod cli_genesis;
@@ -19,6 +18,7 @@ pub mod executor;
 pub mod genesis_builder;
 mod governance_runtime;
 pub mod json_file;
+pub mod mutual_proof;
 pub mod node_aggregator;
 pub mod node_cli_support;
 pub mod node_config;
@@ -106,6 +106,14 @@ pub use control_api_types::{
 };
 pub use executor::{execute_block, Block, BlockExecutionError};
 pub use governance_runtime::{execute_governance_vote, submit_protocol_params_update_proposal};
+pub use mutual_proof::{
+    build_play_heartbeat, build_play_session, build_witness_attestation, collector_address,
+    identity_account_address, identity_account_bech32, load_play_sessions,
+    local_session_ids_for_slot, play_heartbeat_path, play_heartbeat_to_wire, play_session_path,
+    play_session_to_wire, save_play_heartbeat, save_play_session, save_witness_attestation,
+    session_id_from_parts, witness_attestation_path, witness_attestation_to_wire, MutualProofError,
+    PlaySessionInputs,
+};
 pub use node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
@@ -135,9 +143,9 @@ pub use node_daemon::{
     summarize_auto_settlement, summarize_collect_loop_with_client,
     summarize_collect_loop_with_client_and_network, verification_credential_path,
     AutoSettlementSummary, CollectLoopSummary, CollectTickArtifact, CollectTickResult,
-    LocalNodeProgress, NodeDaemonError, NodeHeartbeat, NodeStatusSummary, PruneOutcome,
-    RewardAdjustmentArtifact, RewardAdjustmentArtifactIndex, RewardAdjustmentArtifactSummary,
-    VerificationCredential,
+    LocalNodeProgress, NodeDaemonError, NodeHeartbeat, NodeStatusSummary,
+    PeerBatchIngestionOutcome, PruneOutcome, RewardAdjustmentArtifact,
+    RewardAdjustmentArtifactIndex, RewardAdjustmentArtifactSummary, VerificationCredential,
 };
 pub use node_gvs::{
     classify_tier, compute_coverage_bonus_ppm, compute_gvs_factors, compute_gvs_microunits,

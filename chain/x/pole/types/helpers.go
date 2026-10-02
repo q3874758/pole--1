@@ -25,29 +25,37 @@ const (
 
 func DefaultParams() Params {
 	return Params{
-		RewardBlockDurationSeconds: 3600,
-		BaseHourlyReward:           1000,
-		TargetNetworkWeightUnits:   150_000_000_000_000,
-		RewardAdjustmentCapBps:     2000,
-		ChallengeWindowBlocks:      20,
-		MinRetentionEpochs:         2,
-		PlayerRewardAllocationBps:  8000,
-		ServiceRewardAllocationBps: 1000,
-		CollectRewardBps:           5000,
-		StoreRewardBps:             2500,
-		VerifyRewardBps:            1500,
-		ProposeRewardBps:           1000,
-		Tier1WeightPpm:             1_000_000,
-		Tier2WeightMinPpm:          300_000,
-		Tier2WeightMaxPpm:          600_000,
-		Tier3WeightMinPpm:          50_000,
-		Tier3WeightMaxPpm:          150_000,
-		FeeBurnBps:                 2500,
-		RewardBurnThreshold:        10_000,
-		RewardBurnBps:              1000,
-		GovernanceBurnBps:          100,
-		MinVerificationCount:       3,
-		MinPlayerVerifierShareBps:  5000,
+		RewardBlockDurationSeconds:        3600,
+		BaseHourlyReward:                  1000,
+		TargetNetworkWeightUnits:          150_000_000_000_000,
+		RewardAdjustmentCapBps:            2000,
+		ChallengeWindowBlocks:             20,
+		MinRetentionEpochs:                2,
+		PlayerRewardAllocationBps:         8000,
+		ServiceRewardAllocationBps:        1000,
+		CollectRewardBps:                  5000,
+		StoreRewardBps:                    2500,
+		VerifyRewardBps:                   1500,
+		ProposeRewardBps:                  1000,
+		Tier1WeightPpm:                    1_000_000,
+		Tier2WeightMinPpm:                 300_000,
+		Tier2WeightMaxPpm:                 600_000,
+		Tier3WeightMinPpm:                 50_000,
+		Tier3WeightMaxPpm:                 150_000,
+		FeeBurnBps:                        2500,
+		RewardBurnThreshold:               10_000,
+		RewardBurnBps:                     1000,
+		GovernanceBurnBps:                 100,
+		MinVerificationCount:              3,
+		MinPlayerVerifierShareBps:         5000,
+		MinWitnessCount:                   2,
+		MinWitnessObservationTolerancePpm: 500_000,
+		MinDistinctObservations:           2,
+		SessionSlashBps:                   5_000,
+		MinHeartbeatCount:                 2,
+		HeartbeatBucketSeconds:            300,
+		MinHeartbeatCoverageBps:           5_000,
+		ChallengeBondBurnBps:              2_500,
 	}
 }
 
@@ -102,6 +110,29 @@ func (p Params) Validate() error {
 	}
 	if p.Tier3WeightMinPpm == 0 || p.Tier3WeightMaxPpm == 0 || p.Tier3WeightMinPpm > p.Tier3WeightMaxPpm {
 		return fmt.Errorf("tier3 weight bounds are invalid")
+	}
+
+	if p.MinWitnessObservationTolerancePpm > 1_000_000 {
+		return fmt.Errorf("min_witness_observation_tolerance_ppm must be <= 1000000")
+	}
+	if err := validateBps("session_slash_bps", p.SessionSlashBps); err != nil {
+		return err
+	}
+	if err := validateBps("min_heartbeat_coverage_bps", p.MinHeartbeatCoverageBps); err != nil {
+		return err
+	}
+	if err := validateBps("challenge_bond_burn_bps", p.ChallengeBondBurnBps); err != nil {
+		return err
+	}
+	if p.HeartbeatBucketSeconds == 0 {
+		return fmt.Errorf("heartbeat_bucket_seconds must be greater than 0")
+	}
+	// A session cannot need more distinct observations than witnesses.
+	if p.MinDistinctObservations > p.MinWitnessCount {
+		return fmt.Errorf(
+			"min_distinct_observations (%d) must be <= min_witness_count (%d)",
+			p.MinDistinctObservations, p.MinWitnessCount,
+		)
 	}
 
 	return nil

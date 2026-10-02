@@ -118,7 +118,7 @@
 
 ## 7. 🟢 可选（不阻断，发布后迭代）
 
-- [ ] 7.1 libp2p 真实 swarm 传输（当前 socket 明文 + libp2p 骨架）
+- [ ] 7.1 更强的 P2P 传输（当前 socket 明文；libp2p 骨架与 `libp2p-*`/`libp2p-diagnose` 命令已在 V1 清理中删除）
 - [ ] 7.2 压力测试/benchmark（criterion）
 - [ ] 7.3 归档重放策略（IPFS/Arweave）
 - [ ] 7.4 灾难恢复手册

@@ -16,6 +16,8 @@ service Query {
   rpc ClaimedReward(QueryClaimedRewardRequest) returns (QueryClaimedRewardResponse);
   rpc Challenge(QueryChallengeRequest) returns (QueryChallengeResponse);
   rpc GameWeight(QueryGameWeightRequest) returns (QueryGameWeightResponse);
+  rpc PlaySession(QueryPlaySessionRequest) returns (QueryPlaySessionResponse);
+  rpc SessionSettlement(QuerySessionSettlementRequest) returns (QuerySessionSettlementResponse);
 }
 
 message QueryParamsRequest {}
@@ -102,4 +104,20 @@ message QueryGameWeightRequest {
 
 message QueryGameWeightResponse {
   GameWeightEntry entry = 1;
+}
+
+message QueryPlaySessionRequest {
+  string session_id_hex = 1;
+}
+
+message QueryPlaySessionResponse {
+  PlaySession session = 1;
+}
+
+message QuerySessionSettlementRequest {
+  string session_id_hex = 1;
+}
+
+message QuerySessionSettlementResponse {
+  SessionSettlement settlement = 1;
 }

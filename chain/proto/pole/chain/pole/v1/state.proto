@@ -67,6 +67,32 @@ message Params {
   // must come from player verifiers (nodes with live activity in the
   // previous epoch).
   uint32 min_player_verifier_share_bps = 23;
+  // Minimum number of distinct witness attestations a play session needs
+  // before the chain accepts the claimed play time.
+  uint64 min_witness_count = 24;
+  // Maximum relative deviation (ppm) tolerated between the play session's
+  // observed player count and a witness's own observation. A witness whose
+  // observation disagrees more strongly is rejected: witnessing means
+  // "my own observation corroborates this claim", not "I trust the claim".
+  uint32 min_witness_observation_tolerance_ppm = 25;
+  // Minimum number of distinct witness observation payloads (CIDs)
+  // backing a session. Defeats N witnesses copying one observation.
+  uint64 min_distinct_observations = 26;
+  // Share (bps) of a session's player reward burned when the session is
+  // resolved invalid by a challenge.
+  uint32 session_slash_bps = 27;
+  // Minimum number of signed play heartbeats a session needs. Heartbeats
+  // are what make "this node was actually playing for N seconds"
+  // checkable instead of merely asserted.
+  uint64 min_heartbeat_count = 28;
+  // Length of one heartbeat bucket in seconds.
+  uint64 heartbeat_bucket_seconds = 29;
+  // Minimum share (bps) of the declared play window that heartbeats must
+  // cover.
+  uint32 min_heartbeat_coverage_bps = 30;
+  // Share (bps) of a challenge bond burned when the challenge is rejected
+  // or resolved against the challenger.
+  uint32 challenge_bond_burn_bps = 31;
 }
 
 message BatchCommit {
@@ -196,4 +222,79 @@ message VerificationRecord {
   bool verified = 6;
   int64 verified_at_height = 7;
   string signature_hex = 8;
+}
+
+// PlaySession is a node's signed claim that it was actually playing a
+// mapped game during one slot: "I played app X for N seconds". It is the
+// object the mutual-proof flow proves; without it the chain cannot answer
+// "which node played how long", and player rewards stay unverifiable.
+message PlaySession {
+  string session_id_hex = 1;
+  // The playing node. Also the reward recipient (player == node).
+  string node_address = 2;
+  uint32 app_id = 3;
+  uint64 epoch_id = 4;
+  uint64 slot_id = 5;
+  // Claimed effective play seconds inside this slot; <= slot duration.
+  uint64 play_seconds = 6;
+  // Node that collected the observation backing this claim. May equal
+  // node_address (self-collection), but a witness may never equal it.
+  string collector_address = 7;
+  // CID of the observation payload this claim rests on.
+  string observation_cid = 8;
+  // Observed player count reported for this app/slot.
+  uint64 observed_players = 9;
+  int64 submitted_at_height = 10;
+  string session_signature = 11;
+}
+
+// PlayHeartbeat is a periodic signed liveness proof emitted while the node
+// is playing. It is what turns "I played 3600s" from an assertion into
+// something checkable: the heartbeats must cover the declared window.
+message PlayHeartbeat {
+  string session_id_hex = 1;
+  string node_address = 2;
+  // Monotonic bucket index inside the session's play window.
+  uint64 bucket_index = 3;
+  int64 signed_at_millis = 4;
+  string heartbeat_signature = 5;
+}
+
+// WitnessAttestation is an independent node's corroboration of a play
+// session. It carries the witness's OWN observation, not a copy of the
+// claim: the chain rejects a witness that has no observation of its own,
+// that reuses the session's observation CID, or whose observed player
+// count deviates from the claim by more than the tolerance.
+message WitnessAttestation {
+  string session_id_hex = 1;
+  string witness_address = 2;
+  // Play seconds the witness itself observed for this app/slot.
+  uint64 observed_play_seconds = 3;
+  // CID of the witness's own observation payload; must differ from the
+  // session's observation_cid.
+  string witness_observation_cid = 4;
+  // Player count the witness itself observed.
+  uint64 observed_players = 5;
+  int64 attested_at_height = 6;
+  string witness_signature = 7;
+}
+
+// SessionSettlement is the chain's verdict on a play session. It is
+// computed by the chain from the stored sessions/heartbeats/attestations
+// and is never accepted as a caller-supplied value.
+message SessionSettlement {
+  string session_id_hex = 1;
+  uint64 epoch_id = 2;
+  uint32 app_id = 3;
+  string node_address = 4;
+  bool valid = 5;
+  uint64 play_seconds = 6;
+  uint32 game_weight_ppm = 7;
+  uint64 player_weight_units = 8;
+  uint64 witness_count = 9;
+  uint64 distinct_observation_count = 10;
+  uint64 heartbeat_count = 11;
+  uint32 heartbeat_coverage_bps = 12;
+  int64 settled_at_height = 13;
+  string invalid_reason = 14;
 }

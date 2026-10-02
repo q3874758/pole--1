@@ -65,6 +65,54 @@ pub struct GovernanceParams {
     pub slow_params_update_approval_bps: u16,
 }
 
+/// Mutual-proof gates: the thresholds that decide whether one node's
+/// signed play claim is corroborated by *independent* witnesses.
+///
+/// Mirrors the flat `ParamsWire` proto fields 24-31; the off-chain model
+/// keeps them together because they are only ever read as one policy
+/// block. A zero value disables the corresponding chain-side check, so
+/// every genesis must emit them explicitly (see
+/// `genesis_builder::default_pole_params`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct MutualProofParams {
+    /// Minimum adopted attestations for a session to settle.
+    pub min_witness_count: u64,
+    /// Max deviation (ppm) between a witness's observed player count and
+    /// the session's, before the attestation is thrown out.
+    pub min_witness_observation_tolerance_ppm: u32,
+    /// Minimum distinct witness observations (anti-collusion: two
+    /// witnesses reusing one observation count once).
+    pub min_distinct_observations: u64,
+    /// Share (bps) of a bad-reward player reward burned as the fake-play
+    /// penalty.
+    pub session_slash_bps: u32,
+    /// Minimum signed heartbeats per session.
+    pub min_heartbeat_count: u64,
+    /// Width of one heartbeat bucket in seconds.
+    pub heartbeat_bucket_seconds: u64,
+    /// Minimum share (bps) of the declared play window covered by
+    /// heartbeats.
+    pub min_heartbeat_coverage_bps: u32,
+    /// Share (bps) of a forfeited challenge bond burned instead of
+    /// returning to the pool.
+    pub challenge_bond_burn_bps: u32,
+}
+
+impl Default for MutualProofParams {
+    fn default() -> Self {
+        Self {
+            min_witness_count: 2,
+            min_witness_observation_tolerance_ppm: 500_000,
+            min_distinct_observations: 2,
+            session_slash_bps: 5_000,
+            min_heartbeat_count: 2,
+            heartbeat_bucket_seconds: 300,
+            min_heartbeat_coverage_bps: 5_000,
+            challenge_bond_burn_bps: 2_500,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct ProtocolParams {
     pub slot_seconds: u32,
@@ -80,6 +128,8 @@ pub struct ProtocolParams {
     pub rewards: RewardParams,
     pub governance: GovernanceParams,
     pub slashing: SlashingParams,
+    #[serde(default)]
+    pub mutual_proof: MutualProofParams,
 }
 
 impl Default for ProtocolParams {
@@ -144,6 +194,16 @@ impl Default for ProtocolParams {
                 medium_deviation_bps: 500,
                 severe_deviation_bps: 2_000,
             },
+            mutual_proof: MutualProofParams {
+                min_witness_count: 2,
+                min_witness_observation_tolerance_ppm: 500_000,
+                min_distinct_observations: 2,
+                session_slash_bps: 5_000,
+                min_heartbeat_count: 2,
+                heartbeat_bucket_seconds: 300,
+                min_heartbeat_coverage_bps: 5_000,
+                challenge_bond_burn_bps: 2_500,
+            },
         }
     }
 }
@@ -163,6 +223,12 @@ pub enum ProtocolParamsError {
     InvalidAppWeightOverrides,
     GovernanceThresholdInvalid,
     GovernanceBondZero,
+    MinWitnessCountZero,
+    MinDistinctObservationsZero,
+    MinHeartbeatCountZero,
+    HeartbeatBucketSecondsZero,
+    ObservationToleranceInvalid { ppm: u32 },
+    BurnBpsOutOfRange { field: &'static str, bps: u32 },
 }
 
 impl std::fmt::Display for ProtocolParamsError {
@@ -208,6 +274,31 @@ impl std::fmt::Display for ProtocolParamsError {
             }
             Self::GovernanceBondZero => {
                 write!(f, "governance params_update_bond must be greater than 0")
+            }
+            Self::MinWitnessCountZero => {
+                write!(f, "mutual_proof.min_witness_count must be greater than 0")
+            }
+            Self::MinDistinctObservationsZero => {
+                write!(
+                    f,
+                    "mutual_proof.min_distinct_observations must be greater than 0"
+                )
+            }
+            Self::MinHeartbeatCountZero => {
+                write!(f, "mutual_proof.min_heartbeat_count must be greater than 0")
+            }
+            Self::HeartbeatBucketSecondsZero => {
+                write!(
+                    f,
+                    "mutual_proof.heartbeat_bucket_seconds must be greater than 0"
+                )
+            }
+            Self::ObservationToleranceInvalid { ppm } => write!(
+                f,
+                "mutual_proof.min_witness_observation_tolerance_ppm must be between 1 and 1000000, got {ppm}"
+            ),
+            Self::BurnBpsOutOfRange { field, bps } => {
+                write!(f, "mutual_proof.{field} must be between 0 and 10000, got {bps}")
             }
         }
     }
@@ -288,6 +379,41 @@ impl ProtocolParams {
         {
             return Err(ProtocolParamsError::GovernanceThresholdInvalid);
         }
+        // Mutual-proof gates. A zero gate silently disables a chain-side
+        // check, so the ones that *must* be positive are rejected here;
+        // the burn shares may legitimately be zero ("burn nothing").
+        let proof = &self.mutual_proof;
+        if proof.min_witness_count == 0 {
+            return Err(ProtocolParamsError::MinWitnessCountZero);
+        }
+        if proof.min_distinct_observations == 0 {
+            return Err(ProtocolParamsError::MinDistinctObservationsZero);
+        }
+        if proof.min_heartbeat_count == 0 {
+            return Err(ProtocolParamsError::MinHeartbeatCountZero);
+        }
+        if proof.heartbeat_bucket_seconds == 0 {
+            return Err(ProtocolParamsError::HeartbeatBucketSecondsZero);
+        }
+        if proof.min_witness_observation_tolerance_ppm == 0
+            || proof.min_witness_observation_tolerance_ppm > 1_000_000
+        {
+            return Err(ProtocolParamsError::ObservationToleranceInvalid {
+                ppm: proof.min_witness_observation_tolerance_ppm,
+            });
+        }
+        for (field, bps) in [
+            ("session_slash_bps", proof.session_slash_bps),
+            (
+                "min_heartbeat_coverage_bps",
+                proof.min_heartbeat_coverage_bps,
+            ),
+            ("challenge_bond_burn_bps", proof.challenge_bond_burn_bps),
+        ] {
+            if bps > 10_000 {
+                return Err(ProtocolParamsError::BurnBpsOutOfRange { field, bps });
+            }
+        }
         Ok(())
     }
 }
@@ -355,6 +481,7 @@ mod tests {
                 medium_deviation_bps: 500,
                 severe_deviation_bps: 2_000,
             },
+            mutual_proof: MutualProofParams::default(),
         }
     }
 

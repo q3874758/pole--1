@@ -240,6 +240,7 @@ fn runtime_uses_activated_protocol_min_retention_epochs_for_storage() {
             medium_deviation_bps: 500,
             severe_deviation_bps: 2_000,
         },
+        mutual_proof: pole_protocol_draft::MutualProofParams::default(),
     };
     store.insert_params_update_proposal(
         [0xaa; 32],

@@ -37,6 +37,12 @@ pub struct BatchVerificationReport {
     /// non-own batches have no collector key and always pass this flag.
     #[serde(default = "default_signatures_audit_valid")]
     pub signatures_audit_valid: bool,
+    /// Hex id of the node that actually collected this batch, taken from
+    /// its observations. A verification credential must target THIS node:
+    /// the chain rejects a verifier attesting its own batch, so filling in
+    /// the verifier's own id made every credential unsubmittable.
+    #[serde(default)]
+    pub collector_id_hex: String,
 }
 
 fn default_signatures_audit_valid() -> bool {
@@ -177,6 +183,11 @@ pub fn verify_local_epoch(
                 .map(|observation| observation.collector_id)
                 .filter(|collector| config.node_id().ok().as_ref() == Some(collector));
             let is_own_batch = own_collector.is_some();
+            // The batch's real collector, as recorded in its observations.
+            let collector_id_hex = observations
+                .first()
+                .map(|observation| crate::hex_32(observation.collector_id))
+                .unwrap_or_default();
             let local_pubkey = if is_own_batch {
                 config.identity_keypair().ok().map(|keypair| keypair.public)
             } else {
@@ -234,6 +245,7 @@ pub fn verify_local_epoch(
                 signatures_verified,
                 own_batch: is_own_batch,
                 signatures_audit_valid: signature_audit_ok,
+                collector_id_hex,
             });
         }
     }

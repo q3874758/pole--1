@@ -103,10 +103,20 @@ impl PendingPlayerRewardBlockState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RewardTickContext {
     pub epoch_id: EpochId,
     pub slot_id: u64,
+    /// Hex session id this reward block belongs to (empty when the node is
+    /// running without on-chain mutual proof). Copied into every
+    /// `PlayerRewardBlockRecord` so the reward can be traced back to the
+    /// exact chain session that justified it.
+    ///
+    /// When left empty, `record_player_reward_tick` falls back to this node's
+    /// own stored play sessions for `(epoch_id, slot_id)` — see
+    /// [`crate::mutual_proof::local_session_ids_for_slot`] — so the production
+    /// collect loop needs no extra wiring.
+    pub session_id: String,
     pub sampled_interval_secs: u64,
     pub fixed_block_reward: Amount,
     pub fixed_player_reward: Amount,
@@ -125,6 +135,11 @@ pub struct PlayerRewardBlockRecord {
     pub block_index: u32,
     pub process_name: String,
     pub app_id: u32,
+    /// Hex session id of the on-chain play session this reward block is
+    /// backed by. Empty for legacy artifacts written before mutual proof
+    /// existed (and for offline/pre-chain runs), hence `serde(default)`.
+    #[serde(default)]
+    pub session_id: String,
     pub play_seconds: u64,
     pub reward_block_secs: u64,
     pub sampled_interval_secs: u64,
@@ -454,10 +469,19 @@ pub fn compute_local_epoch_rewards(
             .player_reward += local_player_reward_total;
     }
     if service_reward_pools.verify_pool > 0 {
-        reward_map
-            .entry(local_node_id)
-            .or_insert_with(|| empty_reward_record(epoch_id, local_node_id))
-            .verify_reward += service_reward_pools.verify_pool;
+        // Witness reward is earned by actually corroborating play sessions,
+        // not by merely running with the verify capability enabled. A node
+        // that submitted no attestations this epoch contributed nothing to
+        // verification and earns nothing from the pool. The chain's
+        // WitnessCreditsForEpoch is authoritative for the network-wide
+        // split; this is the node's local view of its own share.
+        let local_attestations = local_witness_attestation_count(config, epoch_id);
+        if local_attestations > 0 {
+            reward_map
+                .entry(local_node_id)
+                .or_insert_with(|| empty_reward_record(epoch_id, local_node_id))
+                .verify_reward += service_reward_pools.verify_pool;
+        }
     }
     if service_reward_pools.propose_pool > 0 {
         reward_map
@@ -545,6 +569,15 @@ pub fn record_player_reward_tick(
     let active_mapping =
         select_active_game_mapping(config, foreground_process, active_game_processes);
 
+    // Traceability back to the on-chain session: an explicit context override
+    // wins; otherwise fall back to this node's own stored play sessions for the
+    // slot, so the reward record names the session that justified it.
+    let session_ids_by_app = if context.session_id.is_empty() {
+        crate::mutual_proof::local_session_ids_for_slot(config, context.epoch_id, context.slot_id)
+    } else {
+        BTreeMap::new()
+    };
+
     let mut pending_state = pending_state.unwrap_or_default();
     pending_state.normalize_whitepaper_fields();
     if pending_state.fixed_block_reward == 0 || pending_state.sampled_interval_secs == 0 {
@@ -621,6 +654,14 @@ pub fn record_player_reward_tick(
                 block_index: next_block_index,
                 process_name: entry.process_name.clone(),
                 app_id: entry.app_id,
+                session_id: if context.session_id.is_empty() {
+                    session_ids_by_app
+                        .get(&entry.app_id)
+                        .cloned()
+                        .unwrap_or_default()
+                } else {
+                    context.session_id.clone()
+                },
                 play_seconds: entry.play_seconds,
                 reward_block_secs,
                 sampled_interval_secs: reward_block_secs,
@@ -1069,6 +1110,25 @@ pub fn player_reward_tick_artifact_path(
         .join(format!("epoch-{epoch_id:06}-slot-{slot_id:06}.json"))
 }
 
+/// Count the local node's witness attestations for an epoch: credentials it
+/// built for *other* nodes' batches. Credentials pointing at its own
+/// batches are not witnesses (the chain rejects self-attestation), so they
+/// do not earn witness reward.
+fn local_witness_attestation_count(config: &NodeConfig, epoch_id: EpochId) -> usize {
+    let Ok(local_id) = config.node_id() else {
+        return 0;
+    };
+    let local_hex = crate::hex_32(local_id);
+    crate::node_daemon::load_verification_credentials(config, epoch_id)
+        .into_iter()
+        .filter(|credential| {
+            credential.epoch_id == epoch_id
+                && credential.verified
+                && credential.target_collector_hex != local_hex
+        })
+        .count()
+}
+
 fn load_player_reward_ticks_for_epoch(
     config: &NodeConfig,
     epoch_id: EpochId,
@@ -1500,6 +1560,7 @@ mod tests {
                 medium_deviation_bps: 500,
                 severe_deviation_bps: 2_000,
             },
+            mutual_proof: crate::params::MutualProofParams::default(),
         };
         params.rewards.app_weight_overrides = vec![crate::params::AppWeightOverride {
             app_id: 730,
@@ -1543,6 +1604,7 @@ mod tests {
         let context = RewardTickContext {
             epoch_id: 1,
             slot_id: 5,
+            session_id: String::new(),
             sampled_interval_secs: 3_600,
             fixed_block_reward: 8_888,
             fixed_player_reward: 8_888,
@@ -1612,6 +1674,7 @@ mod tests {
             let ctx = RewardTickContext {
                 epoch_id: 1,
                 slot_id: tick + 1,
+                session_id: String::new(),
                 sampled_interval_secs: 300,
                 fixed_block_reward: fixed,
                 fixed_player_reward: fixed,

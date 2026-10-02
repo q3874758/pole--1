@@ -24,13 +24,17 @@ use crate::bin_commands::{
     reward_adjustment_show_summary_cmd, tokenomics_cmd, wallet_address_cmd, wallet_create_cmd,
     wallet_recover_cmd, wallet_set_reward_address_cmd,
 };
+use crate::cosmos::{
+    address as cosmos_address, wire_types::BatchCommitWire, wire_types::EpochCommitWire,
+    wire_types::MerkleCommitmentWire, BridgeMessage, CosmosAddress, CosmosClient, CosmosEndpoint,
+};
 use crate::{
     aggregate_local_epoch, build_epoch_commit_from_local_data, build_inmemory_simulation_network,
     current_players_url, decode_hex32, default_data_dir_for_config, detect_active_game_processes,
     detect_foreground_process_name, dispatch_command, effective_challenge_window_blocks,
     effective_collect_interval_secs, effective_install_layout, effective_player_block_reward,
     effective_reward_adjustment_cap_bps, effective_reward_block_secs,
-    effective_target_network_weight_units, format_usage_block, heartbeat_path, hex_32, hex_encode,
+    effective_target_network_weight_units, format_usage_block, heartbeat_path, hex_32,
     infer_reward_game_mapping, is_reward_config_subcommand, latest_local_epoch,
     load_batches_for_epoch, load_cached_reward_game_mapping, load_config_and_epoch_arg,
     load_status, parse_config_path_and_rest, parse_config_path_and_rest_with_known_first_arg,
@@ -107,8 +111,8 @@ pub const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client wallet-recover [data-dir] [password] <24-word-mnemonic...>",
     "  pole-client wallet-address [data-dir]",
     "  pole-client wallet-set-reward-address [config-path] [data-dir] [password]",
-    "  pole-client submit-batch [config-path] [epoch-id]",
-    "  pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks]",
+    "  pole-client submit-batch [config-path] [epoch-id] [chain-id]",
+    "  pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks] [chain-id]",
     "  pole-client export-tx [config-path] [type] [epoch-id] [current-height] [challenge-window-blocks]",
 ];
 pub const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
@@ -2536,46 +2540,168 @@ fn settle_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Resolve the node's on-chain signing identity: the bech32 account
+/// derived from the Ed25519 public key (`sha256(pubkey)[..20]`, the same
+/// truncation the SDK uses for `cosmos.crypto.ed25519.PubKey.Address()`).
+///
+/// The signer account is deliberately *not* derived from `node_id`
+/// (`stable_hash32(pubkey)`): the chain's `GetSigners()` and the
+/// `collector`/`proposer` equality checks all compare bech32 account
+/// addresses, so a `node_id`-derived address would fail to sign.
+fn chain_signer(
+    config: &NodeConfig,
+) -> Result<(CosmosAddress, KeyPair), Box<dyn std::error::Error>> {
+    let identity = config.identity_keypair()?;
+    let account = cosmos_address::cosmos_account_from_pubkey(&identity.public);
+    let bech32 = cosmos_address::encode_bech32(cosmos_address::DEFAULT_BECH32_PREFIX, &account)?;
+    let signer = CosmosAddress {
+        account: account.to_vec(),
+        bech32,
+    };
+    Ok((signer, identity))
+}
+
+/// The signer plus a client pointed at the node's local chain RPC/REST
+/// endpoints.
+fn chain_account_and_client(
+    config: &NodeConfig,
+    chain_id: &str,
+) -> Result<(CosmosAddress, KeyPair, CosmosClient), Box<dyn std::error::Error>> {
+    let (signer, identity) = chain_signer(config)?;
+    let client = CosmosClient::new(CosmosEndpoint::local_pole(chain_id))?;
+    Ok((signer, identity, client))
+}
+
+fn merkle_wire(commitment: &crate::primitives::MerkleCommitment) -> MerkleCommitmentWire {
+    MerkleCommitmentWire {
+        root: hex_32(commitment.root),
+        leaf_count: commitment.leaf_count,
+    }
+}
+
+/// Project a local [`crate::records::BatchCommit`] onto the proto3
+/// `BatchCommit` wire type. `collector_address` must be the signer's
+/// bech32 account (see [`chain_account_and_client`]).
+fn batch_commit_to_wire(
+    batch: &crate::records::BatchCommit,
+    collector_address: &str,
+) -> BatchCommitWire {
+    BatchCommitWire {
+        epoch_id: batch.epoch_id,
+        collector_address: collector_address.to_string(),
+        slot_start: batch.slot_start,
+        slot_end: batch.slot_end,
+        batch: merkle_wire(&batch.batch),
+        payload_cid: batch.payload_cid.clone(),
+        observation_count: batch.obs_count,
+        submitted_at_height: batch.submitted_at_height as i64,
+    }
+}
+
+/// Project a local [`crate::records::EpochCommit`] onto the proto3
+/// `EpochCommit` wire type. The local record carries neither `finalized`
+/// nor `total_network_weight_units` (both are chain-side bookkeeping), so
+/// they are filled with `false` and the locally derived weight sum.
+fn epoch_commit_to_wire(
+    commit: &crate::records::EpochCommit,
+    proposer_address: &str,
+    total_network_weight_units: u64,
+) -> EpochCommitWire {
+    EpochCommitWire {
+        epoch_id: commit.epoch_id,
+        accepted_batches: merkle_wire(&commit.accepted_batches),
+        observations: merkle_wire(&commit.observations),
+        aggregates: merkle_wire(&commit.aggregates),
+        rewards: merkle_wire(&commit.rewards),
+        availability: merkle_wire(&commit.availability),
+        randomness_seed_hex: hex_32(commit.randomness_seed),
+        proposer_address: proposer_address.to_string(),
+        challenge_open_height: commit.challenge_open_height as i64,
+        challenge_deadline_height: commit.challenge_deadline_height as i64,
+        finalized: false,
+        total_network_weight_units,
+    }
+}
+
+/// Sum of `gvs_microunits` over the local aggregate records, matching the
+/// chain-side `total_network_weight_units` defined in `ValidateEpochRoots`.
+fn local_total_network_weight_units(
+    aggregation: &crate::node_aggregator::EpochAggregationArtifact,
+) -> u64 {
+    aggregation
+        .records
+        .iter()
+        .map(|entry| entry.aggregate.gvs_microunits)
+        .sum()
+}
+
 fn submit_batch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (config_path, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() > start_index + 1 {
-        return Err("usage: pole-client submit-batch [config-path] [epoch-id]".into());
+    if args.len() > start_index + 2 {
+        return Err("usage: pole-client submit-batch [config-path] [epoch-id] [chain-id]".into());
     }
 
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
     let epoch_id = resolve_epoch_id_arg(args, start_index, &config)?;
+    let chain_id = args
+        .get(start_index + 1)
+        .cloned()
+        .unwrap_or_else(|| "pole".to_string());
 
     let batches = load_batches_for_epoch(&config, epoch_id)?;
     if batches.is_empty() {
         return Err(format!("no batches found for epoch {}", epoch_id).into());
     }
 
-    let collector_hex = hex_encode(&config.node_id()?);
-    let mut batch_count = 0;
-    for batch in &batches {
-        if batch.batch_commit.epoch_id == epoch_id {
-            let tx_json = crate::chain_bridge::generate_tx_json_for_batch(
-                &collector_hex,
-                &batch.batch_commit,
-            )?;
-            println!("{}", tx_json);
+    let (signer, identity, client) = chain_account_and_client(&config, &chain_id)?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let mut batch_count = 0u32;
+    let mut accepted_count = 0u32;
+    rt.block_on(async {
+        for batch in &batches {
+            if batch.batch_commit.epoch_id != epoch_id {
+                continue;
+            }
+            let wire = batch_commit_to_wire(&batch.batch_commit, &signer.bech32);
+            let msg = BridgeMessage::SubmitBatch {
+                collector: signer.clone(),
+                batch_commit: wire,
+            };
+            match client
+                .submit(&msg, &signer, &identity, &Default::default())
+                .await
+            {
+                Ok(resp) => {
+                    if resp.is_ok() {
+                        accepted_count += 1;
+                    }
+                    println!(
+                        "submit-batch tx_hash={} code={} log={}",
+                        resp.tx_hash, resp.code, resp.log
+                    );
+                }
+                Err(err) => println!("submit-batch submit_error={err}"),
+            }
             batch_count += 1;
         }
-    }
+    });
 
     println!("PoLE client submit-batch");
     println!("config_path={}", config_path.to_string_lossy());
+    println!("chain_id={}", chain_id);
+    println!("collector_address={}", signer.bech32);
     println!("epoch_id={}", epoch_id);
     println!("batch_count={}", batch_count);
+    println!("accepted_count={}", accepted_count);
 
     Ok(())
 }
 
 fn submit_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (config_path, start_index) = parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
-    if args.len() > start_index + 3 {
+    if args.len() > start_index + 4 {
         return Err(
-            "usage: pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks]"
+            "usage: pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks] [chain-id]"
                 .into(),
         );
     }
@@ -2586,6 +2712,10 @@ fn submit_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let current_height = resolve_current_height_arg(args, start_index + 1, &progress)?;
     let challenge_window_blocks =
         resolve_challenge_window_blocks_arg(args, start_index + 2, &config)?;
+    let chain_id = args
+        .get(start_index + 3)
+        .cloned()
+        .unwrap_or_else(|| "pole".to_string());
 
     let preparation = crate::node_prepare::compute_local_epoch_preparation(
         &config,
@@ -2594,18 +2724,65 @@ fn submit_epoch_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         challenge_window_blocks,
     )?;
 
-    let proposer_hex = hex_encode(&config.node_id()?);
-    let tx_json = crate::chain_bridge::generate_tx_json_for_epoch_commit(
-        &proposer_hex,
+    let total_network_weight_units =
+        local_total_network_weight_units(&preparation.aggregation_artifact);
+    let (signer, identity, client) = chain_account_and_client(&config, &chain_id)?;
+    let wire = epoch_commit_to_wire(
         &preparation.epoch_commit,
-    )?;
+        &signer.bech32,
+        total_network_weight_units,
+    );
+    let msg = BridgeMessage::CommitEpoch {
+        proposer: signer.clone(),
+        epoch_commit: wire,
+    };
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        match client
+            .submit(&msg, &signer, &identity, &Default::default())
+            .await
+        {
+            Ok(resp) => println!(
+                "submit-epoch tx_hash={} code={} log={}",
+                resp.tx_hash, resp.code, resp.log
+            ),
+            Err(err) => println!("submit-epoch submit_error={err}"),
+        }
+    });
 
     println!("PoLE client submit-epoch");
     println!("config_path={}", config_path.to_string_lossy());
+    println!("chain_id={}", chain_id);
+    println!("proposer_address={}", signer.bech32);
     println!("epoch_id={}", epoch_id);
-    println!("tx_json={}", tx_json);
+    println!(
+        "challenge_deadline_height={}",
+        preparation.epoch_commit_artifact.challenge_deadline_height
+    );
+    println!("aggregate_count={}", preparation.artifact.aggregate_count);
+    println!("reward_count={}", preparation.artifact.reward_count);
+    println!("total_network_weight_units={}", total_network_weight_units);
+    println!(
+        "ready_for_submission={}",
+        preparation.artifact.ready_for_submission
+    );
 
     Ok(())
+}
+
+/// Render a proto3 `Any` as the same `{"type_url":…,"value":base64}`
+/// envelope the removed `chain_bridge` module emitted, so existing
+/// tooling that consumes `pole-client export-tx` keeps working — but the
+/// value bytes are now genuine protobuf instead of a serde-JSON blob.
+fn any_to_tx_json(any: &crate::cosmos::proto::Any) -> String {
+    use base64::Engine as _;
+    let value = base64::engine::general_purpose::STANDARD.encode(&any.value);
+    serde_json::json!({
+        "type_url": any.type_url,
+        "value": value,
+    })
+    .to_string()
 }
 
 fn export_tx_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -2624,18 +2801,21 @@ fn export_tx_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("tx type required (batch|epoch)")?;
     let epoch_id = resolve_epoch_id_arg(args, start_index + 1, &config)?;
 
+    let (signer, _identity) = chain_signer(&config)?;
+
     match tx_type.as_str() {
         "batch" => {
             let batches = load_batches_for_epoch(&config, epoch_id)?;
-            let collector_hex = hex_encode(&config.node_id()?);
             for batch in batches {
-                if batch.batch_commit.epoch_id == epoch_id {
-                    let tx_json = crate::chain_bridge::generate_tx_json_for_batch(
-                        &collector_hex,
-                        &batch.batch_commit,
-                    )?;
-                    println!("{}", tx_json);
+                if batch.batch_commit.epoch_id != epoch_id {
+                    continue;
                 }
+                let wire = batch_commit_to_wire(&batch.batch_commit, &signer.bech32);
+                let msg = BridgeMessage::SubmitBatch {
+                    collector: signer.clone(),
+                    batch_commit: wire,
+                };
+                println!("{}", any_to_tx_json(&msg.to_any()));
             }
         }
         "epoch" => {
@@ -2654,12 +2834,18 @@ fn export_tx_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 current_height,
                 challenge_window_blocks,
             )?;
-            let proposer_hex = hex_encode(&config.node_id()?);
-            let tx_json = crate::chain_bridge::generate_tx_json_for_epoch_commit(
-                &proposer_hex,
+            let total_network_weight_units =
+                local_total_network_weight_units(&preparation.aggregation_artifact);
+            let wire = epoch_commit_to_wire(
                 &preparation.epoch_commit,
-            )?;
-            println!("{}", tx_json);
+                &signer.bech32,
+                total_network_weight_units,
+            );
+            let msg = BridgeMessage::CommitEpoch {
+                proposer: signer.clone(),
+                epoch_commit: wire,
+            };
+            println!("{}", any_to_tx_json(&msg.to_any()));
         }
         _ => {
             return Err("tx type must be 'batch' or 'epoch'".into());

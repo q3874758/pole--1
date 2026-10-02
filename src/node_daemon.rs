@@ -20,7 +20,7 @@ use crate::node_aggregator::{
     aggregate_local_epoch, aggregate_record_root, EpochAggregationArtifact, NodeAggregationError,
 };
 use crate::node_config::{NodeConfig, NodeConfigError};
-use crate::node_pipeline::AssembledBatch;
+use crate::node_pipeline::{merkle_leaf_sha256, merkle_root, stable_hash32, AssembledBatch};
 use crate::node_rewards::{
     adjusted_player_block_reward, effective_challenge_window_blocks,
     effective_min_retention_epochs, effective_player_block_reward,
@@ -87,6 +87,14 @@ pub struct CollectTickArtifact {
     pub payload_hash_hex: String,
     pub batch_root_hex: String,
     pub obs_count: u32,
+    /// Bech32 on-chain account address of the batch's collector
+    /// (`sha256(pubkey)[..20]`). Required to build a witness credential: the
+    /// chain keys `GetNode` / player classification on the account address,
+    /// which cannot be derived from `collector_id` (an irreversible hash).
+    /// Empty for artifacts written before this field existed, and for peer
+    /// announcements whose publisher did not advertise an address.
+    #[serde(default)]
+    pub collector_address: String,
     #[serde(default)]
     pub player_reward_block_count: usize,
     #[serde(default)]
@@ -95,6 +103,18 @@ pub struct CollectTickArtifact {
     pub reward_process_name: Option<String>,
     pub stored_payload_cid: Option<String>,
     pub retention_until_epoch: Option<u64>,
+}
+
+/// Outcome of draining our own p2p inbox for other nodes' batch
+/// announcements during a collect tick. `accepted` batches were verified
+/// against their announcement and stored locally, which is what makes them
+/// aggregatable and witnessable on this node.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerBatchIngestionOutcome {
+    pub announced: usize,
+    pub accepted: usize,
+    pub duplicates: usize,
+    pub rejected: usize,
 }
 
 /// A signed verification credential: a verifier attests that it checked
@@ -215,16 +235,37 @@ pub fn build_verification_credentials(
                         && batch.signatures_audit_valid
                 })
                 .unwrap_or(false);
-            let target_collector_hex = batch_report
-                .map(|_| config.node_id_hex.clone())
-                .unwrap_or_else(|| config.node_id_hex.clone());
+            // The credential must name the batch's ACTUAL collector. The
+            // chain rejects a verifier attesting its own batch, so filling
+            // in the verifier's own identity here made every credential
+            // unsubmittable. Only other nodes' batches are witnessable;
+            // our own batches are verified locally but never self-attested.
+            let Some(target_collector_hex) = batch_report
+                .map(|batch| batch.collector_id_hex.clone())
+                .filter(|collector| !collector.is_empty())
+            else {
+                continue;
+            };
+            if target_collector_hex == verifier_hex {
+                continue;
+            }
+            // Witness the collector at its REAL on-chain address. Only the
+            // collector can produce that address (it is sha256(pubkey)[..20]);
+            // the node id is an irreversible hash, so a node id truncated to
+            // 20 bytes named the wrong account and the chain's GetNode lookup
+            // failed. Batches that never advertised an address stay
+            // un-witnessable rather than producing a guaranteed-failing tx.
+            if artifact.collector_address.is_empty() {
+                continue;
+            }
+            let target_collector_address = artifact.collector_address.clone();
             let mut credential = VerificationCredential {
                 epoch_id,
                 target_batch_root_hex: artifact.batch_root_hex.clone(),
                 target_collector_hex,
                 verifier_id_hex: verifier_hex.clone(),
                 verifier_address: verifier_address.clone(),
-                target_collector_address: verifier_address.clone(),
+                target_collector_address,
                 is_player,
                 verified,
                 verified_at_millis: verified_at,
@@ -617,6 +658,7 @@ pub struct CollectTickResult {
     pub storage_challenge_artifact: Option<StorageChallengeArtifact>,
     pub storage_challenge_error: Option<String>,
     pub retention_prune_outcome: PruneOutcome,
+    pub peer_batch_ingestion: PeerBatchIngestionOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -635,6 +677,7 @@ pub struct CollectLoopSummary {
     pub auto_settlement_summary: AutoSettlementSummary,
     pub total_batch_recipients: usize,
     pub total_receipt_recipients: usize,
+    pub total_ingested_peer_batches: usize,
     pub total_pruned_payloads: usize,
     pub last_retention_audit_artifact: Option<RetentionAuditArtifact>,
     pub last_storage_challenge_artifact: Option<StorageChallengeArtifact>,
@@ -662,6 +705,7 @@ impl CollectLoopSummary {
             },
             total_batch_recipients: 0,
             total_receipt_recipients: 0,
+            total_ingested_peer_batches: 0,
             total_pruned_payloads: 0,
             last_retention_audit_artifact: None,
             last_storage_challenge_artifact: None,
@@ -674,6 +718,7 @@ impl CollectLoopSummary {
         self.ticks_completed += 1;
         self.total_batch_recipients += result.outcome.batch_recipients;
         self.total_receipt_recipients += result.outcome.receipt_recipients;
+        self.total_ingested_peer_batches += result.peer_batch_ingestion.accepted;
         self.total_pruned_payloads += result.pruned_payload_count();
         self.last_prune_epoch = result.retention_prune_outcome.current_epoch;
         self.last_retention_audit_artifact = Some(result.retention_audit_artifact.clone());
@@ -775,6 +820,7 @@ pub enum NodeDaemonError {
     Verification(NodeVerificationError),
     Settlement(String),
     StorageAudit(NodeStorageAuditError),
+    MutualProof(crate::mutual_proof::MutualProofError),
     Steam(SteamCollectorError),
     Io(io::Error),
     Json(serde_json::Error),
@@ -794,6 +840,7 @@ impl fmt::Display for NodeDaemonError {
             Self::Verification(err) => write!(f, "verification error: {err}"),
             Self::Settlement(err) => write!(f, "settlement error: {err}"),
             Self::StorageAudit(err) => write!(f, "storage audit error: {err}"),
+            Self::MutualProof(err) => write!(f, "mutual proof error: {err}"),
             Self::Steam(err) => write!(f, "steam error: {err}"),
             Self::Io(err) => write!(f, "io error: {err}"),
             Self::Json(err) => write!(f, "json error: {err}"),
@@ -861,6 +908,12 @@ impl From<NodeSettlementError> for NodeDaemonError {
 impl From<NodeStorageAuditError> for NodeDaemonError {
     fn from(value: NodeStorageAuditError) -> Self {
         Self::StorageAudit(value)
+    }
+}
+
+impl From<crate::mutual_proof::MutualProofError> for NodeDaemonError {
+    fn from(value: crate::mutual_proof::MutualProofError) -> Self {
+        Self::MutualProof(value)
     }
 }
 
@@ -1184,6 +1237,22 @@ fn run_collect_tick_with_client_inner(
         &outcome.assembled_batch.payload_cid,
         &outcome.assembled_batch.payload_bytes,
     )?;
+
+    // Drain our own inbox so other nodes' batches become locally available
+    // before this tick's aggregation / verification / reward pass runs.
+    let peer_batch_ingestion = match network.as_deref_mut() {
+        Some(network) => ingest_peer_batch_announcements(config, &mut runtime, network)?,
+        None => PeerBatchIngestionOutcome::default(),
+    };
+    if peer_batch_ingestion.accepted > 0 || peer_batch_ingestion.rejected > 0 {
+        eprintln!(
+            "pole-node: ingested {} peer batch(es) ({} rejected, {} duplicate)",
+            peer_batch_ingestion.accepted,
+            peer_batch_ingestion.rejected,
+            peer_batch_ingestion.duplicates
+        );
+    }
+
     runtime.retention_book.save_json(&ledger_path)?;
 
     let artifact =
@@ -1483,6 +1552,7 @@ fn run_collect_tick_with_client_inner(
         storage_challenge_artifact,
         storage_challenge_error,
         retention_prune_outcome,
+        peer_batch_ingestion,
     })
 }
 
@@ -1511,6 +1581,7 @@ fn collect_tick_context(
         RewardTickContext {
             epoch_id: progress.next_epoch_id,
             slot_id: progress.next_slot_id,
+            session_id: String::new(),
             sampled_interval_secs,
             fixed_block_reward,
             fixed_player_reward: fixed_block_reward,
@@ -1894,6 +1965,7 @@ fn persist_collect_tick_artifact(
         payload_hash_hex: crate::hex_32(outcome.assembled_batch.payload_hash),
         batch_root_hex: crate::hex_32(outcome.assembled_batch.batch_commit.batch.root),
         obs_count: outcome.assembled_batch.batch_commit.obs_count,
+        collector_address: config.identity_account_bech32().unwrap_or_default(),
         player_reward_block_count: player_reward_tick_artifact.completed_reward_block_count,
         player_reward_total: player_reward_tick_artifact.total_player_reward,
         reward_process_name: player_reward_tick_artifact
@@ -1916,6 +1988,137 @@ fn persist_collect_tick_artifact(
         &artifact.payload_cid,
     ))?;
     Ok(artifact)
+}
+
+/// Drain our own p2p inbox and persist other nodes' batch announcements.
+///
+/// A batch is only stored when the retrieved payload independently
+/// reproduces the announcement: same payload hash, same batch root, same
+/// observation count, all observations for the announced epoch and from the
+/// announced collector. Anything else is dropped, so a forged announcement
+/// cannot seed `batches/` with a payload this node would then attest to.
+/// Stored batches are also registered in the retention book, which is what
+/// `verify_local_epoch` requires before a batch can back a credential.
+fn ingest_peer_batch_announcements(
+    config: &NodeConfig,
+    runtime: &mut LocalNodeRuntime,
+    network: &mut (dyn P2pNetwork + '_),
+) -> Result<PeerBatchIngestionOutcome, NodeDaemonError> {
+    let local_node_id = config.node_id()?;
+    let envelopes = network
+        .drain_inbox(local_node_id)
+        .map_err(|err| NodeDaemonError::Io(io::Error::other(err.to_string())))?;
+    let retention_epochs = effective_min_retention_epochs(config);
+
+    let mut outcome = PeerBatchIngestionOutcome::default();
+    for envelope in envelopes {
+        let P2pMessage::Batch(announcement) = envelope.message else {
+            continue;
+        };
+        outcome.announced += 1;
+
+        // Our own batch is stored by the collect path itself.
+        if announcement.collector_id == local_node_id {
+            continue;
+        }
+
+        let response = match network.request_payload(local_node_id, &announcement.payload_cid) {
+            Ok(response) => response,
+            Err(_) => {
+                outcome.rejected += 1;
+                continue;
+            }
+        };
+        let payload_bytes = response.payload_bytes;
+        if response.payload_cid != announcement.payload_cid
+            || response.payload_hash != announcement.payload_hash
+            || stable_hash32(&payload_bytes) != announcement.payload_hash
+            || payload_bytes.len() as u64 != announcement.payload_size_bytes
+        {
+            outcome.rejected += 1;
+            continue;
+        }
+
+        let Ok(observations) = borsh::from_slice::<Vec<ObservationRecord>>(&payload_bytes) else {
+            outcome.rejected += 1;
+            continue;
+        };
+        let collector_matches = observations
+            .iter()
+            .all(|observation| observation.collector_id == announcement.collector_id)
+            && observations
+                .first()
+                .map(|observation| observation.collector_id)
+                == Some(announcement.collector_id);
+        let epoch_matches = observations
+            .iter()
+            .all(|observation| observation.epoch_id == announcement.epoch_id);
+        let leaves = observations
+            .iter()
+            .map(|observation| {
+                merkle_leaf_sha256(&borsh::to_vec(observation).expect("observation encoding"))
+            })
+            .collect::<Vec<_>>();
+        if observations.is_empty()
+            || observations.len() as u32 != announcement.obs_count
+            || !collector_matches
+            || !epoch_matches
+            || merkle_root(&leaves) != announcement.batch_root
+        {
+            outcome.rejected += 1;
+            continue;
+        }
+
+        let slot_id = observations
+            .first()
+            .map(|observation| observation.slot_id)
+            .unwrap_or(0);
+        let artifact_path = batch_artifact_path(
+            config,
+            announcement.epoch_id,
+            slot_id,
+            &announcement.payload_cid,
+        );
+        if artifact_path.exists() {
+            outcome.duplicates += 1;
+            continue;
+        }
+
+        write_payload_file(config, &announcement.payload_cid, &payload_bytes)?;
+        match runtime.retention_book.record_payload(
+            local_node_id,
+            announcement.epoch_id,
+            retention_epochs,
+            announcement.payload_cid.clone(),
+            announcement.payload_hash,
+            payload_bytes.len() as u64,
+        ) {
+            Ok(record) => {
+                let artifact = CollectTickArtifact {
+                    epoch_id: announcement.epoch_id,
+                    slot_id,
+                    payload_cid: announcement.payload_cid.clone(),
+                    payload_hash_hex: crate::hex_32(announcement.payload_hash),
+                    batch_root_hex: crate::hex_32(announcement.batch_root),
+                    obs_count: announcement.obs_count,
+                    collector_address: announcement.collector_address.clone(),
+                    player_reward_block_count: 0,
+                    player_reward_total: 0,
+                    reward_process_name: None,
+                    stored_payload_cid: Some(record.payload_cid.clone()),
+                    retention_until_epoch: Some(record.retention_until_epoch),
+                };
+                artifact.save_json(&artifact_path)?;
+                outcome.accepted += 1;
+            }
+            Err(StorageBookError::QuotaExceeded { .. }) => {
+                outcome.rejected += 1;
+            }
+            Err(err) => return Err(NodeDaemonError::Storage(err)),
+        }
+    }
+
+    Ok(outcome)
 }
 
 fn build_tick_epoch_artifacts(
@@ -3071,10 +3274,10 @@ pub fn load_batches_for_epoch(
         return Ok(Vec::new());
     }
 
+    let local_node_id = config.node_id()?;
     let mut entries = fs::read_dir(&batches_dir)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|entry| entry.path());
 
-    let collector_id = config.node_id()?;
     let mut batches = Vec::new();
     for entry in entries {
         let path = entry.path();
@@ -3094,6 +3297,13 @@ pub fn load_batches_for_epoch(
         let payload_hash = decode_hex_32(&artifact.payload_hash_hex)?;
         let batch_root = decode_hex_32(&artifact.batch_root_hex)?;
         let slot_id = artifact.slot_id;
+        // The batch's real collector, as recorded in its observations. Using
+        // our own node id here collapsed every ingested peer batch onto the
+        // local node, which corrupted uniqueness accounting downstream.
+        let collector_id = observations
+            .first()
+            .map(|observation| observation.collector_id)
+            .unwrap_or(local_node_id);
 
         batches.push(AssembledBatch {
             batch_commit: crate::records::BatchCommit {
@@ -3539,6 +3749,7 @@ mod tests {
             payload_hash_hex: "00".repeat(32),
             batch_root_hex: "11".repeat(32),
             obs_count: 1,
+            collector_address: String::new(),
             player_reward_block_count: 3,
             player_reward_total: 3000,
             reward_process_name: Some("Game.exe".into()),

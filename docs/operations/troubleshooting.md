@@ -82,7 +82,7 @@
 1. 检查网络模式配置：
    ```bash
    pole-client status client-config.json
-   # 查看 libp2p_enabled 和 p2p_simulation 字段
+   # 查看 p2p_socket / p2p_fs / p2p_simulation 相关字段
    ```
 
 2. 使用模拟模式测试：
@@ -159,8 +159,8 @@
 # 完整诊断
 pole-client doctor client-config.json
 
-# 网络诊断
-pole-node libp2p-diagnose node.json
+# 网络诊断（真实 socket 传输）
+pole-client watch-p2p-socket client-config.json 10
 
 # 节点状态
 pole-node status node.json

@@ -117,8 +117,8 @@ func TestClaimRewardMintsTransfersAndMarksClaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finalize epoch: %v", err)
 	}
-	// Mint the scheme-A annual emission pool so the claim can be paid
-	// from it (rewards no longer mint on demand).
+	// Seed the scheme-A reference curve; claims also mint an exact shortfall
+	// when this pool is insufficient.
 	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
 		t.Fatalf("begin block annual emission: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestBeginBlockAnnualEmissionMintsBudgetIntoPool(t *testing.T) {
 	}
 	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
 
-	// No finalized epoch yet -> neutral adjustment -> year-1 base budget,
-	// split into 12 monthly quotas (200M / 12 = 16,666,666).
+	// No finalized epoch yet -> neutral adjustment -> year-1 reference
+	// rate (200M annually, one 30-day share = 16,666,666).
 	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerMonth) * time.Second))
 	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
 		t.Fatalf("begin block: %v", err)
@@ -169,9 +169,9 @@ func TestBeginBlockAnnualEmissionMintsBudgetIntoPool(t *testing.T) {
 		t.Fatalf("expected pool 16_666_666, got %s", balance.Amount.String())
 	}
 
-	// A finalized epoch far below target raises the budget to the +10% cap
-	// (year 1 base 200M -> 220M; monthly quota 220M/12 = 18,333,333). One
-	// second into the new month mints ~7.
+	// A finalized epoch far below target raises the reference rate to the
+	// +10% activity cap (year 1 base 200M -> 220M). One second into the
+	// next observation period mints ~7.
 	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
 		EpochId:                 1,
 		Finalized:               true,
@@ -186,6 +186,181 @@ func TestBeginBlockAnnualEmissionMintsBudgetIntoPool(t *testing.T) {
 	balance = app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
 	if !balance.Amount.Equal(sdkmath.NewInt(16_666_673)) {
 		t.Fatalf("expected pool 16_666_673, got %s", balance.Amount.String())
+	}
+}
+
+// TestNoMonthlyQuotaCeiling pins the P3 decision: the scheme-A curve is a
+// rate-control reference, not an issuance ceiling. The 30-day counter is
+// kept for observability only, so issuance must keep flowing month after
+// month and year after year instead of stopping once a budget is spent.
+func TestNoMonthlyQuotaCeiling(t *testing.T) {
+	app := initTestApp(t)
+	genesisTime := time.Unix(1_700_000_000, 0)
+	ctx := initTestContext(app).WithBlockTime(genesisTime)
+	if err := app.PoleKeeper.InitAnnualEmission(ctx); err != nil {
+		t.Fatalf("reset annual emission: %v", err)
+	}
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
+
+	// One 30-day step: year-1 reference rate (200M annually) pays the
+	// monthly share of 16,666,666.
+	monthlyShare := sdkmath.NewInt(16_666_666)
+	ctx = ctx.WithBlockTime(genesisTime.Add(time.Duration(types.SecondsPerMonth) * time.Second))
+	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
+		t.Fatalf("begin block after one month: %v", err)
+	}
+	balance := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+	if !balance.Amount.Equal(monthlyShare) {
+		t.Fatalf("expected one monthly share %s, got %s", monthlyShare, balance.Amount.String())
+	}
+
+	// A clock jump larger than a month is clamped to a single month's
+	// share: catch-up must not create an accidental burst.
+	ctx = ctx.WithBlockTime(ctx.BlockTime().Add(
+		time.Duration(types.SecondsPerMonth*6) * time.Second,
+	))
+	if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
+		t.Fatalf("begin block after a long clock jump: %v", err)
+	}
+	balance = app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+	if !balance.Amount.Equal(monthlyShare.MulRaw(2)) {
+		t.Fatalf("expected a single clamped catch-up share, got %s", balance.Amount.String())
+	}
+
+	// Cross the protocol year boundary by stepping month by month, then
+	// keep going. The years 1-2 rate is 16,666,666 per month and the
+	// long-term tail halves from year 3, so the assertion tracks each
+	// step individually: issuance must never stop, whatever the
+	// year-index arithmetic does.
+	for i := 0; i < 18; i++ {
+		before := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+		ctx = ctx.WithBlockTime(ctx.BlockTime().Add(
+			time.Duration(types.SecondsPerMonth) * time.Second,
+		))
+		if err := app.PoleKeeper.BeginBlockAnnualEmission(ctx); err != nil {
+			t.Fatalf("begin block at month %d: %v", i+1, err)
+		}
+		after := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+		if !after.Amount.GT(before.Amount) {
+			t.Fatalf(
+				"issuance stopped at month %d (%s -> %s): no quota may cap it",
+				i+1, before.Amount.String(), after.Amount.String(),
+			)
+		}
+	}
+
+	// 1 + 1 (clamped catch-up) + 18 monthly steps, all minted: cumulative
+	// issuance is well past the whole year-1 reference volume.
+	balance = app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+	if balance.Amount.LTE(sdkmath.NewInt(200_000_000)) {
+		t.Fatalf("expected cumulative issuance to exceed the year-1 reference, got %s", balance.Amount.String())
+	}
+}
+
+// TestEmissionFollowsConfirmedSettlements pins the other half of P3: a
+// confirmed settlement is payable in full even when the reference curve has
+// minted nothing and the module pool is empty. Issuance tracks confirmed
+// play, so a single large epoch must not be blocked by a budget.
+func TestEmissionFollowsConfirmedSettlements(t *testing.T) {
+	app := initTestApp(t)
+	genesisTime := time.Unix(1_700_000_000, 0)
+	ctx := initTestContext(app).WithBlockHeight(100).WithBlockTime(genesisTime)
+	if err := app.PoleKeeper.InitAnnualEmission(ctx); err != nil {
+		t.Fatalf("reset annual emission: %v", err)
+	}
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{11}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+	app.AccountKeeper.SetAccount(ctx, app.AccountKeeper.NewAccountWithAddress(ctx, recipientAddr))
+
+	// One confirmed epoch worth 400M: twice the whole year-1 reference
+	// volume, minted from an empty pool without a single BeginBlock.
+	const netReward = uint64(400_000_000)
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId: 1, Finalized: true, TotalNetworkWeightUnits: 400_000_000,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+	if err := app.PoleKeeper.SetRewardRecord(ctx, types.RewardRecord{
+		EpochId: 1, Recipient: recipient, PlayerReward: netReward, NetReward: netReward,
+	}); err != nil {
+		t.Fatalf("set reward record: %v", err)
+	}
+
+	// Confirm the pool really is empty before the claim.
+	if pool := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom); !pool.Amount.IsZero() {
+		t.Fatalf("expected an empty module pool before the claim, got %s", pool.Amount.String())
+	}
+
+	msgServer := app.MsgServiceRouter().Handler(&types.MsgClaimReward{})
+	if _, err := msgServer(ctx, &types.MsgClaimReward{Claimer: recipient, EpochId: 1, Recipient: recipient}); err != nil {
+		t.Fatalf("claim a settlement larger than the annual reference: %v", err)
+	}
+
+	// burn = (400_000_000 - 10_000) * 1000 / 10_000 = 39_999_000, so the
+	// payout is 360_001_000 and the pool ends empty.
+	balance := app.BankKeeper.GetBalance(ctx, recipientAddr, types.BaseDenom)
+	if !balance.Amount.Equal(sdkmath.NewInt(360_001_000)) {
+		t.Fatalf("expected confirmed payout 360_001_000, got %s", balance.Amount.String())
+	}
+	if pool := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom); !pool.Amount.IsZero() {
+		t.Fatalf("expected the module pool to end empty, got %s", pool.Amount.String())
+	}
+
+	// Total supply must have grown by at least the confirmed payout,
+	// which is already past the year-1 reference emission.
+	supply := app.BankKeeper.GetSupply(ctx, types.BaseDenom)
+	if supply.Amount.LT(sdkmath.NewInt(360_001_000)) {
+		t.Fatalf("expected supply to follow the confirmed settlement, got %s", supply.Amount.String())
+	}
+}
+
+func TestClaimRewardMintsConfirmedShortfall(t *testing.T) {
+	app := initTestApp(t)
+	genesisTime := time.Unix(1_700_000_000, 0)
+	ctx := initTestContext(app).WithBlockHeight(100).WithBlockTime(genesisTime)
+	if err := app.PoleKeeper.InitAnnualEmission(ctx); err != nil {
+		t.Fatalf("reset annual emission: %v", err)
+	}
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{8}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+	app.AccountKeeper.SetAccount(ctx, app.AccountKeeper.NewAccountWithAddress(ctx, recipientAddr))
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId: 1, Finalized: true, TotalNetworkWeightUnits: 50,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+	if err := app.PoleKeeper.SetRewardRecord(ctx, types.RewardRecord{
+		EpochId: 1, Recipient: recipient, PlayerReward: 50_000, NetReward: 50_000,
+	}); err != nil {
+		t.Fatalf("set reward record: %v", err)
+	}
+
+	// Do not run BeginBlockAnnualEmission: the module account starts empty.
+	// A confirmed claim must mint only the exact payout shortfall.
+	msgServer := app.MsgServiceRouter().Handler(&types.MsgClaimReward{})
+	if _, err := msgServer(ctx, &types.MsgClaimReward{Claimer: recipient, EpochId: 1, Recipient: recipient}); err != nil {
+		t.Fatalf("claim reward from empty pool: %v", err)
+	}
+	balance := app.BankKeeper.GetBalance(ctx, recipientAddr, types.BaseDenom)
+	// Default reward burn is 10% of the 40_000 excess above the 10_000
+	// threshold, so the exact 50_000 claim mints 50_000, pays 46_000,
+	// and burns 4_000.
+	if !balance.Amount.Equal(sdkmath.NewInt(46_000)) {
+		t.Fatalf("expected on-demand payout 46_000, got %s", balance.Amount.String())
+	}
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
+	moduleBalance := app.BankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
+	if !moduleBalance.Amount.IsZero() {
+		t.Fatalf("expected empty module pool after payout and burn, got %s", moduleBalance.Amount.String())
 	}
 }
 
@@ -442,15 +617,69 @@ func TestFinalizeEpochValidatesRoots(t *testing.T) {
 	}
 }
 
-// TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords
-// covers the live cross-language flow: an off-chain Rust proposer
-// commits a rewards root over ITS computed reward set, but reward
-// records are never submitted on-chain (they enter the store only via
-// genesis or challenge resolutions), so the chain holds none for the
-// epoch. FinalizeEpoch must accept the proposer's committed rewards
-// root in that case while still enforcing the aggregates root and
-// total-weight checks.
-func TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords(t *testing.T) {
+// TestFinalizeEpochRejectsMissingRewardRecords covers the other half of the
+// unbacked-reward gap: a proposer that omits the rewards commitment entirely
+// must not be able to close the epoch. Before the unconditional rewards
+// check, a nil commitment was read as "no rewards to verify" and the epoch
+// finalized with no payout whatsoever.
+func TestFinalizeEpochRejectsMissingRewardRecords(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(25)
+
+	recipientAddr := sdk.AccAddress(bytes.Repeat([]byte{7}, 20))
+	recipient, err := app.AccountKeeper.AddressCodec().BytesToString(recipientAddr)
+	if err != nil {
+		t.Fatalf("recipient bech32: %v", err)
+	}
+
+	aggregate := types.AggregateRecord{EpochId: 30, AppId: 730, TotalWeightUnits: 88, PlayerCount: 2}
+	if err := app.PoleKeeper.SetAggregateRecord(ctx, aggregate); err != nil {
+		t.Fatalf("set aggregate record: %v", err)
+	}
+
+	// Everything else about the commit is well formed; only Rewards is nil.
+	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
+		EpochId:                 30,
+		ProposerAddress:         recipient,
+		ChallengeOpenHeight:     1,
+		ChallengeDeadlineHeight: 10,
+		Aggregates:              &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.AggregateRecord{aggregate}), LeafCount: 1},
+		TotalNetworkWeightUnits: 88,
+	}); err != nil {
+		t.Fatalf("set epoch commit: %v", err)
+	}
+
+	finalize := app.MsgServiceRouter().Handler(&types.MsgFinalizeEpoch{})
+	if finalize == nil {
+		t.Fatalf("expected finalize epoch handler")
+	}
+	seedVerificationCoverage(t, app, ctx, 30)
+
+	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 30})
+	if err == nil {
+		t.Fatalf("expected finalize to reject an epoch with no rewards commitment")
+	}
+	if !strings.Contains(err.Error(), "missing rewards commitment") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	commit, err := app.PoleKeeper.GetEpochCommit(ctx, 30)
+	if err != nil {
+		t.Fatalf("epoch commit after rejected finalize: %v", err)
+	}
+	if commit.Finalized {
+		t.Fatalf("epoch must not be marked finalized when the rewards commitment is missing")
+	}
+}
+
+// TestFinalizeEpochRejectsUnbackedRewardRoot covers the gap that made
+// claims unpayable: reward records used to have no live submission path,
+// so a proposer committed a rewards root over an off-chain reward set
+// that never landed on-chain, FinalizeEpoch waved it through, and every
+// ClaimReward against that epoch then failed with "reward record not
+// found". The chain now requires the committed rewards root to be backed
+// by records it actually holds.
+func TestFinalizeEpochRejectsUnbackedRewardRoot(t *testing.T) {
 	app := initTestApp(t)
 	ctx := initTestContext(app).WithBlockHeight(25)
 
@@ -463,7 +692,7 @@ func TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords(t *test
 	if err := app.PoleKeeper.SetAggregateRecord(ctx, aggregate); err != nil {
 		t.Fatalf("set aggregate record: %v", err)
 	}
-	// Proposer-side rewards root over a reward set that never lands on-chain.
+	// Proposer commits a rewards root over a set that never lands on-chain.
 	offchainReward := types.RewardRecord{EpochId: 20, Recipient: recipient, PlayerReward: 50, NetReward: 50}
 	aggregateRoot := testCommitmentRoot(t, []types.AggregateRecord{aggregate})
 	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
@@ -484,29 +713,93 @@ func TestFinalizeEpochAcceptsProposerRewardRootWithoutChainRewardRecords(t *test
 	}
 	seedVerificationCoverage(t, app, ctx, 20)
 	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 20})
-	if err != nil {
-		t.Fatalf("finalize epoch with proposer-only rewards root: %v", err)
+	if err == nil {
+		t.Fatalf("expected finalize to reject a rewards root with no backing records")
+	}
+	if !strings.Contains(err.Error(), "reward root mismatch") {
+		t.Fatalf("expected reward root mismatch, got: %v", err)
 	}
 
-	// The aggregates root and total-weight checks must still be strict:
-	// a wrong aggregates root fails even with no reward records.
+	// Submitting the records that back the committed root makes it finalizable,
+	// and — the point of the fix — makes the reward claimable.
+	submit := app.MsgServiceRouter().Handler(&types.MsgSubmitRewardRecords{})
+	if submit == nil {
+		t.Fatalf("expected submit reward records handler")
+	}
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: recipient,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Propose: true},
+		BondedTokens:    types.MinProposeBondedTokens,
+	}); err != nil {
+		t.Fatalf("set proposer node: %v", err)
+	}
+	resp, err := submit(ctx, &types.MsgSubmitRewardRecords{
+		Proposer: recipient,
+		EpochId:  20,
+		Records:  []*types.RewardRecord{&offchainReward},
+	})
+	if err != nil {
+		t.Fatalf("submit reward records: %v", err)
+	}
+	if resp == nil {
+		t.Fatalf("expected submit response")
+	}
+	seedVerificationCoverage(t, app, ctx, 20)
+	if _, err := finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 20}); err != nil {
+		t.Fatalf("finalize epoch after submitting backing records: %v", err)
+	}
+
+	// The record is now on-chain, so the claim finds it.
+	stored, err := app.PoleKeeper.GetRewardRecord(ctx, 20, recipient)
+	if err != nil {
+		t.Fatalf("reward record after submit: %v", err)
+	}
+	if stored.NetReward != 50 {
+		t.Fatalf("expected stored net reward 50, got %d", stored.NetReward)
+	}
+}
+
+// TestSubmitRewardRecordsRejectsRootMismatch: a proposer must not be able
+// to commit one rewards root and later submit a different record set.
+func TestSubmitRewardRecordsRejectsRootMismatch(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(25)
+
+	proposerAddr := sdk.AccAddress(bytes.Repeat([]byte{6}, 20))
+	proposer, err := app.AccountKeeper.AddressCodec().BytesToString(proposerAddr)
+	if err != nil {
+		t.Fatalf("proposer bech32: %v", err)
+	}
+	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
+		OperatorAddress: proposer,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Propose: true},
+		BondedTokens:    types.MinProposeBondedTokens,
+	}); err != nil {
+		t.Fatalf("set proposer node: %v", err)
+	}
+
+	committed := types.RewardRecord{EpochId: 30, Recipient: proposer, NetReward: 100}
 	if err := app.PoleKeeper.SetEpochCommit(ctx, types.EpochCommit{
-		EpochId:                 22,
-		ProposerAddress:         recipient,
+		EpochId:                 30,
+		ProposerAddress:         proposer,
 		ChallengeOpenHeight:     1,
 		ChallengeDeadlineHeight: 10,
-		Rewards:                 &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.RewardRecord{offchainReward}), LeafCount: 1},
-		Aggregates:              &types.MerkleCommitment{Root: "bad-root", LeafCount: 1},
-		TotalNetworkWeightUnits: 88,
+		Rewards:                 &types.MerkleCommitment{Root: testCommitmentRoot(t, []types.RewardRecord{committed}), LeafCount: 1},
 	}); err != nil {
-		t.Fatalf("set invalid epoch commit: %v", err)
+		t.Fatalf("set epoch commit: %v", err)
 	}
-	if err := app.PoleKeeper.SetAggregateRecord(ctx, types.AggregateRecord{EpochId: 22, AppId: 730, TotalWeightUnits: 88, PlayerCount: 2}); err != nil {
-		t.Fatalf("set aggregate record for invalid finalize: %v", err)
-	}
-	_, err = finalize(ctx, &types.MsgFinalizeEpoch{Finalizer: recipient, EpochId: 22})
-	if err == nil {
-		t.Fatalf("expected finalize epoch to fail on invalid aggregate root")
+
+	// A different amount yields a different root: must be rejected.
+	swapped := types.RewardRecord{EpochId: 30, Recipient: proposer, NetReward: 999}
+	submit := app.MsgServiceRouter().Handler(&types.MsgSubmitRewardRecords{})
+	if _, err := submit(ctx, &types.MsgSubmitRewardRecords{
+		Proposer: proposer,
+		EpochId:  30,
+		Records:  []*types.RewardRecord{&swapped},
+	}); err == nil {
+		t.Fatalf("expected submit to reject a record set that does not match the committed root")
 	}
 }
 
@@ -579,9 +872,17 @@ func TestUpsertAggregateRefreshesEpochCommitment(t *testing.T) {
 	if commit.TotalNetworkWeightUnits != 188 {
 		t.Fatalf("expected refreshed total weight 188, got %d", commit.TotalNetworkWeightUnits)
 	}
-	// Rewards commitment must be untouched (proposer-side).
+	// Rewards commitment must be untouched by the aggregate upsert
+	// (proposer-side; the reward records arrive via MsgSubmitRewardRecords).
 	if commit.Rewards == nil || commit.Rewards.Root != rewardRoot {
 		t.Fatalf("expected rewards commitment to stay untouched, got %+v", commit.Rewards)
+	}
+
+	// Back the committed rewards root with actual records, otherwise the
+	// now-unconditional rewards root check rejects the finalize.
+	rewardRecord := types.RewardRecord{EpochId: 21, Recipient: recipient, NetReward: 77}
+	if err := app.PoleKeeper.SetRewardRecord(ctx, rewardRecord); err != nil {
+		t.Fatalf("set reward record: %v", err)
 	}
 
 	finalize := app.MsgServiceRouter().Handler(&types.MsgFinalizeEpoch{})

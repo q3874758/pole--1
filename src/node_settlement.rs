@@ -841,5 +841,6 @@ fn local_protocol_params(config: &NodeConfig, challenge_window_blocks: u32) -> P
             medium_deviation_bps: 500,
             severe_deviation_bps: 2_000,
         },
+        mutual_proof: crate::params::MutualProofParams::default(),
     }
 }

@@ -24,24 +24,30 @@ pub fn encode<M: MessageEncode>(msg: &M) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Canonical SignDoc hash for SIGN_MODE_DIRECT.
+/// Canonical sign bytes for SIGN_MODE_DIRECT.
 ///
-/// The SDK definition (v0.50+, used by both Cosmos SDK 0.47+ and the
-/// `SignModeDirect` code path):
-///   bytes_to_sign = sha256( body_bytes || auth_info_bytes || chain_id || account_number_be )
+/// The SDK definition (`x/tx/signing/direct/direct.go`):
+///   bytes_to_sign = proto.Marshal(SignDoc{body_bytes, auth_info_bytes,
+///                                         chain_id, account_number})
 ///
-/// This is the exact byte sequence that gets signed by the signer.
-pub fn sign_doc_hash(
+/// The four context fields are *not* concatenated and hashed: they are
+/// serialized as a real protobuf message (tags 1..4). The raw marshaled
+/// bytes are what the signer signs — Ed25519 then applies SHA-512
+/// internally, so there is no extra pre-hash on this side.
+///
+/// `SignDoc` carries no maps, so prost's field-ordered encoding is
+/// already the deterministic encoding the SDK's `proto.MarshalOptions{
+/// Deterministic: true}` produces.
+pub fn sign_doc_bytes(
     body_bytes: &[u8],
     auth_info_bytes: &[u8],
     chain_id: &str,
     account_number: u64,
-) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(body_bytes);
-    hasher.update(auth_info_bytes);
-    hasher.update(chain_id.as_bytes());
-    hasher.update(account_number.to_be_bytes());
-    hasher.finalize().into()
+) -> Result<Vec<u8>, String> {
+    encode(&SignDoc {
+        body_bytes: body_bytes.to_vec(),
+        auth_info_bytes: auth_info_bytes.to_vec(),
+        chain_id: chain_id.to_string(),
+        account_number,
+    })
 }
