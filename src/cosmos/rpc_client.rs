@@ -363,12 +363,9 @@ struct BroadcastTxResponseWrapper {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[allow(dead_code)]
 struct ResponseCheckTx {
     #[serde(default)]
     code: u32,
-    #[serde(default)]
-    data: Option<String>,
     #[serde(default)]
     log: String,
     #[serde(default)]
