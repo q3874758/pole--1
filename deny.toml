@@ -18,8 +18,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # Transitive-dependency advisories reviewed for v0.1.0. All are
 # reachable only through the libp2p / cosmos-proto dependency
 # subtree, not through PoLE's own code paths, and upstream offers
-# no fix within the pinned major versions. Revisit on each
-# dependency bump; track in RELEASE_CHECKLIST §Ch.5.
+# dependency bump; track in release notes.
 ignore = [
     "RUSTSEC-2024-0436", # paste unmaintained (flex-error → tendermint-proto); no safe upgrade
     "RUSTSEC-2026-0097", # rand unsound w/ custom logger (libp2p subtree); not used that way
