@@ -92,11 +92,11 @@ git show backup/pre-history-strip-<timestamp>:chain/poled.exe > /tmp/poled.exe
 - The CI `rust` job runs `cargo fmt` + `cargo clippy -D warnings`
   on every push, so accidental new artifacts are caught at
   push time.
-- A future `pre-commit` framework (see TODO list) can run
+- A pre-commit hook or CI check can run
   `du -sh` on staged paths and reject anything > 5 MB.
 
 ## References
 
 - `git-filter-repo` manual: <https://github.com/newren/git-filter-repo>
 - GitHub file size limit: <https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github>
-- Sigstore / cosign SBOM signing: see [SBOM.md](SBOM.md) (TODO)
+- Sigstore / cosign SBOM signing: see [SBOM.md](SBOM.md)

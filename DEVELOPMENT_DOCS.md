@@ -15,7 +15,7 @@ PoLE 的文档体系从现在开始按以下原则拆分：
 ### 1. 白皮书
 
 文件：
-[docs_PoLE_Whitepaper.md](/e:/pole/docs_PoLE_Whitepaper.md)
+[docs_PoLE_Whitepaper.md](docs_PoLE_Whitepaper.md)
 
 适合写入的内容：
 
@@ -34,7 +34,7 @@ PoLE 的文档体系从现在开始按以下原则拆分：
 ### 2. 实施计划
 
 文件：
-[IMPLEMENTATION_PLAN.md](/e:/pole/IMPLEMENTATION_PLAN.md)
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 
 用途：
 
@@ -45,7 +45,7 @@ PoLE 的文档体系从现在开始按以下原则拆分：
 ### 3. 追踪矩阵
 
 文件：
-[TRACEABILITY.md](/e:/pole/TRACEABILITY.md)
+[TRACEABILITY.md](TRACEABILITY.md)
 
 用途：
 
@@ -63,9 +63,9 @@ PoLE 的文档体系从现在开始按以下原则拆分：
 
 ### 工程内容写到哪里
 
-- 新的实现方案、模块拆分、交易流程、参数面变化，写入 [IMPLEMENTATION_PLAN.md](/e:/pole/IMPLEMENTATION_PLAN.md)。
-- 新的白皮书概念落地到哪个模块、哪个文件，写入 [TRACEABILITY.md](/e:/pole/TRACEABILITY.md)。
-- 只有当协议原则、经济模型、治理边界或路线图发生变化时，才更新 [docs_PoLE_Whitepaper.md](/e:/pole/docs_PoLE_Whitepaper.md)。
+- 新的实现方案、模块拆分、交易流程、参数面变化，写入 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)。
+- 新的白皮书概念落地到哪个模块、哪个文件，写入 [TRACEABILITY.md](TRACEABILITY.md)。
+- 只有当协议原则、经济模型、治理边界或路线图发生变化时，才更新 [docs_PoLE_Whitepaper.md](docs_PoLE_Whitepaper.md)。
 
 ### 白皮书禁止回流的内容
 
@@ -83,9 +83,10 @@ PoLE 的文档体系从现在开始按以下原则拆分：
 
 ## 当前开发文档结构建议
 
-- [IMPLEMENTATION_PLAN.md](/e:/pole/IMPLEMENTATION_PLAN.md)：回答“要做什么、先做什么、做到什么算完成”
-- [TRACEABILITY.md](/e:/pole/TRACEABILITY.md)：回答“白皮书里的东西在代码哪里”
-- [DEVELOPMENT_DOCS.md](/e:/pole/DEVELOPMENT_DOCS.md)：回答“哪些内容该写到哪类文档里”
+- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)：回答“要做什么、先做什么、做到什么算完成”
+- [TRACEABILITY.md](TRACEABILITY.md)：回答“白皮书里的东西在代码哪里”
+- [DEVELOPMENT_DOCS.md](DEVELOPMENT_DOCS.md)：回答“哪些内容该写到哪类文档里”
+- [docs/PoLE_Project_Plan.md](docs/PoLE_Project_Plan.md)：项目整体商业模式、相互证明架构、双边激励与 Roadmap 实施规划书
 
 后续如果工程内容继续增多，可以再拆出：
 

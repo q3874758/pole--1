@@ -49,11 +49,11 @@
 
 ### 2.4 Rust→Cosmos 桥接层
 
-Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK 交易并广播到链（已接通全部 11 种 Msg）：
+Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK 交易并广播到链（已接通全部 17 种 Msg）：
 
 | 组件 | 位置 | 说明 |
 |------|------|------|
-| 消息编码 | `src/cosmos/pole_msgs.rs` | 11 种 Msg 的 proto3 wire encoder |
+| 消息编码 | `src/cosmos/pole_msgs.rs` | 17 种 Msg 的 proto3 wire encoder |
 | wire 类型 | `src/cosmos/wire_types.rs` | 桥接专用 wire-only 类型 |
 | 交易构造 | `src/cosmos/tx_builder.rs` | CosmosTxBuilder（protobuf 序列化） |
 | 交易签名 | `src/cosmos/tx_signer.rs` | SIGN_MODE_DIRECT 签名 |
@@ -65,6 +65,16 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | 互证记录构造 | `src/mutual_proof.rs` | PlaySession / PlayHeartbeat / WitnessAttestation 构造与 wire 投影 |
 | 互证 CLI | `src/cli_node.rs` | play-session / play-heartbeat / attest-session / settle-session / submit-reward-records |
 | 互证链上逻辑 | 不适用（链下构造） | `chain/x/pole/keeper/session.go` |
+
+### 2.5 原生低开销静默后台运行时 (`os_support`)
+
+| 机制 | Rust 位置 | 平台与规范 |
+|------|-----------|-----------|
+| 进程空闲优先级 | `os_support.rs` - `apply_process_background_priority` | Win32 `IDLE_PRIORITY_CLASS` (0x40)，所有 CPU 算力优先供给 3D 游戏 |
+| 硬件能效调度 | `os_support.rs` - `apply_process_background_priority` | Windows EcoQoS (`PROCESS_POWER_THROTTLING_EXECUTION_SPEED`)，强制调度在 E-Core |
+| 物理内存动态裁剪 | `os_support.rs` - `trim_process_working_set` | Win32 `SetProcessWorkingSetSize`，间歇主动释放非活动页，常驻物理内存 < 15MB |
+| 零损耗前台游戏嗅探 | `os_support.rs` - `detect_foreground_process_name` | `user32.dll` 纳秒直调，探测开销 < 0.01ms，完全无外部子进程微卡顿 |
+| 游戏进程快照遍历 | `os_support.rs` - `detect_active_process_names` | `CreateToolhelp32Snapshot` 快照匹配，无 PowerShell 拉起抖动 |
 
 ---
 

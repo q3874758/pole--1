@@ -44,7 +44,7 @@ PoLE 自定义模块 `x/pole` 承接的协议对象：
 
 ## 构建与测试
 
-在 `E:\pole备用\chain` 下：
+在 `chain/` 目录下：
 
 ```powershell
 $env:GOFLAGS='-mod=readonly'
