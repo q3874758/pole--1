@@ -454,6 +454,7 @@ pub fn is_launcher_process_name(process_name: &str) -> bool {
 /// - In-world gaming (even when character is AFK / sleeping) is valid and fully rewarded.
 /// - Parked at launcher, login screen, or main menu without loading the world is rejected.
 pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEngagementState {
+    let _ = pid;
     if let Ok(override_val) = std::env::var("POLE_ENGAGEMENT_STATE_OVERRIDE") {
         let lower = override_val.trim().to_ascii_lowercase();
         if lower == "main_menu" || lower == "menu" {
