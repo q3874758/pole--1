@@ -6,6 +6,21 @@ use pole_protocol_draft::{
 };
 use serde_json::json;
 
+fn temp_root(name: &str) -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "pole-test-{name}-{}-{id}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 #[test]
 fn windows_service_definition_renders_binary_path() {
     let definition = WindowsServiceDefinition::new(
@@ -110,11 +125,7 @@ fn packaged_windows_service_scripts_match_cli_contract() {
 
 #[test]
 fn service_managers_default_to_not_installed_status() {
-    let root = std::env::temp_dir().join(format!("pole-service-platform-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("service-platform");
 
     let windows = WindowsServiceManager::new(
         WindowsServiceDefinition::new(
@@ -138,16 +149,12 @@ fn service_managers_default_to_not_installed_status() {
     );
     assert_eq!(linux.status().unwrap(), ManagedServiceStatus::NotInstalled);
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn systemd_manager_install_and_uninstall_track_unit_file() {
-    let root = std::env::temp_dir().join(format!("pole-systemd-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("systemd");
 
     let definition = SystemdUnitDefinition::new(
         "/opt/pole/pole-node",
@@ -173,16 +180,12 @@ fn systemd_manager_install_and_uninstall_track_unit_file() {
         ManagedServiceStatus::NotInstalled
     );
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn systemd_manager_start_and_stop_use_configured_binary() {
-    let root = std::env::temp_dir().join(format!("pole-systemd-start-stop-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("systemd-start-stop");
 
     #[cfg(windows)]
     let command_binary = root.join("systemctl.cmd");
@@ -193,10 +196,7 @@ fn systemd_manager_start_and_stop_use_configured_binary() {
     #[cfg(windows)]
     std::fs::write(
         &command_binary,
-        format!(
-            "@echo off\necho %*>>\"{}\"\nexit /b 0\n",
-            log_path.display()
-        ),
+        "@echo off\r\necho %*>>\"%~dp0systemctl.log\"\r\nexit /b 0\r\n",
     )
     .unwrap();
     #[cfg(not(windows))]
@@ -231,16 +231,12 @@ fn systemd_manager_start_and_stop_use_configured_binary() {
     assert!(log.contains("start pole-node.service"));
     assert!(log.contains("stop pole-node.service"));
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn windows_manager_install_and_uninstall_track_registration_file() {
-    let root = std::env::temp_dir().join(format!("pole-windows-service-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("windows-service");
 
     // Mock `sc.exe` so the manager never probes the real Windows service
     // database (which would legitimately report 1060 "service does not exist"
@@ -250,15 +246,13 @@ fn windows_manager_install_and_uninstall_track_registration_file() {
     let sc_binary = root.join("sc.cmd");
     #[cfg(not(windows))]
     let sc_binary = root.join("sc");
+    #[cfg(not(windows))]
     let log_path = root.join("sc.log");
 
     #[cfg(windows)]
     std::fs::write(
         &sc_binary,
-        format!(
-            "@echo off\r\nif \"%1\"==\"query\" echo STATE              : 1  STOPPED\r\necho %*>>\"{}\"\r\nexit /b 0\r\n",
-            log_path.display()
-        ),
+        "@echo off\r\nif \"%1\"==\"query\" echo STATE              : 1  STOPPED\r\necho %*>>\"%~dp0sc.log\"\r\nexit /b 0\r\n",
     )
     .unwrap();
     #[cfg(not(windows))]
@@ -301,7 +295,7 @@ fn windows_manager_install_and_uninstall_track_registration_file() {
         ManagedServiceStatus::NotInstalled
     );
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[cfg(windows)]
@@ -319,11 +313,7 @@ fn windows_service_definition_renders_start_and_stop_commands() {
 
 #[test]
 fn windows_manager_start_and_stop_use_configured_binary() {
-    let root = std::env::temp_dir().join(format!("pole-windows-start-stop-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("windows-start-stop");
 
     #[cfg(windows)]
     let command_binary = root.join("sc.cmd");
@@ -334,10 +324,7 @@ fn windows_manager_start_and_stop_use_configured_binary() {
     #[cfg(windows)]
     std::fs::write(
         &command_binary,
-        format!(
-            "@echo off\necho %*>>\"{}\"\nexit /b 0\n",
-            log_path.display()
-        ),
+        "@echo off\r\necho %*>>\"%~dp0sc.log\"\r\nexit /b 0\r\n",
     )
     .unwrap();
     #[cfg(not(windows))]
@@ -371,16 +358,12 @@ fn windows_manager_start_and_stop_use_configured_binary() {
     assert!(log.contains("start PoLENode"));
     assert!(log.contains("stop PoLENode"));
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn systemd_manager_status_uses_binary_output() {
-    let root = std::env::temp_dir().join(format!("pole-systemd-status-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("systemd-status");
 
     #[cfg(windows)]
     let command_binary = root.join("systemctl.cmd");
@@ -417,16 +400,12 @@ fn systemd_manager_status_uses_binary_output() {
         ManagedServiceStatus::Running { pid: None }
     );
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn windows_manager_status_uses_binary_output() {
-    let root = std::env::temp_dir().join(format!("pole-windows-status-{}", std::process::id()));
-    if root.exists() {
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-    std::fs::create_dir_all(&root).unwrap();
+    let root = temp_root("windows-status");
 
     #[cfg(windows)]
     let command_binary = root.join("sc.cmd");
@@ -469,5 +448,5 @@ fn windows_manager_status_uses_binary_output() {
         ManagedServiceStatus::Running { pid: None }
     );
 
-    std::fs::remove_dir_all(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }
