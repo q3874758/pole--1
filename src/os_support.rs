@@ -517,7 +517,13 @@ pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
         let mut running = Vec::new();
         if let Ok(entries) = std::fs::read_dir("/proc") {
             for entry in entries.flatten() {
-                if let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) {
+                let p = entry.path();
+                if let Ok(target) = std::fs::read_link(p.join("exe")) {
+                    if let Some(file_name) = target.file_name().and_then(|f| f.to_str()) {
+                        running.push(file_name.to_string());
+                    }
+                }
+                if let Ok(comm) = std::fs::read_to_string(p.join("comm")) {
                     let name = comm.trim().to_string();
                     if !name.is_empty() {
                         running.push(name);
@@ -602,7 +608,16 @@ pub fn match_configured_process_names(configured: &[String], running: &[String])
         .collect::<BTreeSet<_>>();
     configured
         .iter()
-        .filter(|name| running_set.contains(*name))
+        .filter(|name| {
+            if running_set.contains(*name) {
+                return true;
+            }
+            // On Linux /proc/[pid]/comm is capped at 15 chars (TASK_COMM_LEN - 1).
+            // Allow prefix match when the running name is 15 chars and configured is longer.
+            running_set
+                .iter()
+                .any(|r| r.len() == 15 && name.starts_with(r))
+        })
         .cloned()
         .collect()
 }
@@ -610,6 +625,14 @@ pub fn match_configured_process_names(configured: &[String], running: &[String])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_match_configured_process_names_truncated_comm() {
+        let configured = vec!["pole_protocol_draft-96c1047ed732d60a".to_string()];
+        let running = vec!["pole_protocol_d".to_string()];
+        let matched = match_configured_process_names(&configured, &running);
+        assert_eq!(matched, vec!["pole_protocol_draft-96c1047ed732d60a"]);
+    }
 
     #[test]
     fn test_process_normalization() {

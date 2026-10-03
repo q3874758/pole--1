@@ -2247,11 +2247,10 @@ fn ingest_peer_batch_announcements(
                                 let diff: u64 = own_players.abs_diff(session.observed_players);
                                 let max_val: u64 =
                                     std::cmp::max(own_players, session.observed_players);
-                                let deviation_ppm: u64 = if max_val > 0 {
-                                    diff.saturating_mul(1_000_000) / max_val
-                                } else {
-                                    0
-                                };
+                                let deviation_ppm: u64 = diff
+                                    .saturating_mul(1_000_000)
+                                    .checked_div(max_val)
+                                    .unwrap_or(0);
                                 let tolerance = crate::params::MutualProofParams::default()
                                     .min_witness_observation_tolerance_ppm;
                                 if deviation_ppm <= tolerance as u64 {
