@@ -114,7 +114,7 @@ fn address_from_account20(account: &[u8; 20]) -> Address {
     out
 }
 
-fn address_to_bech32(address: &Address) -> Result<String, MutualProofError> {
+pub fn address_to_bech32(address: &Address) -> Result<String, MutualProofError> {
     crate::cosmos::address::encode_bech32(DEFAULT_BECH32_PREFIX, &address[..20])
         .map_err(|err| MutualProofError::Address(err.to_string()))
 }
@@ -323,6 +323,10 @@ pub fn save_play_session(
 
 pub fn load_play_sessions(config: &NodeConfig) -> Vec<PlaySession> {
     load_directory::<PlaySession>(config, "play-sessions")
+}
+
+pub fn load_witness_attestations(config: &NodeConfig) -> Vec<WitnessAttestation> {
+    load_directory::<WitnessAttestation>(config, "witness-attestations")
 }
 
 /// Heartbeats already recorded for one session, ordered by bucket index.

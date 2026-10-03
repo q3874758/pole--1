@@ -31,7 +31,9 @@ use serde::{Deserialize, Serialize};
 use crate::node_config::P2pSimulationConfig;
 use crate::node_pipeline::AssembledBatch;
 use crate::primitives::{ChallengeKind, ContentId, EpochId, Hash32, NodeId};
-use crate::records::{Challenge, ObservationRecord, ReplicaReceipt};
+use crate::records::{
+    Challenge, ObservationRecord, PlaySession, ReplicaReceipt, WitnessAttestation,
+};
 use crate::storage_book::StoredPayloadRecord;
 
 #[derive(
@@ -52,6 +54,8 @@ pub enum P2pTopic {
     Batches,
     Receipts,
     Challenges,
+    PlaySessions,
+    Attestations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -94,11 +98,23 @@ pub struct ChallengeAnnouncement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PlaySessionAnnouncement {
+    pub session: PlaySession,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct WitnessAttestationAnnouncement {
+    pub attestation: WitnessAttestation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum P2pMessage {
     Observation(ObservationAnnouncement),
     Batch(BatchAnnouncement),
     ReplicaReceipt(ReplicaReceiptAnnouncement),
     Challenge(ChallengeAnnouncement),
+    PlaySession(PlaySessionAnnouncement),
+    WitnessAttestation(WitnessAttestationAnnouncement),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,6 +300,8 @@ impl P2pMessage {
             Self::Batch(_) => P2pTopic::Batches,
             Self::ReplicaReceipt(_) => P2pTopic::Receipts,
             Self::Challenge(_) => P2pTopic::Challenges,
+            Self::PlaySession(_) => P2pTopic::PlaySessions,
+            Self::WitnessAttestation(_) => P2pTopic::Attestations,
         }
     }
 }

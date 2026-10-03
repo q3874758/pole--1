@@ -27,6 +27,7 @@ func RegisterInterfaces(registry types.InterfaceRegistry) {
 		&MsgAttestSession{},
 		&MsgSettleSession{},
 		&MsgSubmitRewardRecords{},
+		&MsgActivityBurn{},
 	)
 
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)

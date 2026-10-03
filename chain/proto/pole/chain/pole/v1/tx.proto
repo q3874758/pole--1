@@ -27,6 +27,7 @@ service Msg {
   rpc AttestSession(MsgAttestSession) returns (MsgAttestSessionResponse);
   rpc SettleSession(MsgSettleSession) returns (MsgSettleSessionResponse);
   rpc SubmitRewardRecords(MsgSubmitRewardRecords) returns (MsgSubmitRewardRecordsResponse);
+  rpc ActivityBurn(MsgActivityBurn) returns (MsgActivityBurnResponse);
 }
 
 message MsgUpsertNode {
@@ -208,3 +209,20 @@ message MsgSubmitRewardRecordsResponse {
   string reward_root_hex = 1;
   uint32 leaf_count = 2;
 }
+
+// MsgActivityBurn destroys tokens directly from a user account for application
+// activities (event ticket, guild boost, publisher promotion), contracting net supply.
+message MsgActivityBurn {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1;
+  uint64 amount = 2;
+  string activity_id = 3;
+  string burn_type = 4;
+  string memo = 5;
+}
+
+message MsgActivityBurnResponse {
+  uint64 burned_amount = 1;
+}
+

@@ -1312,6 +1312,23 @@ fn run_collect_tick_with_client_inner(
                 proof.sessions_reused,
                 proof.heartbeats_saved
             );
+            if proof.sessions_created > 0 {
+                if let Some(net) = network.as_deref_mut() {
+                    let node_id = config.node_id().unwrap_or([0u8; 32]);
+                    for session in crate::mutual_proof::load_play_sessions(config) {
+                        if session.epoch_id == progress.next_epoch_id
+                            && session.slot_id == progress.next_slot_id
+                        {
+                            let _ = net.publish(
+                                node_id,
+                                crate::p2p::P2pMessage::PlaySession(
+                                    crate::p2p::PlaySessionAnnouncement { session },
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
         }
         Ok(_) => {}
         Err(err) => eprintln!("pole-node: play heartbeat error: {err}"),
@@ -1726,8 +1743,15 @@ fn record_play_heartbeats(
     let slots_per_block = (block_secs / tick_interval_secs).max(1);
     let stored_sessions = load_play_sessions(config);
     let signed_at_millis = current_unix_millis()?;
+    for (process_name, app_id) in active_apps {
+        let engagement = crate::os_support::evaluate_game_engagement(&process_name, None);
+        if engagement == crate::os_support::PlayEngagementState::MainMenu {
+            eprintln!(
+                "pole-node: game process {process_name} is in main menu / launcher, skipping heartbeat generation"
+            );
+            continue;
+        }
 
-    for (_process_name, app_id) in active_apps {
         let reused = stored_sessions.iter().find(|session| {
             session.app_id == app_id
                 && session.epoch_id == progress.next_epoch_id
@@ -2185,8 +2209,100 @@ fn ingest_peer_batch_announcements(
 
     let mut outcome = PeerBatchIngestionOutcome::default();
     for envelope in envelopes {
-        let P2pMessage::Batch(announcement) = envelope.message else {
-            continue;
+        let announcement = match envelope.message {
+            P2pMessage::Batch(batch) => batch,
+            P2pMessage::PlaySession(session_announcement) => {
+                let session = session_announcement.session;
+                let _ = crate::mutual_proof::save_play_session(config, &session);
+                if let Ok(identity) = config.identity_keypair() {
+                    let local_address =
+                        crate::mutual_proof::identity_account_address(&identity.public);
+                    if session.node_address != local_address
+                        && session.collector_address != local_node_id
+                        && config.capabilities.collect
+                    {
+                        let own_obs = runtime.retention_book.payloads.values().find_map(|p| {
+                            if p.epoch_id == session.epoch_id {
+                                let path = payload_path(config, &p.payload_cid);
+                                if let Ok(bytes) = fs::read(&path) {
+                                    if let Ok(obs_vec) =
+                                        borsh::from_slice::<Vec<ObservationRecord>>(&bytes)
+                                    {
+                                        for obs in obs_vec {
+                                            if obs.app_id == session.app_id {
+                                                return Some((
+                                                    p.payload_cid.clone(),
+                                                    obs.observed_players,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        });
+
+                        if let Some((own_cid, own_players)) = own_obs {
+                            if own_cid != session.observation_cid {
+                                let diff: u64 = own_players.abs_diff(session.observed_players);
+                                let max_val: u64 =
+                                    std::cmp::max(own_players, session.observed_players);
+                                let deviation_ppm: u64 = if max_val > 0 {
+                                    diff.saturating_mul(1_000_000) / max_val
+                                } else {
+                                    0
+                                };
+                                let tolerance = crate::params::MutualProofParams::default()
+                                    .min_witness_observation_tolerance_ppm;
+                                if deviation_ppm <= tolerance as u64 {
+                                    if let Ok(attestation) =
+                                        crate::mutual_proof::build_witness_attestation(
+                                            config,
+                                            &identity,
+                                            &session,
+                                            &own_cid,
+                                            session.play_seconds,
+                                            own_players,
+                                        )
+                                    {
+                                        let _ = crate::mutual_proof::save_witness_attestation(
+                                            config,
+                                            &attestation,
+                                        );
+                                        let _ = network.publish(
+                                            local_node_id,
+                                            P2pMessage::WitnessAttestation(
+                                                crate::p2p::WitnessAttestationAnnouncement {
+                                                    attestation,
+                                                },
+                                            ),
+                                        );
+                                        eprintln!(
+                                            "pole-node: auto-witnessed play session {} for app {} over P2P",
+                                            crate::hex_32(session.session_id),
+                                            session.app_id
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            P2pMessage::WitnessAttestation(attestation_announcement) => {
+                let _ = crate::mutual_proof::save_witness_attestation(
+                    config,
+                    &attestation_announcement.attestation,
+                );
+                eprintln!(
+                    "pole-node: stored received witness attestation for session {} from {} over P2P",
+                    crate::hex_32(attestation_announcement.attestation.session_id),
+                    crate::hex_32(attestation_announcement.attestation.witness_address)
+                );
+                continue;
+            }
+            _ => continue,
         };
         outcome.announced += 1;
 
@@ -3929,6 +4045,15 @@ mod tests {
         assert_eq!(second_block.sessions_created, 1);
         assert_eq!(load_play_sessions(&config).len(), 2);
 
+        // When the game process is parked at the main menu / launcher, heartbeat generation is paused.
+        std::env::set_var("POLE_ENGAGEMENT_STATE_OVERRIDE", "main_menu");
+        progress.next_slot_id = 14;
+        let menu_tick =
+            record_play_heartbeats(&config, &progress, &running, &observed, "cid-3").unwrap();
+        assert_eq!(menu_tick.heartbeats_saved, 0);
+        assert_eq!(menu_tick.sessions_created, 0);
+        std::env::remove_var("POLE_ENGAGEMENT_STATE_OVERRIDE");
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -3963,6 +4088,145 @@ mod tests {
         let loaded = load_verification_credentials(&config, 7);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], credential);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_p2p_play_session_auto_witnessing_flow() {
+        let root = std::env::temp_dir().join(format!("pole-p2p-witness-{}", std::process::id()));
+        if root.exists() {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let mut witness_config = NodeConfig::default();
+        witness_config.runtime.data_dir = root.to_string_lossy().into_owned();
+        witness_config.capabilities.collect = true;
+        let witness_key = crate::KeyPair::from_seed(&[1u8; 32]);
+        witness_config.node_id_hex = crate::hex_32(witness_key.public);
+        let witness_addr = crate::mutual_proof::identity_account_address(&witness_key.public);
+        std::fs::create_dir_all(&witness_config.runtime.data_dir).unwrap();
+        std::fs::write(
+            root.join("identity.json"),
+            serde_json::to_string(&witness_key).unwrap(),
+        )
+        .unwrap();
+
+        let player_key = crate::KeyPair::from_seed(&[2u8; 32]);
+        let player_addr = crate::mutual_proof::identity_account_address(&player_key.public);
+
+        // Prepare observation payload on witness node
+        let obs_vec = vec![ObservationRecord {
+            epoch_id: 1,
+            slot_id: 1,
+            app_id: 730,
+            source_kind: crate::ActivitySourceKind::Steam,
+            source_confidence_ppm: 1_000_000,
+            observed_players: 100_000,
+            observed_at_millis: 1_000,
+            collector_id: witness_key.public,
+            raw_body_cid: "raw-cid".into(),
+            raw_body_hash: [0u8; 32],
+            collector_signature: vec![0u8; 64],
+        }];
+        let payload_bytes = borsh::to_vec(&obs_vec).unwrap();
+        let payload_cid = "cid-witness-obs-730".to_string();
+        let path = payload_path(&witness_config, &payload_cid);
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(&path, &payload_bytes).unwrap();
+
+        let mut runtime = LocalNodeRuntime::new(
+            witness_config.clone(),
+            crate::storage_book::LocalRetentionBook::default(),
+        );
+        let stored_record = crate::storage_book::StoredPayloadRecord {
+            epoch_id: 1,
+            payload_cid: payload_cid.clone(),
+            payload_hash: [1u8; 32],
+            size_bytes: payload_bytes.len() as u64,
+            retention_until_epoch: 10,
+            receipt: crate::ReplicaReceipt {
+                epoch_id: 1,
+                payload_cid: payload_cid.clone(),
+                storer_id: witness_key.public,
+                retention_until_epoch: 10,
+                receipt_signature: vec![0u8; 64],
+            },
+        };
+        runtime
+            .retention_book
+            .payloads
+            .insert(payload_cid, stored_record);
+
+        // Setup InMemoryP2pNetwork
+        let mut network = crate::p2p::InMemoryP2pNetwork::default();
+        let node_a = player_key.public;
+        let node_b = witness_key.public;
+        network
+            .bootstrap_peer(
+                node_a,
+                &[crate::p2p::P2pTopic::PlaySessions, crate::p2p::P2pTopic::Attestations],
+            )
+            .unwrap();
+        network
+            .bootstrap_peer(
+                node_b,
+                &[crate::p2p::P2pTopic::PlaySessions, crate::p2p::P2pTopic::Attestations],
+            )
+            .unwrap();
+
+        // Node A creates and publishes PlaySession
+        let session = crate::PlaySession {
+            session_id: [42u8; 32],
+            node_address: player_addr,
+            app_id: 730,
+            epoch_id: 1,
+            slot_id: 1,
+            play_seconds: 300,
+            collector_address: player_addr,
+            observation_cid: "cid-player-obs-730".to_string(),
+            observed_players: 100_005, // within tolerance
+            submitted_at_height: 100,
+            session_signature: vec![0u8; 64],
+        };
+
+        network
+            .publish(
+                node_a,
+                P2pMessage::PlaySession(crate::p2p::PlaySessionAnnouncement {
+                    session: session.clone(),
+                }),
+            )
+            .unwrap();
+
+        // Node B ingests peer messages
+        let outcome =
+            ingest_peer_batch_announcements(&witness_config, &mut runtime, &mut network).unwrap();
+        assert_eq!(outcome.accepted, 0); // No batches, was a session
+
+        // Assert session was saved on Node B
+        let saved_sessions = crate::mutual_proof::load_play_sessions(&witness_config);
+        assert_eq!(saved_sessions.len(), 1);
+        assert_eq!(saved_sessions[0].session_id, session.session_id);
+
+        // Assert attestation was generated and saved on Node B
+        let saved_attestations =
+            crate::mutual_proof::load_witness_attestations(&witness_config);
+        assert_eq!(saved_attestations.len(), 1);
+        assert_eq!(saved_attestations[0].session_id, session.session_id);
+        assert_eq!(saved_attestations[0].witness_address, witness_addr);
+
+        // Assert attestation was broadcast over P2P network to Node A's inbox
+        let node_a_inbox = network.drain_inbox(node_a).unwrap();
+        assert_eq!(node_a_inbox.len(), 1);
+        match &node_a_inbox[0].message {
+            P2pMessage::WitnessAttestation(ann) => {
+                assert_eq!(ann.attestation.session_id, session.session_id);
+                assert_eq!(ann.attestation.witness_address, witness_addr);
+            }
+            other => panic!("Expected WitnessAttestation, got {:?}", other),
+        }
 
         std::fs::remove_dir_all(&root).unwrap();
     }

@@ -118,6 +118,8 @@ pub fn parse_socket_topics(topics: &str) -> Result<Vec<P2pTopic>, CliParseError>
             "receipts" => Ok(P2pTopic::Receipts),
             "challenges" => Ok(P2pTopic::Challenges),
             "observations" => Ok(P2pTopic::Observations),
+            "playsessions" | "sessions" => Ok(P2pTopic::PlaySessions),
+            "attestations" => Ok(P2pTopic::Attestations),
             _ => Err(CliParseError::UnknownSocketTopic(item.to_string())),
         })
         .collect::<Result<Vec<_>, _>>()?;

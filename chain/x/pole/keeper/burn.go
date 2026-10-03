@@ -101,3 +101,45 @@ func (k Keeper) SettleChallengeBond(ctx context.Context, challenger string, bond
 	}
 	return k.BurnFromRewardPool(ctx, bond*uint64(burnBps)/10_000)
 }
+
+// ExecuteActivityBurn burns tokens directly from a user account for an application activity
+// (e.g. event_ticket, guild_boost, publisher_promotion).
+// It transfers the coins from sender account to pole module and calls BurnCoins,
+// updates TotalActivityBurned, and emits an `activity_burned` event.
+func (k Keeper) ExecuteActivityBurn(ctx context.Context, sender string, amount uint64, activityId, burnType, memo string) (uint64, error) {
+	if amount == 0 {
+		return 0, fmt.Errorf("burn amount must be positive")
+	}
+	if k.bankKeeper == nil {
+		return 0, fmt.Errorf("bank keeper is not configured")
+	}
+	addr, err := sdk.AccAddressFromBech32(sender)
+	if err != nil {
+		return 0, fmt.Errorf("invalid sender address: %w", err)
+	}
+	coins := sdk.NewCoins(sdk.NewCoin(types.BaseDenom, sdkmath.NewIntFromUint64(amount)))
+	if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, addr, types.ModuleName, coins); err != nil {
+		return 0, fmt.Errorf("failed to transfer coins for burn: %w", err)
+	}
+	if err := k.bankKeeper.BurnCoins(ctx, types.ModuleName, coins); err != nil {
+		return 0, fmt.Errorf("failed to burn coins: %w", err)
+	}
+
+	total, _ := k.TotalActivityBurned.Get(ctx)
+	_ = k.TotalActivityBurned.Set(ctx, total+amount)
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			"activity_burned",
+			sdk.NewAttribute("sender", sender),
+			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
+			sdk.NewAttribute("activity_id", activityId),
+			sdk.NewAttribute("burn_type", burnType),
+			sdk.NewAttribute("memo", memo),
+		),
+	)
+
+	return amount, nil
+}
+

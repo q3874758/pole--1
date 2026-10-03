@@ -43,6 +43,7 @@ type Keeper struct {
 	PlayHeartbeats      collections.Map[collections.Pair[string, uint64], types.PlayHeartbeat]
 	WitnessAttestations collections.Map[collections.Pair[string, string], types.WitnessAttestation]
 	SessionSettlements  collections.Map[string, types.SessionSettlement]
+	TotalActivityBurned collections.Item[uint64]
 }
 
 type bankKeeper interface {
@@ -249,6 +250,12 @@ func NewKeeper(storeService store.KVStoreService, authority string) (Keeper, err
 			"session_settlements",
 			collections.StringKey,
 			sdkcodec.CollValue[types.SessionSettlement](protoCodec),
+		),
+		TotalActivityBurned: collections.NewItem(
+			sb,
+			types.TotalActivityBurnedKeyPrefix,
+			"total_activity_burned",
+			collections.Uint64Value,
 		),
 	}
 

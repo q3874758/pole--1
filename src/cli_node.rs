@@ -1164,7 +1164,15 @@ fn run_once_with_client(
         }
         NetworkMode::SocketBackend { bind_addr, peers } => {
             let mut network = SocketP2pNetwork::bind(config.node_id()?, bind_addr, peers)?;
-            network.bootstrap_peer(config.node_id()?, &[P2pTopic::Batches, P2pTopic::Receipts])?;
+            network.bootstrap_peer(
+                config.node_id()?,
+                &[
+                    P2pTopic::Batches,
+                    P2pTopic::Receipts,
+                    P2pTopic::PlaySessions,
+                    P2pTopic::Attestations,
+                ],
+            )?;
             let result =
                 run_collect_tick_with_client_and_network(config, progress, client, &mut network)?;
             let summary = summarize_tick_p2p_backend(&mut network, &result)?;
@@ -1234,7 +1242,15 @@ fn run_loop_with_client(
         }
         NetworkMode::SocketBackend { bind_addr, peers } => {
             let mut network = SocketP2pNetwork::bind(config.node_id()?, bind_addr, peers)?;
-            network.bootstrap_peer(config.node_id()?, &[P2pTopic::Batches, P2pTopic::Receipts])?;
+            network.bootstrap_peer(
+                config.node_id()?,
+                &[
+                    P2pTopic::Batches,
+                    P2pTopic::Receipts,
+                    P2pTopic::PlaySessions,
+                    P2pTopic::Attestations,
+                ],
+            )?;
             let loop_summary = summarize_collect_loop_with_client_and_network(
                 config,
                 client,

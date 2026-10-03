@@ -421,6 +421,8 @@ pub fn compute_local_epoch_rewards(
         .map(|group| reward_units_from_gvs(group.aggregate.gvs_microunits))
         .sum::<Amount>();
 
+    let credits = load_witness_credits(config, epoch_id);
+
     let service_reward_pools = service_reward_pools_for_epoch(
         config,
         player_block_count,
@@ -430,6 +432,7 @@ pub fn compute_local_epoch_rewards(
             .values()
             .any(|record| record.epoch_id == epoch_id),
         !aggregation.groups.is_empty(),
+        !credits.is_empty(),
     );
 
     let mut collect_scores = BTreeMap::<NodeId, Amount>::new();
@@ -490,7 +493,6 @@ pub fn compute_local_epoch_rewards(
     // rejected. Reproduce the chain's split from the same inputs instead:
     // the credits the proposer cached from the chain (`WitnessCredits`
     // query) and this epoch's verify pool.
-    let credits = load_witness_credits(config, epoch_id);
     if !credits.is_empty() {
         let allocation = allocate_witness_rewards(&credits, service_reward_pools.verify_pool);
         for (recipient, amount) in allocation {
@@ -889,6 +891,7 @@ fn service_reward_pools_for_epoch(
     total_gvs_units: Amount,
     has_retention_records: bool,
     has_aggregation_groups: bool,
+    has_witness_credits: bool,
 ) -> ServiceRewardPools {
     match config.reward.reward_source {
         RewardSourceMode::Static => ServiceRewardPools {
@@ -899,10 +902,11 @@ fn service_reward_pools_for_epoch(
                 0
             },
             verify_pool: if total_gvs_units > 0
-                && config.capabilities.verify
-                && has_aggregation_groups
+                && (config.capabilities.verify && has_aggregation_groups)
             {
                 (total_gvs_units / 10).max(1)
+            } else if has_witness_credits && player_block_count > 0 {
+                (player_block_count as Amount * 100).max(1)
             } else {
                 0
             },
@@ -928,11 +932,12 @@ fn service_reward_pools_for_epoch(
             } else {
                 0
             };
-            let verify_pool = if config.capabilities.verify && has_aggregation_groups {
-                proportional_service_pool(base_service_pool, config.reward.verify_reward_bps)
-            } else {
-                0
-            };
+            let verify_pool =
+                if (config.capabilities.verify && has_aggregation_groups) || has_witness_credits {
+                    proportional_service_pool(base_service_pool, config.reward.verify_reward_bps)
+                } else {
+                    0
+                };
             let propose_pool = if config.capabilities.propose && has_aggregation_groups {
                 proportional_service_pool(base_service_pool, config.reward.propose_reward_bps)
             } else {
@@ -1187,8 +1192,21 @@ pub fn player_reward_tick_artifact_path(
 /// caller treats as "no chain-recorded credits for this epoch".
 fn load_witness_credits(config: &NodeConfig, epoch_id: EpochId) -> BTreeMap<String, u64> {
     let endpoint = CosmosEndpoint::local_pole(config.chain_id.as_str());
-    crate::cosmos::query_client::witness_credits_blocking(&endpoint.rest_url, epoch_id)
-        .unwrap_or_default()
+    let mut credits =
+        crate::cosmos::query_client::witness_credits_blocking(&endpoint.rest_url, epoch_id)
+            .unwrap_or_default();
+    if credits.is_empty() {
+        for att in crate::mutual_proof::load_witness_attestations(config) {
+            for session in crate::mutual_proof::load_play_sessions(config) {
+                if session.session_id == att.session_id && session.epoch_id == epoch_id {
+                    if let Ok(bech32) = crate::mutual_proof::address_to_bech32(&att.witness_address) {
+                        *credits.entry(bech32).or_default() += 1;
+                    }
+                }
+            }
+        }
+    }
+    credits
 }
 
 /// A deterministic local `NodeId` for a witness named only by its chain
@@ -1710,7 +1728,7 @@ mod tests {
             ..NodeConfig::default()
         };
 
-        let pools = service_reward_pools_for_epoch(&config, 2, 0, true, true);
+        let pools = service_reward_pools_for_epoch(&config, 2, 0, true, true, false);
         assert_eq!(pools.collect_pool, 2_283);
         assert_eq!(pools.store_pool, 1_141);
         assert_eq!(pools.verify_pool, 684);
@@ -1737,7 +1755,7 @@ mod tests {
             ..NodeConfig::default()
         };
 
-        let pools = service_reward_pools_for_epoch(&config, 1, 0, false, false);
+        let pools = service_reward_pools_for_epoch(&config, 1, 0, false, false, false);
         assert_eq!(pools.collect_pool, 1_141);
         assert_eq!(pools.store_pool, 0);
         assert_eq!(pools.verify_pool, 0);
@@ -1969,5 +1987,117 @@ mod tests {
         assert_eq!(last_comp.artifact.records[0].player_reward, 1);
 
         let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn test_dual_sided_reward_pipeline_player_and_witness() {
+        use crate::{KeyPair, PlaySession, WitnessAttestation};
+
+        let root = std::env::temp_dir().join(format!("pole-dual-reward-{}", std::process::id()));
+        if root.exists() {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = root.to_string_lossy().into_owned();
+        let player_key = KeyPair::from_seed(&[11u8; 32]);
+        config.node_id_hex = crate::hex_32(player_key.public);
+        std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
+        std::fs::write(
+            root.join("identity.json"),
+            serde_json::to_string(&player_key).unwrap(),
+        )
+        .unwrap();
+
+        // Save a player reward tick so player_reward_pool > 0 and player_block_count > 0
+        let tick_dir = std::path::Path::new(&config.runtime.data_dir).join("player-reward-blocks");
+        std::fs::create_dir_all(&tick_dir).unwrap();
+        let tick = PlayerRewardTickArtifact {
+            epoch_id: 1,
+            slot_id: 1,
+            sampled_interval_secs: 300,
+            reward_block_secs: 3600,
+            reward_adjustment_period_index: 0,
+            adjustment_cycle_index: 0,
+            reward_adjustment_period_blocks: 0,
+            adjustment_cycle_blocks: 0,
+            completed_reward_block_count: 1,
+            fixed_block_reward_basis_period_index: 0,
+            fixed_player_reward_basis_cycle_index: 0,
+            fixed_block_reward_basis_network_weight_units: 0,
+            fixed_player_reward_basis_total_network_weight_units: 0,
+            block_reward: 100_000,
+            fixed_player_reward: 100_000,
+            foreground_process: Some("cs2.exe".into()),
+            active_game_processes: vec!["cs2.exe".into()],
+            records: vec![],
+            total_player_reward: 50_000,
+        };
+        std::fs::write(
+            tick_dir.join("tick-1.json"),
+            serde_json::to_string(&tick).unwrap(),
+        )
+        .unwrap();
+
+        // Save PlaySession for epoch 1
+        let session_id = [77u8; 32];
+        let session = PlaySession {
+            session_id,
+            node_address: crate::mutual_proof::identity_account_address(&player_key.public),
+            app_id: 730,
+            epoch_id: 1,
+            slot_id: 1,
+            play_seconds: 3600,
+            collector_address: crate::mutual_proof::identity_account_address(&player_key.public),
+            observation_cid: "cid-obs-1".into(),
+            observed_players: 50_000,
+            submitted_at_height: 10,
+            session_signature: vec![0u8; 64],
+        };
+        crate::mutual_proof::save_play_session(&config, &session).unwrap();
+
+        // Save WitnessAttestation from a distinct witness node
+        let witness_key = KeyPair::from_seed(&[22u8; 32]);
+        let witness_addr = crate::mutual_proof::identity_account_address(&witness_key.public);
+        let witness_bech32 =
+            crate::mutual_proof::identity_account_bech32(&witness_key.public).unwrap();
+        let attestation = WitnessAttestation {
+            session_id,
+            witness_address: witness_addr,
+            observed_play_seconds: 3600,
+            witness_observation_cid: "cid-witness-obs-2".into(),
+            observed_players: 50_010,
+            attested_at_height: 12,
+            witness_signature: vec![0u8; 64],
+        };
+        crate::mutual_proof::save_witness_attestation(&config, &attestation).unwrap();
+
+        config.reward.reward_source = crate::node_config::RewardSourceMode::Tokenomics;
+
+        // Compute local epoch rewards
+        let comp = compute_local_epoch_rewards(&config, 1).unwrap();
+        assert!(!comp.artifact.records.is_empty());
+
+        // Find player record
+        let player_rec = comp
+            .artifact
+            .records
+            .iter()
+            .find(|r| r.reward.player_reward > 0)
+            .expect("must have a record with player_reward > 0");
+        assert_eq!(player_rec.reward.player_reward, 50_000);
+        assert!(player_rec.reward.net_reward >= 50_000);
+
+        // Find witness record
+        let witness_rec = comp
+            .artifact
+            .records
+            .iter()
+            .find(|r| r.reward.verify_reward > 0)
+            .expect("must have a record with verify_reward > 0");
+        assert_eq!(witness_rec.reward.recipient_address, witness_bech32);
+        assert!(witness_rec.reward.verify_reward > 0);
+        assert_eq!(witness_rec.reward.net_reward, witness_rec.reward.verify_reward);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

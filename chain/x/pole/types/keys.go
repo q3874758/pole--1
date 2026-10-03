@@ -25,4 +25,5 @@ var (
 	PlayHeartbeatsKeyPrefix      = collections.NewPrefix(14)
 	WitnessAttestationsKeyPrefix = collections.NewPrefix(15)
 	SessionSettlementsKeyPrefix  = collections.NewPrefix(16)
+	TotalActivityBurnedKeyPrefix = collections.NewPrefix(17)
 )

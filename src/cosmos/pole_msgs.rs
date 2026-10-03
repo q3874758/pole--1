@@ -812,6 +812,61 @@ fn encode_reward_record_inner(r: &RewardRecordWire) -> Vec<u8> {
     buf
 }
 
+/// `MsgActivityBurn` — destroys tokens for application activities.
+///
+/// pole.chain.pole.v1.MsgActivityBurn {
+///   string sender = 1;
+///   uint64 amount = 2;
+///   string activity_id = 3;
+///   string burn_type = 4;
+///   string memo = 5;
+/// }
+pub fn encode_msg_activity_burn(
+    sender_bech32: &str,
+    amount: u64,
+    activity_id: &str,
+    burn_type: &str,
+    memo: &str,
+) -> Any {
+    let mut buf = Vec::with_capacity(128);
+    encode_string(1, sender_bech32, &mut buf);
+    encode_uint64(2, amount, &mut buf);
+    encode_string(3, activity_id, &mut buf);
+    encode_string(4, burn_type, &mut buf);
+    encode_string(5, memo, &mut buf);
+    Any {
+        type_url: "/pole.chain.pole.v1.MsgActivityBurn".to_string(),
+        value: buf,
+    }
+}
+
+/// Standalone encoder struct for `MsgActivityBurn`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MsgActivityBurn<'a> {
+    pub sender: &'a str,
+    pub amount: u64,
+    pub activity_id: &'a str,
+    pub burn_type: &'a str,
+    pub memo: &'a str,
+}
+
+impl<'a> MessageEncoder for MsgActivityBurn<'a> {
+    fn type_url(&self) -> &'static str {
+        "/pole.chain.pole.v1.MsgActivityBurn"
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        encode_msg_activity_burn(
+            self.sender,
+            self.amount,
+            self.activity_id,
+            self.burn_type,
+            self.memo,
+        )
+        .value
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1654,6 +1709,29 @@ mod tests {
             repeated_tags >= 2,
             "expected at least two field-3 tags, got {repeated_tags}"
         );
+    }
+
+    #[test]
+    fn msg_activity_burn_encoder_roundtrip() {
+        let any = encode_msg_activity_burn(
+            "cosmos1sender",
+            500_000,
+            "weekend_cs2_championship",
+            "event_ticket",
+            "vip pass",
+        );
+        assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgActivityBurn");
+        assert_eq!(any.value[0], 0x0A); // field 1 string
+        // Also test MessageEncoder trait
+        let msg = MsgActivityBurn {
+            sender: "cosmos1sender",
+            amount: 500_000,
+            activity_id: "weekend_cs2_championship",
+            burn_type: "event_ticket",
+            memo: "vip pass",
+        };
+        assert_eq!(msg.type_url(), "/pole.chain.pole.v1.MsgActivityBurn");
+        assert_eq!(msg.encode(), any.value);
     }
 
     fn full_params_fixture() -> ParamsWire {

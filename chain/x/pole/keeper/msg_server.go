@@ -738,6 +738,26 @@ func (m *msgServer) SubmitRewardRecords(ctx context.Context, msg *types.MsgSubmi
 	return &types.MsgSubmitRewardRecordsResponse{RewardRootHex: root, LeafCount: leafCount}, nil
 }
 
+// ActivityBurn allows any token holder to burn tokens directly for an application-level
+// activity (such as event tickets, guild boosts, publisher promotions).
+func (m *msgServer) ActivityBurn(ctx context.Context, msg *types.MsgActivityBurn) (*types.MsgActivityBurnResponse, error) {
+	if msg == nil {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "message is required")
+	}
+	if msg.Sender == "" {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidAddress, "sender address is required")
+	}
+	if msg.Amount == 0 {
+		return nil, errorsmod.Wrap(sdkerrors.ErrInvalidRequest, "burn amount must be positive")
+	}
+	burned, err := m.keeper.ExecuteActivityBurn(ctx, msg.Sender, msg.Amount, msg.ActivityId, msg.BurnType, msg.Memo)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgActivityBurnResponse{BurnedAmount: burned}, nil
+}
+
+
 // validateWitnessRewardSplit enforces the verify-reward rule on the submitted
 // record set: verify reward is paid for corroboration the chain actually
 // recorded, not for operating with the verify capability enabled.

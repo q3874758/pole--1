@@ -10,6 +10,7 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	protov2 "google.golang.org/protobuf/proto"
 
+	"pole/chain/x/pole/keeper"
 	"pole/chain/x/pole/types"
 )
 
@@ -382,3 +383,93 @@ func TestNetSupplyChangeEqualsEmissionMinusBurn(t *testing.T) {
 	}
 	_ = supplyBefore
 }
+
+// TestMsgActivityBurnReducesSupplyAndRecordsTotal validates the application-level
+// activity burn channel: users burn tokens directly for game events / promotions,
+// contracting net supply and tracking total burned.
+func TestMsgActivityBurnReducesSupplyAndRecordsTotal(t *testing.T) {
+	app := initTestApp(t)
+	ctx := initTestContext(app).WithBlockHeight(10)
+	msgServer := keeper.NewMsgServerImpl(&app.PoleKeeper)
+
+	sender := sdk.AccAddress([]byte("activity_user_123456"))
+	fundAccount(t, app, ctx, sender, 50_000)
+
+	supplyBefore := supply(app, ctx)
+
+	// Zero amount rejected
+	if _, err := msgServer.ActivityBurn(ctx, &types.MsgActivityBurn{
+		Sender:     sender.String(),
+		Amount:     0,
+		ActivityId: "cs2_weekend_event",
+		BurnType:   "event_ticket",
+		Memo:       "zero burn",
+	}); err == nil {
+		t.Fatalf("expected error for zero burn amount")
+	}
+
+	// Insufficient balance rejected
+	if _, err := msgServer.ActivityBurn(ctx, &types.MsgActivityBurn{
+		Sender:     sender.String(),
+		Amount:     60_000,
+		ActivityId: "cs2_weekend_event",
+		BurnType:   "event_ticket",
+		Memo:       "too much",
+	}); err == nil {
+		t.Fatalf("expected error for insufficient balance")
+	}
+
+	// Valid burn
+	res, err := msgServer.ActivityBurn(ctx, &types.MsgActivityBurn{
+		Sender:     sender.String(),
+		Amount:     20_000,
+		ActivityId: "weekend_cs2_championship",
+		BurnType:   "event_ticket",
+		Memo:       "vip ticket",
+	})
+	if err != nil {
+		t.Fatalf("valid activity burn failed: %v", err)
+	}
+	if res.BurnedAmount != 20_000 {
+		t.Fatalf("expected burned amount 20_000, got %d", res.BurnedAmount)
+	}
+
+	// Check sender balance
+	senderBal := app.BankKeeper.GetBalance(ctx, sender, types.BaseDenom).Amount.Uint64()
+	if senderBal != 30_000 {
+		t.Fatalf("expected sender balance 30_000, got %d", senderBal)
+	}
+
+	// Check supply contraction
+	supplyAfter := supply(app, ctx)
+	if !supplyAfter.Equal(supplyBefore.Sub(sdkmath.NewInt(20_000))) {
+		t.Fatalf("expected supply contraction of 20_000, before=%s, after=%s", supplyBefore, supplyAfter)
+	}
+
+	// Check total activity burned recorded in keeper
+	totalBurned, err := app.PoleKeeper.TotalActivityBurned.Get(ctx)
+	if err != nil {
+		t.Fatalf("get total activity burned: %v", err)
+	}
+	if totalBurned != 20_000 {
+		t.Fatalf("expected total activity burned 20_000, got %d", totalBurned)
+	}
+
+	// Second burn adds up
+	_, err = msgServer.ActivityBurn(ctx, &types.MsgActivityBurn{
+		Sender:     sender.String(),
+		Amount:     10_000,
+		ActivityId: "guild_boost_season_1",
+		BurnType:   "guild_boost",
+		Memo:       "guild boost",
+	})
+	if err != nil {
+		t.Fatalf("second activity burn failed: %v", err)
+	}
+
+	totalBurned2, _ := app.PoleKeeper.TotalActivityBurned.Get(ctx)
+	if totalBurned2 != 30_000 {
+		t.Fatalf("expected total activity burned 30_000, got %d", totalBurned2)
+	}
+}
+

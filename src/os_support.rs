@@ -11,6 +11,7 @@
 #![allow(unsafe_code)]
 
 use std::collections::BTreeSet;
+use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
 mod win32 {
@@ -33,6 +34,20 @@ mod win32 {
         pub version: u32,
         pub control_mask: u32,
         pub state_mask: u32,
+    }
+
+    #[repr(C)]
+    pub struct PROCESS_MEMORY_COUNTERS {
+        pub cb: u32,
+        pub page_fault_count: u32,
+        pub peak_working_set_size: usize,
+        pub working_set_size: usize,
+        pub quota_peak_paged_pool_usage: usize,
+        pub quota_paged_pool_usage: usize,
+        pub quota_peak_non_paged_pool_usage: usize,
+        pub quota_non_paged_pool_usage: usize,
+        pub pagefile_usage: usize,
+        pub peak_pagefile_usage: usize,
     }
 
     #[repr(C)]
@@ -284,6 +299,216 @@ pub fn detect_foreground_process_name() -> Option<String> {
     }
 }
 
+/// Detects the window title of the current foreground active window.
+pub fn detect_foreground_window_title() -> Option<String> {
+    if let Ok(override_title) = std::env::var("POLE_CLIENT_FOREGROUND_TITLE_OVERRIDE") {
+        let trimmed = override_title.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    #[cfg(windows)]
+    unsafe {
+        let user32 = win32::LoadLibraryA(b"user32.dll\0".as_ptr());
+        if user32.is_null() {
+            return None;
+        }
+
+        let get_foreground_window: Option<unsafe extern "system" fn() -> *mut win32::c_void> =
+            std::mem::transmute(win32::GetProcAddress(
+                user32,
+                b"GetForegroundWindow\0".as_ptr(),
+            ));
+        let get_window_text_w: Option<
+            unsafe extern "system" fn(*mut win32::c_void, *mut u16, i32) -> i32,
+        > = std::mem::transmute(win32::GetProcAddress(
+            user32,
+            b"GetWindowTextW\0".as_ptr(),
+        ));
+
+        let (Some(get_fg), Some(get_text)) = (get_foreground_window, get_window_text_w) else {
+            return None;
+        };
+
+        let hwnd = get_fg();
+        if hwnd.is_null() {
+            return None;
+        }
+
+        let mut buf = [0u16; 512];
+        let len = get_text(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len <= 0 {
+            return None;
+        }
+
+        let title = String::from_utf16_lossy(&buf[..len as usize]);
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Detects the physical working set size (in bytes) of a process by PID.
+pub fn detect_process_working_set_bytes(pid: u32) -> u64 {
+    if pid == 0 {
+        return 0;
+    }
+
+    #[cfg(windows)]
+    unsafe {
+        let kernel32 = win32::LoadLibraryA(b"kernel32.dll\0".as_ptr());
+        if kernel32.is_null() {
+            return 0;
+        }
+
+        let get_mem_info: Option<
+            unsafe extern "system" fn(
+                *mut win32::c_void,
+                *mut win32::PROCESS_MEMORY_COUNTERS,
+                u32,
+            ) -> i32,
+        > = std::mem::transmute(win32::GetProcAddress(
+            kernel32,
+            b"K32GetProcessMemoryInfo\0".as_ptr(),
+        ));
+
+        let Some(get_info) = get_mem_info else {
+            return 0;
+        };
+
+        let handle = win32::OpenProcess(win32::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return 0;
+        }
+
+        let mut counters: win32::PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        counters.cb = std::mem::size_of::<win32::PROCESS_MEMORY_COUNTERS>() as u32;
+        let ok = get_info(handle, &mut counters, counters.cb);
+        win32::CloseHandle(handle);
+
+        if ok != 0 {
+            counters.working_set_size as u64
+        } else {
+            0
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        0
+    }
+}
+
+/// Represents the evaluated game engagement state of a player node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlayEngagementState {
+    /// Process is in launcher, login dialog, or main menu / title screen (not counted)
+    MainMenu,
+    /// Process has loaded game world / session (valid play, active or AFK in-world)
+    InWorld,
+}
+
+impl Default for PlayEngagementState {
+    fn default() -> Self {
+        Self::InWorld
+    }
+}
+
+/// Checks whether a window title indicates a launcher, updater, or main menu screen.
+pub fn is_main_menu_or_launcher_title(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    let trimmed = lower.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    trimmed.contains("launcher")
+        || trimmed.contains("updater")
+        || trimmed.contains("splash screen")
+        || trimmed.contains("press start")
+        || trimmed.contains("press any key")
+        || trimmed.contains("title screen")
+        || trimmed.contains("main menu")
+        || trimmed.contains("login")
+        || trimmed.contains("sign in")
+        || trimmed.ends_with(" - main menu")
+        || trimmed.ends_with(" - title")
+}
+
+/// Checks whether an executable process name is an external launcher rather than the game itself.
+pub fn is_launcher_process_name(process_name: &str) -> bool {
+    let lower = process_name.to_ascii_lowercase();
+    lower.contains("launcher")
+        || lower.contains("bootstrap")
+        || lower.contains("updater")
+        || lower.contains("crashreport")
+        || lower.contains("easyanticheat")
+}
+
+/// Evaluates whether the game process is in an active in-world session (including AFK)
+/// or parked at the main menu / launcher.
+///
+/// Rules:
+/// - In-world gaming (even when character is AFK / sleeping) is valid and fully rewarded.
+/// - Parked at launcher, login screen, or main menu without loading the world is rejected.
+pub fn evaluate_game_engagement(
+    process_name: &str,
+    pid: Option<u32>,
+) -> PlayEngagementState {
+    if let Ok(override_val) = std::env::var("POLE_ENGAGEMENT_STATE_OVERRIDE") {
+        let lower = override_val.trim().to_ascii_lowercase();
+        if lower == "main_menu" || lower == "menu" {
+            return PlayEngagementState::MainMenu;
+        }
+        if lower == "in_world" || lower == "world" {
+            return PlayEngagementState::InWorld;
+        }
+    }
+
+    // 1. Process name matches standalone launcher/bootstrap wrapper
+    if is_launcher_process_name(process_name) {
+        return PlayEngagementState::MainMenu;
+    }
+
+    // 2. Foreground window title detection
+    if let Some(title) = detect_foreground_window_title() {
+        if is_main_menu_or_launcher_title(&title) {
+            return PlayEngagementState::MainMenu;
+        }
+    }
+
+    // 3. Low working-set threshold check for 3D PC games
+    #[cfg(windows)]
+    if let Some(pid_val) = pid {
+        let working_set = detect_process_working_set_bytes(pid_val);
+        // Modern 3D PC games (cs2, elden ring, etc.) occupy multi-GB when world assets load;
+        // Under 120MB strongly indicates initial launcher or title stub.
+        if working_set > 0 && working_set < 120 * 1024 * 1024 {
+            if let Some(title) = detect_foreground_window_title() {
+                let lower_proc = normalize_process_name(process_name);
+                if title.to_ascii_lowercase().contains(&lower_proc)
+                    && is_main_menu_or_launcher_title(&title)
+                {
+                    return PlayEngagementState::MainMenu;
+                }
+            }
+        }
+    }
+
+    // Default to InWorld: legitimate players AFK in-world are fully counted
+    PlayEngagementState::InWorld
+}
+
 /// Detects which configured target process names are currently running on the system.
 /// Uses native process snapshotting (< 1ms, zero child processes).
 pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
@@ -435,5 +660,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_main_menu_and_launcher_detection() {
+        assert!(is_main_menu_or_launcher_title("Counter-Strike 2 - Main Menu"));
+        assert!(is_main_menu_or_launcher_title("Elden Ring - Title Screen"));
+        assert!(is_main_menu_or_launcher_title("Game Launcher v1.2"));
+        assert!(is_main_menu_or_launcher_title("Please Login to Continue"));
+        assert!(is_main_menu_or_launcher_title("Press Start - Palworld"));
+        assert!(!is_main_menu_or_launcher_title("Counter-Strike 2"));
+        assert!(!is_main_menu_or_launcher_title("Playing Casual on Dust II"));
+        assert!(!is_main_menu_or_launcher_title("Exploring Limgrave"));
+
+        assert!(is_launcher_process_name("masseffectlauncher.exe"));
+        assert!(is_launcher_process_name("EpicGamesLauncher.exe"));
+        assert!(is_launcher_process_name("steam_updater.exe"));
+        assert!(!is_launcher_process_name("cs2.exe"));
+        assert!(!is_launcher_process_name("eldenring.exe"));
+    }
+
+    #[test]
+    fn test_evaluate_game_engagement_state() {
+        // Launcher process is evaluated as MainMenu
+        assert_eq!(
+            evaluate_game_engagement("masseffectlauncher.exe", None),
+            PlayEngagementState::MainMenu
+        );
+
+        // Normal game process with no menu title evaluates as InWorld (even if AFK)
+        assert_eq!(
+            evaluate_game_engagement("cs2.exe", None),
+            PlayEngagementState::InWorld
+        );
+
+        // Environment override works for integration/unit test isolation
+        std::env::set_var("POLE_ENGAGEMENT_STATE_OVERRIDE", "main_menu");
+        assert_eq!(
+            evaluate_game_engagement("cs2.exe", None),
+            PlayEngagementState::MainMenu
+        );
+        std::env::set_var("POLE_ENGAGEMENT_STATE_OVERRIDE", "in_world");
+        assert_eq!(
+            evaluate_game_engagement("masseffectlauncher.exe", None),
+            PlayEngagementState::InWorld
+        );
+        std::env::remove_var("POLE_ENGAGEMENT_STATE_OVERRIDE");
     }
 }

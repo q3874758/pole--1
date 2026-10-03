@@ -74,6 +74,10 @@ func (m *MsgSubmitRewardRecords) GetSigners() []sdk.AccAddress {
 	return mustAccSigners(m.Proposer)
 }
 
+func (m *MsgActivityBurn) GetSigners() []sdk.AccAddress {
+	return mustAccSigners(m.Sender)
+}
+
 func mustAccSigners(bech32 string) []sdk.AccAddress {
 	addr, err := sdk.AccAddressFromBech32(bech32)
 	if err != nil {

@@ -3277,11 +3277,20 @@ fn socket_topic_label(topic: crate::P2pTopic) -> &'static str {
         crate::P2pTopic::Batches => "batches",
         crate::P2pTopic::Receipts => "receipts",
         crate::P2pTopic::Challenges => "challenges",
+        crate::P2pTopic::PlaySessions => "playsessions",
+        crate::P2pTopic::Attestations => "attestations",
     }
 }
 
 fn default_socket_topic_labels() -> Vec<&'static str> {
-    vec!["observations", "batches", "receipts", "challenges"]
+    vec![
+        "observations",
+        "batches",
+        "receipts",
+        "challenges",
+        "playsessions",
+        "attestations",
+    ]
 }
 
 fn start_background_watch(
