@@ -1199,7 +1199,8 @@ fn load_witness_credits(config: &NodeConfig, epoch_id: EpochId) -> BTreeMap<Stri
         for att in crate::mutual_proof::load_witness_attestations(config) {
             for session in crate::mutual_proof::load_play_sessions(config) {
                 if session.session_id == att.session_id && session.epoch_id == epoch_id {
-                    if let Ok(bech32) = crate::mutual_proof::address_to_bech32(&att.witness_address) {
+                    if let Ok(bech32) = crate::mutual_proof::address_to_bech32(&att.witness_address)
+                    {
                         *credits.entry(bech32).or_default() += 1;
                     }
                 }
@@ -2096,7 +2097,10 @@ mod tests {
             .expect("must have a record with verify_reward > 0");
         assert_eq!(witness_rec.reward.recipient_address, witness_bech32);
         assert!(witness_rec.reward.verify_reward > 0);
-        assert_eq!(witness_rec.reward.net_reward, witness_rec.reward.verify_reward);
+        assert_eq!(
+            witness_rec.reward.net_reward,
+            witness_rec.reward.verify_reward
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

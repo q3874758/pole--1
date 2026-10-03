@@ -4166,13 +4166,19 @@ mod tests {
         network
             .bootstrap_peer(
                 node_a,
-                &[crate::p2p::P2pTopic::PlaySessions, crate::p2p::P2pTopic::Attestations],
+                &[
+                    crate::p2p::P2pTopic::PlaySessions,
+                    crate::p2p::P2pTopic::Attestations,
+                ],
             )
             .unwrap();
         network
             .bootstrap_peer(
                 node_b,
-                &[crate::p2p::P2pTopic::PlaySessions, crate::p2p::P2pTopic::Attestations],
+                &[
+                    crate::p2p::P2pTopic::PlaySessions,
+                    crate::p2p::P2pTopic::Attestations,
+                ],
             )
             .unwrap();
 
@@ -4211,8 +4217,7 @@ mod tests {
         assert_eq!(saved_sessions[0].session_id, session.session_id);
 
         // Assert attestation was generated and saved on Node B
-        let saved_attestations =
-            crate::mutual_proof::load_witness_attestations(&witness_config);
+        let saved_attestations = crate::mutual_proof::load_witness_attestations(&witness_config);
         assert_eq!(saved_attestations.len(), 1);
         assert_eq!(saved_attestations[0].session_id, session.session_id);
         assert_eq!(saved_attestations[0].witness_address, witness_addr);

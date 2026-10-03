@@ -1722,7 +1722,7 @@ mod tests {
         );
         assert_eq!(any.type_url, "/pole.chain.pole.v1.MsgActivityBurn");
         assert_eq!(any.value[0], 0x0A); // field 1 string
-        // Also test MessageEncoder trait
+                                        // Also test MessageEncoder trait
         let msg = MsgActivityBurn {
             sender: "cosmos1sender",
             amount: 500_000,

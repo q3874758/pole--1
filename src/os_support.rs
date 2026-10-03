@@ -10,8 +10,8 @@
 
 #![allow(unsafe_code)]
 
-use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[cfg(windows)]
 mod win32 {
@@ -322,10 +322,7 @@ pub fn detect_foreground_window_title() -> Option<String> {
             ));
         let get_window_text_w: Option<
             unsafe extern "system" fn(*mut win32::c_void, *mut u16, i32) -> i32,
-        > = std::mem::transmute(win32::GetProcAddress(
-            user32,
-            b"GetWindowTextW\0".as_ptr(),
-        ));
+        > = std::mem::transmute(win32::GetProcAddress(user32, b"GetWindowTextW\0".as_ptr()));
 
         let (Some(get_fg), Some(get_text)) = (get_foreground_window, get_window_text_w) else {
             return None;
@@ -410,18 +407,13 @@ pub fn detect_process_working_set_bytes(pid: u32) -> u64 {
 }
 
 /// Represents the evaluated game engagement state of a player node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PlayEngagementState {
     /// Process is in launcher, login dialog, or main menu / title screen (not counted)
     MainMenu,
     /// Process has loaded game world / session (valid play, active or AFK in-world)
+    #[default]
     InWorld,
-}
-
-impl Default for PlayEngagementState {
-    fn default() -> Self {
-        Self::InWorld
-    }
 }
 
 /// Checks whether a window title indicates a launcher, updater, or main menu screen.
@@ -461,10 +453,7 @@ pub fn is_launcher_process_name(process_name: &str) -> bool {
 /// Rules:
 /// - In-world gaming (even when character is AFK / sleeping) is valid and fully rewarded.
 /// - Parked at launcher, login screen, or main menu without loading the world is rejected.
-pub fn evaluate_game_engagement(
-    process_name: &str,
-    pid: Option<u32>,
-) -> PlayEngagementState {
+pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEngagementState {
     if let Ok(override_val) = std::env::var("POLE_ENGAGEMENT_STATE_OVERRIDE") {
         let lower = override_val.trim().to_ascii_lowercase();
         if lower == "main_menu" || lower == "menu" {
@@ -664,7 +653,9 @@ mod tests {
 
     #[test]
     fn test_main_menu_and_launcher_detection() {
-        assert!(is_main_menu_or_launcher_title("Counter-Strike 2 - Main Menu"));
+        assert!(is_main_menu_or_launcher_title(
+            "Counter-Strike 2 - Main Menu"
+        ));
         assert!(is_main_menu_or_launcher_title("Elden Ring - Title Screen"));
         assert!(is_main_menu_or_launcher_title("Game Launcher v1.2"));
         assert!(is_main_menu_or_launcher_title("Please Login to Continue"));
