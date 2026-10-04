@@ -79,6 +79,10 @@ function initElements() {
   els.btnSvcCheck = document.getElementById("btn-svc-check");
   els.infoAppVersion = document.getElementById("info-app-version");
   els.infoUpdateStatus = document.getElementById("info-update-status");
+  els.gitSyncBadge = document.getElementById("git-sync-badge");
+  els.gitCommitInfo = document.getElementById("git-commit-info");
+  els.chkAutoSync = document.getElementById("chk-auto-sync");
+  els.btnGitSync = document.getElementById("btn-git-sync");
   els.btnClearConsole = document.getElementById("btn-clear-console");
   els.consoleStream = document.getElementById("console-stream");
 }
@@ -343,6 +347,26 @@ function renderDashboard(rawData) {
   }
 }
 
+function renderGitStatus(git) {
+  if (!git) return;
+  state.git = git;
+  if (els.gitCommitInfo) {
+    els.gitCommitInfo.textContent = `${git.branch} (${git.current_commit})`;
+  }
+  if (els.infoUpdateStatus) {
+    els.infoUpdateStatus.textContent = git.message || (git.synced ? "已是最新代码" : "发现远程新提交");
+  }
+  if (els.gitSyncBadge) {
+    if (git.synced) {
+      els.gitSyncBadge.textContent = git.is_git_repo ? "Git 已同步" : "最新版";
+      els.gitSyncBadge.className = "badge badge-success";
+    } else {
+      els.gitSyncBadge.textContent = "发现新提交";
+      els.gitSyncBadge.className = "badge badge-warning";
+    }
+  }
+}
+
 function renderBlockchain(rawData) {
   if (!rawData) return;
   const bc = rawData.blockchain || rawData;
@@ -383,12 +407,13 @@ async function refreshAll() {
   }
 
   try {
-    const [gamingData, dashData, bcData, storageData, logsData] = await Promise.all([
+    const [gamingData, dashData, bcData, storageData, logsData, gitData] = await Promise.all([
       apiGet("/api/gaming"),
       apiGet("/api/dashboard"),
       apiGet("/api/blockchain"),
       apiGet("/api/storage"),
       apiGet("/api/logs"),
+      apiGet("/api/git/status"),
     ]);
 
     if (gamingData) renderGaming(gamingData);
@@ -398,6 +423,7 @@ async function refreshAll() {
       renderDashboard({ ...dashData, storage: { ...dashData.storage, ...storageData } });
     }
     if (logsData) renderLogs(logsData);
+    if (gitData) renderGitStatus(gitData);
   } catch (err) {
     console.error("refreshAll error:", err);
   } finally {
@@ -579,6 +605,35 @@ function setupEvents() {
     });
   }
 
+  // Git Sync button handler
+  if (els.btnGitSync) {
+    els.btnGitSync.addEventListener("click", async () => {
+      try {
+        els.btnGitSync.disabled = true;
+        els.btnGitSync.textContent = "🔄 正在同步 GitHub 仓库...";
+        showToast("正在与 GitHub 仓库同步...");
+        logToConsole("正在与 GitHub 远程仓库同步代码...");
+
+        const res = await apiPost("/api/git/sync");
+        if (res && res.ok) {
+          showToast(res.message || "✅ GitHub 仓库同步完成！");
+          logToConsole(`[Git 同步] ${res.message}`);
+        } else {
+          const errMsg = res ? res.message : "同步请求失败";
+          showToast(`❌ 同步未完成: ${errMsg}`);
+          logToConsole(`[Git 同步失败] ${errMsg}`);
+        }
+        await refreshAll();
+      } catch (err) {
+        showToast(`❌ 同步异常: ${err.message}`);
+        logToConsole(`[Git 同步异常] ${err.message}`);
+      } finally {
+        els.btnGitSync.disabled = false;
+        els.btnGitSync.textContent = "🔄 立即与 GitHub 仓库同步";
+      }
+    });
+  }
+
   // Clear Console
   if (els.btnClearConsole && els.consoleStream) {
     els.btnClearConsole.addEventListener("click", () => {
@@ -586,6 +641,32 @@ function setupEvents() {
       showToast("控制台已清空");
     });
   }
+}
+
+// Setup Auto-Refresh
+function setupAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+  state.autoRefreshTimer = setInterval(refreshAll, 5000);
+
+  // Background Git auto-sync check every 5 minutes
+  if (state.autoSyncTimer) clearInterval(state.autoSyncTimer);
+  state.autoSyncTimer = setInterval(async () => {
+    if (els.chkAutoSync && els.chkAutoSync.checked) {
+      const git = await apiGet("/api/git/status");
+      if (git && !git.synced && git.update_available) {
+        logToConsole(`[GitHub 自动同步] 检测到远程新提交: ${git.remote_commit}，正在拉取同步...`);
+        const res = await apiPost("/api/git/sync");
+        if (res && res.ok) {
+          showToast("🎉 已自动与 GitHub 仓库同步最新代码！");
+          logToConsole(`[GitHub 自动同步] ${res.message}`);
+          refreshAll();
+        }
+      }
+    }
+  }, 300000);
 }
 
 // Bootstrap

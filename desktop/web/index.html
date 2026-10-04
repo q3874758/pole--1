@@ -369,13 +369,24 @@
 
             <div class="card-panel">
               <div class="panel-header">
-                <h3>软件版本与更新通道</h3>
+                <h3>软件版本与 Git 仓库同步</h3>
+                <span id="git-sync-badge" class="badge badge-success">已连接</span>
               </div>
               <dl class="data-table">
                 <div><dt>客户端版本</dt><dd id="info-app-version">v0.1.3 (Windows x64)</dd></div>
-                <div><dt>更新发布通道</dt><dd>GitHub Releases Stable</dd></div>
-                <div><dt>热更新状态</dt><dd id="info-update-status">已是最新版本</dd></div>
+                <div><dt>远程仓库</dt><dd><a href="https://github.com/q3874758/pole--1" target="_blank" rel="noreferrer" style="color:var(--accent-cyan);text-decoration:underline;">q3874758/pole--1</a></dd></div>
+                <div><dt>分支 / 提交</dt><dd id="git-commit-info">main (b01e970)</dd></div>
+                <div><dt>同步状态</dt><dd id="info-update-status">已是最新代码</dd></div>
               </dl>
+              <div class="field-group margin-top-sm" style="display:flex;align-items:center;gap:8px;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-secondary);">
+                  <input type="checkbox" id="chk-auto-sync" checked style="accent-color:var(--accent-cyan);cursor:pointer;" />
+                  开启后台定时自动同步 (每 10 分钟自动检查并拉取最新代码)
+                </label>
+              </div>
+              <div class="btn-group-actions margin-top-sm">
+                <button id="btn-git-sync" class="btn-action btn-green" type="button">🔄 立即与 GitHub 仓库同步</button>
+              </div>
             </div>
           </div>
 

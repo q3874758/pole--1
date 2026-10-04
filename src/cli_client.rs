@@ -115,6 +115,8 @@ pub const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client submit-batch [config-path] [epoch-id] [chain-id]",
     "  pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks] [chain-id]",
     "  pole-client export-tx [config-path] [type] [epoch-id] [current-height] [challenge-window-blocks]",
+    "  pole-client git-status [config-path]",
+    "  pole-client git-sync [config-path]",
 ];
 pub const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("init", init_cmd),
@@ -208,6 +210,8 @@ pub const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("submit-batch", submit_batch_cmd),
     ("submit-epoch", submit_epoch_cmd),
     ("export-tx", export_tx_cmd),
+    ("git-status", git_status_cmd),
+    ("git-sync", git_sync_cmd),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3854,6 +3858,36 @@ fn print_next_step(subcommand: &str, config_path: &Path) {
         "next_step={}",
         command_hint(subcommand, config_path.to_string_lossy().as_ref())
     );
+}
+
+fn git_status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = args.get(2).map(PathBuf::from);
+    let status = crate::git_sync::get_git_status(config_path.as_deref());
+    println!("is_git_repo={}", status.is_git_repo);
+    println!("repo_url={}", status.repo_url);
+    println!("branch={}", status.branch);
+    println!("current_commit={}", status.current_commit);
+    if let Some(ref rc) = status.remote_commit {
+        println!("remote_commit={rc}");
+    }
+    println!("synced={}", status.synced);
+    println!("update_available={}", status.update_available);
+    println!("message={}", status.message);
+    Ok(())
+}
+
+fn git_sync_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = args.get(2).map(PathBuf::from);
+    println!("PoLE: 正在与 GitHub 远程仓库同步...");
+    let result = crate::git_sync::sync_git(config_path.as_deref());
+    println!("ok={}", result.ok);
+    println!("updated={}", result.updated);
+    println!("current_commit={}", result.current_commit);
+    println!("message={}", result.message);
+    if !result.ok {
+        return Err(result.message.into());
+    }
+    Ok(())
 }
 
 pub fn print_usage() {

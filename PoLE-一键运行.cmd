@@ -12,6 +12,9 @@ echo ===================================================
 
 cd /d "%~dp0"
 
+if exist ".git" (
+    where git >nul 2>nul && git pull --ff-only origin main >nul 2>nul
+)
 if exist "target\release\pole.exe" (
     start "" "target\release\pole.exe"
 ) else if exist "target\debug\pole.exe" (

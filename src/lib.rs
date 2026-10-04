@@ -16,6 +16,7 @@ pub mod control_api_types;
 pub mod cosmos;
 pub mod executor;
 pub mod genesis_builder;
+pub mod git_sync;
 mod governance_runtime;
 pub mod json_file;
 pub mod mutual_proof;

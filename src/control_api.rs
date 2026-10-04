@@ -1184,6 +1184,14 @@ pub fn handle_connection(
             )?)?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
+        ("GET", "/api/git/status") => {
+            let body = serde_json::to_string(&crate::git_sync::get_git_status(Some(config_path.as_ref())))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("POST", "/api/git/sync") => {
+            let body = serde_json::to_string(&crate::git_sync::sync_git(Some(config_path.as_ref())))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
         ("GET", "/api/config") => {
             let body = serde_json::to_string(&collect_config(config_path)?)?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
