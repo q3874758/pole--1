@@ -5,19 +5,17 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      skip_signing:
-        description: "Skip code signing (for testing)"
-        required: false
-        default: "false"
-        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
   VERSION: ${{ github.ref_name }}
 
+permissions:
+  contents: write
+
 jobs:
-  release-windows:
+  release:
+    name: Release (Windows x64)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,194 +26,39 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --manifest-path Cargo.toml
 
-      - name: Create portable zip
+      - name: Generate SBOMs
         run: |
           New-Item -ItemType Directory -Force -Path dist/packages | Out-Null
+          .\target\release\pole-sbom.exe --manifest-path Cargo.toml --format cyclonedx --out dist/packages/sbom.cyclonedx.json
+          .\target\release\pole-sbom.exe --manifest-path Cargo.toml --format spdx --out dist/packages/sbom.spdx.json
+
+      - name: Package portable zip
+        run: |
           Compress-Archive -Path target/release/pole.exe,target/release/pole-client.exe,target/release/pole-node.exe,target/release/pole-genesis.exe,target/release/pole-sbom.exe,"PoLE-一键运行.cmd","PoLE-停止运行.cmd" -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums
         run: |
           cd dist/packages
-          Get-ChildItem *.exe | ForEach-Object { certutil -hashfile $_.FullName SHA256 | Select-String -Pattern "^[a-f0-9]{64}" > "$($_.BaseName).sha256" }
           Get-ChildItem *.zip | ForEach-Object { certutil -hashfile $_.FullName SHA256 | Select-String -Pattern "^[a-f0-9]{64}" > "$($_.BaseName).sha256" }
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: |
-            dist/packages/*.zip
-            dist/packages/*.sha256
-
-  release-github:
-    needs: [release-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      # Required for `cosign sign-blob` keyless signing
-      # (OIDC token from GitHub Actions).
-      id-token: write
-      # Required for `cosign sign-blob` to write the signing
-      # certificate back into the GitHub Actions cache (used to
-      # verify against Rekor).
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Stage Windows release artifacts
-        run: |
-          mkdir -p dist/release
-          cp artifacts/windows-artifacts/PoLE-${VERSION}-x64-portable.zip dist/release/
-          cp artifacts/windows-artifacts/*.sha256 dist/release/
-
-      - name: Build pole-sbom
-        run: cargo build --release --bin pole-sbom
-
-      - name: Emit CycloneDX SBOM
-        run: |
-          ./target/release/pole-sbom \
-            --manifest-path Cargo.toml \
-            --format cyclonedx \
-            --out dist/release/sbom.cyclonedx.json
-
-      - name: Emit SPDX SBOM
-        run: |
-          ./target/release/pole-sbom \
-            --manifest-path Cargo.toml \
-            --format spdx \
-            --out dist/release/sbom.spdx.json
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign SBOMs with cosign (keyless OIDC)
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          for sbom in dist/release/sbom.cyclonedx.json dist/release/sbom.spdx.json; do
-            echo "==> Signing $sbom"
-            cosign sign-blob \
-              --output-signature "${sbom}.sig" \
-              --output-certificate "${sbom}.pem" \
-              --yes \
-              "$sbom"
-          done
-
-      - name: Verify signatures
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          for sbom in dist/release/sbom.cyclonedx.json dist/release/sbom.spdx.json; do
-            echo "==> Verifying $sbom"
-            cosign verify-blob \
-              --signature "${sbom}.sig" \
-              --certificate "${sbom}.pem" \
-              --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
-              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-              "$sbom"
-          done
-
-      # ---- stable.json (release manifest) cosign keyless signing ----
-      # V1 hard card #2: the `signature = "dev-signature"` placeholder in
-      # dist/release-manifests/stable.json must be replaced by a real
-      # cosign keyless signature at release time. We stage the manifest
-      # under dist/release/, sign it, and let the GH Release glob pick
-      # it up alongside its .sig / .cert sidecars (see `files:` below).
-      - name: Stage release manifest
-        run: |
-          mkdir -p dist/release
-          cp dist/release-manifests/stable.json dist/release/stable.json
-          # The committed manifest carries the source-tree version (0.1.0);
-          # stamp the actual release version (tag without leading "v") so the
-          # update channel's version comparison is correct for this tag.
-          MANIFEST_VERSION="${VERSION#v}"
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$MANIFEST_VERSION\"/" dist/release/stable.json
-          echo "staged stable.json version=$MANIFEST_VERSION"
-          grep '"version"' dist/release/stable.json
-
-      - name: Sign stable.json (cosign keyless OIDC + Rekor)
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          cosign sign-blob --yes \
-            --output-signature dist/release/stable.json.sig \
-            --output-certificate dist/release/stable.json.cert \
-            dist/release/stable.json
-
-      - name: Verify stable.json signature
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          cosign verify-blob \
-            --signature dist/release/stable.json.sig \
-            --certificate dist/release/stable.json.cert \
-            --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
-            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-            dist/release/stable.json
-
-      - name: Generate release notes
-        # Unquoted heredoc so ${VERSION} expands; backticks are escaped
-        # (\`) so bash does not run command substitution on them.
-        run: |
-          cat > dist/release/RELEASE_NOTES.md << EOF
-          # PoLE ${VERSION} Release Notes
-
-          ## Downloads
-          - **Windows Portable**: \`PoLE-${VERSION}-x64-portable.zip\` - No installation required
-
-          ## Software Bill of Materials (SBOM)
-          - \`sbom.cyclonedx.json\` — CycloneDX 1.5, signed with [cosign](https://docs.sigstore.dev/)
-          - \`sbom.spdx.json\` — SPDX 2.3, signed with cosign
-          - Each \`.sig\` / \`.pem\` pair proves the SBOM was produced by
-            this repository's CI at tag \`${VERSION}\`.
-
-          ## Verifying SBOM signatures
-          \`\`\`bash
-          # Requires cosign >= 2.0
-          cosign verify-blob \
-            --signature sbom.cyclonedx.json.sig \
-            --certificate sbom.cyclonedx.json.pem \
-            --certificate-identity-regexp 'https://github.com/q3874758/pole--1' \
-            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-            sbom.cyclonedx.json
-          \`\`\`
-
-          ## What's New
-          - Full PoLE protocol implementation with hour-based reward blocks
-          - P2P network with libp2p (QUIC, TCP, mDNS, Kademlia)
-          - Local Web control console (browser dashboard via control API)
-          - Windows Service integration and background EcoQoS optimization
-          - Automatic update with rollback support
-          - Challenge and dispute resolution system
-
-          ## Windows Installation
-          1. Download \`PoLE-${VERSION}-x64-portable.zip\`
-          2. Extract to any folder
-          3. Double-click \`PoLE-一键运行.cmd\` (or \`pole.exe\`) to start with zero configuration
-          4. Double-click \`PoLE-停止运行.cmd\` to cleanly stop background services
-
-          ## Verification
-          Checksums are provided in \`.sha256\` files alongside each artifact.
-          SBOM signatures are provided as \`.sig\` / \`.pem\` pairs.
-          EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           prerelease: false
+          name: PoLE ${{ github.ref_name }} (Windows 一键极速版)
           generate_release_notes: true
           files: |
-            dist/release/*
-          body_path: dist/release/RELEASE_NOTES.md
+            dist/packages/*
+          body: |
+            ## PoLE ${{ github.ref_name }} Windows 一键极速运行版
+
+            首个面向 PC 游戏生态的去中心化真实游玩证明与双边激励网络。
+
+            ### 🚀 普通玩家极速下载与运行：
+            1. **下载附件**：在下方 **Assets** 列表中下载 `PoLE-${{ github.ref_name }}-x64-portable.zip`
+            2. **解压运行**：解压到任意文件夹（例如桌面），**双击 `PoLE-一键运行.cmd`**（或直接双击 `pole.exe`）
+            3. **中文控制台**：系统将自动在后台极低能耗（<15MB 内存，<0.1% CPU）静默运行，并自动打开中文网页仪表盘：http://127.0.0.1:8787/
+            4. **安全退出**：双击 `PoLE-停止运行.cmd` 即可完全退出。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
