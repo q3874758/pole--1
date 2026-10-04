@@ -1162,12 +1162,19 @@ pub fn serve(
     }
     let mut served = 0usize;
     for stream in listener.incoming() {
-        match handle_connection(stream?, &config_path) {
-            Ok(()) => {}
+        let stream = match stream {
+            Ok(s) => s,
             Err(e) => {
+                eprintln!("[control-api] accept error: {e}");
+                continue;
+            }
+        };
+        let config_path = config_path.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = handle_connection(stream, &config_path) {
                 eprintln!("[control-api] connection error: {e}");
             }
-        }
+        });
         served += 1;
         if let Some(limit) = max_requests {
             if served >= limit {

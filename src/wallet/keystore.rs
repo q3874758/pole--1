@@ -89,6 +89,61 @@ pub fn resolve_identity_password(allow_prompt: bool) -> Result<String> {
     )))
 }
 
+/// Ensures that a valid identity password is available in the environment.
+///
+/// If `POLE_IDENTITY_PASSWORD` is already set, does nothing.
+/// Otherwise, reads or generates a secure, persistent 32-byte hex token in
+/// `%LOCALAPPDATA%\PoLE\.identity_token` and sets `POLE_IDENTITY_PASSWORD`
+/// so ordinary desktop users can run seamlessly without password prompts.
+pub fn ensure_default_identity_password() -> Option<String> {
+    if let Some(existing) = identity_password_from_env() {
+        return Some(existing);
+    }
+    let token = resolve_or_create_local_identity_token()?;
+    std::env::set_var(IDENTITY_PASSWORD_ENV, &token);
+    Some(token)
+}
+
+fn resolve_or_create_local_identity_token() -> Option<String> {
+    let check_dir = |p: std::path::PathBuf| -> Option<std::path::PathBuf> {
+        let probe = p.join(".probe");
+        if fs::create_dir_all(&p).is_ok() && fs::write(&probe, b"").is_ok() {
+            let _ = fs::remove_file(probe);
+            Some(p)
+        } else {
+            None
+        }
+    };
+
+    let base_dir = std::env::var_os("LOCALAPPDATA")
+        .and_then(|v| check_dir(std::path::PathBuf::from(v).join("PoLE")))
+        .or_else(|| {
+            std::env::var_os("APPDATA")
+                .and_then(|v| check_dir(std::path::PathBuf::from(v).join("PoLE")))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from(".pole"));
+
+    let _ = fs::create_dir_all(&base_dir);
+    let token_path = base_dir.join(".identity_token");
+
+    if let Ok(content) = fs::read_to_string(&token_path) {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    let token = hex::encode(bytes);
+
+    if fs::write(&token_path, &token).is_ok() {
+        Some(token)
+    } else {
+        None
+    }
+}
+
 impl EncryptedKeystore {
     pub fn new(keypair: KeyPair, comment: Option<String>) -> Self {
         Self {

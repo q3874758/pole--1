@@ -293,7 +293,7 @@ fn process_exists_in_install_dir(install_dir: &Path, normalized_process_name: &s
     false
 }
 
-fn discover_steam_library_roots() -> Vec<PathBuf> {
+pub fn discover_steam_library_roots() -> Vec<PathBuf> {
     let mut roots = BTreeSet::new();
 
     if let Ok(override_value) = env::var("POLE_STEAM_ROOTS") {

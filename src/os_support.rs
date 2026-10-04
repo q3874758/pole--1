@@ -448,7 +448,7 @@ pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
     match_configured_process_names(&configured, &running)
 }
 
-fn list_running_process_names() -> Vec<String> {
+pub fn list_running_process_names() -> Vec<String> {
     let mut names = Vec::new();
     unsafe {
         let snapshot = win32::CreateToolhelp32Snapshot(win32::TH32CS_SNAPPROCESS, 0);

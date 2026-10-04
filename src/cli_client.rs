@@ -57,6 +57,7 @@ const DEFAULT_CONTROL_API_BIND_ADDR: &str = "127.0.0.1:8787";
 pub const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client init [config-path] [minimal|player|validator]",
     "  pole-client player-start [config-path]",
+    "  pole-client player-stop [config-path]",
     "  pole-client player-autostart [config-path]",
     "  pole-client status [config-path]",
     "  pole-client doctor [config-path]",
@@ -118,6 +119,7 @@ pub const CLIENT_USAGE_COMMANDS: &[&str] = &[
 pub const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("init", init_cmd),
     ("player-start", player_start_cmd),
+    ("player-stop", player_stop_cmd),
     ("player-autostart", player_autostart_cmd),
     ("status", status_cmd),
     ("doctor", doctor_cmd),
@@ -361,6 +363,8 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: pole-client player-start [config-path]".into());
     }
 
+    let _ = crate::ensure_default_identity_password();
+
     let config_path = args
         .get(2)
         .map(PathBuf::from)
@@ -373,11 +377,40 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .filter(|name| should_capture_foreground_process(name))
         .map(canonical_process_name);
-    if let Some(process_name) = &captured_process {
-        let merged_processes = merge_process_names(
-            &config.runtime.game_process_names,
-            std::slice::from_ref(process_name),
-        );
+
+    let mut detected_games = Vec::new();
+    if let Some(ref proc) = captured_process {
+        detected_games.push(proc.clone());
+    }
+
+    // Auto-discover running games from active system processes
+    let running_processes = crate::os_support::list_running_process_names();
+    let steam_roots = crate::steam_game_directory::discover_steam_library_roots();
+    for proc in &running_processes {
+        if !should_capture_foreground_process(proc) {
+            continue;
+        }
+        let canonical = canonical_process_name(proc);
+        if canonical.is_empty()
+            || detected_games
+                .iter()
+                .any(|g| g.eq_ignore_ascii_case(&canonical))
+        {
+            continue;
+        }
+        if crate::steam_game_directory::infer_reward_game_mapping_from_roots(
+            &canonical,
+            &steam_roots,
+        )
+        .is_some()
+        {
+            detected_games.push(canonical);
+        }
+    }
+
+    if !detected_games.is_empty() {
+        let merged_processes =
+            merge_process_names(&config.runtime.game_process_names, &detected_games);
         save_game_process_names(&mut config, &config_path, merged_processes)?;
     }
 
@@ -394,13 +427,32 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         start_background_watch(&config_path, background_ticks, background_mode)?
     };
 
+    let dashboard_url = format!("http://{DEFAULT_CONTROL_API_BIND_ADDR}/");
+    let control_api_outcome =
+        ensure_control_api_server(&config_path, &config, DEFAULT_CONTROL_API_BIND_ADDR)?;
+    if env::var("POLE_CLIENT_SKIP_BROWSER_OPEN").ok().as_deref() != Some("1") {
+        let _ = open_dashboard_url(&dashboard_url);
+    }
+
     println!("PoLE player mode started");
     println!("config_path={}", config_path.to_string_lossy());
     println!("data_dir={}", config.runtime.data_dir);
     println!("capabilities={}", format_capabilities(&config));
     println!("foreground_process={foreground_process:?}");
     println!("captured_game_process={captured_process:?}");
+    println!("detected_games={detected_games:?}");
     println!("game_process_names={:?}", config.runtime.game_process_names);
+    println!("dashboard_url={dashboard_url}");
+    match control_api_outcome {
+        ControlApiLaunchOutcome::Started { pid } => {
+            println!("control_api_started=true");
+            println!("control_api_pid={pid}");
+        }
+        ControlApiLaunchOutcome::AlreadyRunning => {
+            println!("control_api_started=false");
+            println!("control_api_already_running=true");
+        }
+    }
     println!("reward_block_secs={}", effective_reward_block_secs(&config));
     println!("player_block_reward={}", config.reward.player_block_reward);
     println!(
@@ -429,10 +481,57 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             println!("autostart_already_registered=true");
             println!("autostart_launcher={}", launcher_path.to_string_lossy());
         }
+        AutostartRegistrationOutcome::Skipped { reason } => {
+            println!("autostart_enabled=false");
+            println!("autostart_skipped={reason}");
+        }
     }
     print_background_start_outcome(daemon_outcome);
     print_next_step("status", &config_path);
 
+    Ok(())
+}
+
+fn player_stop_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() > 3 {
+        return Err("usage: pole-client player-stop [config-path]".into());
+    }
+
+    let config_path = args
+        .get(2)
+        .map(PathBuf::from)
+        .unwrap_or_else(default_player_start_config_path);
+    let config_path = resolve_input_path(&config_path)?;
+    let config = if config_path.exists() {
+        NodeConfig::load_json(&config_path).unwrap_or_default()
+    } else {
+        NodeConfig::default()
+    };
+
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    let daemon_files = DaemonFiles::from_data_dir(&data_dir);
+    let mut stopped_daemon = false;
+    if let Some(pid) = daemon_files.read_pid() {
+        if process_is_running(pid) {
+            stopped_daemon = crate::os_support::kill_process(pid);
+        }
+        daemon_files.clear_stale_state();
+    }
+
+    let control_pid_path = data_dir.join("control-api.pid");
+    let mut stopped_api = false;
+    if let Ok(content) = fs::read_to_string(&control_pid_path) {
+        if let Ok(pid) = content.trim().parse::<u32>() {
+            if process_is_running(pid) {
+                stopped_api = crate::os_support::kill_process(pid);
+            }
+        }
+        let _ = fs::remove_file(&control_pid_path);
+    }
+
+    println!("PoLE player stopped");
+    println!("stopped_daemon={stopped_daemon}");
+    println!("stopped_control_api={stopped_api}");
     Ok(())
 }
 
@@ -466,10 +565,19 @@ fn status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: pole-client status [config-path]".into());
     }
 
+    let default_path = if Path::new(DEFAULT_CONFIG_PATH).exists() {
+        DEFAULT_CONFIG_PATH.to_string()
+    } else if default_player_start_config_path().exists() {
+        default_player_start_config_path()
+            .to_string_lossy()
+            .to_string()
+    } else {
+        DEFAULT_CONFIG_PATH.to_string()
+    };
     let config_path = args
         .get(2)
         .map(String::as_str)
-        .unwrap_or(DEFAULT_CONFIG_PATH);
+        .unwrap_or(&default_path);
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
     let summary = load_status(&config)?;
     let active_game_processes = detect_active_game_processes(&config);
@@ -1745,7 +1853,9 @@ fn control_api_serve_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Erro
         .ok()
         .map(|value| value.parse::<usize>())
         .transpose()?;
-    serve_control_api(listener, config_path, max_requests)
+    let res = serve_control_api(listener, config_path, max_requests);
+    eprintln!("[control-api] serve_control_api ended with {res:?}");
+    res
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2968,6 +3078,7 @@ enum BackgroundStartOutcome {
 enum AutostartRegistrationOutcome {
     Registered { launcher_path: PathBuf },
     AlreadyRegistered { launcher_path: PathBuf },
+    Skipped { reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3077,14 +3188,26 @@ impl DaemonFiles {
 }
 
 fn default_player_start_config_path() -> PathBuf {
+    let local = PathBuf::from(DEFAULT_CONFIG_PATH);
+    if local.exists() {
+        return local;
+    }
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        PathBuf::from(local_app_data)
+        let app_data_path = PathBuf::from(local_app_data)
             .join("PoLE")
             .join("player")
-            .join("node.json")
-    } else {
-        PathBuf::from(DEFAULT_CONFIG_PATH)
+            .join("node.json");
+        if let Some(parent) = app_data_path.parent() {
+            if fs::create_dir_all(parent).is_ok() {
+                let probe = parent.join(".probe_write");
+                if fs::write(&probe, b"").is_ok() {
+                    let _ = fs::remove_file(probe);
+                    return app_data_path;
+                }
+            }
+        }
     }
+    local
 }
 
 fn resolve_input_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -3114,26 +3237,72 @@ fn load_or_init_player_config(
     sync_activity_sources(&mut config);
     config.save_json(config_path)?;
 
-    let (_, resolved) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let (_, mut resolved) = NodeConfig::load_json_with_runtime_paths(config_path)?;
     fs::create_dir_all(&resolved.runtime.data_dir)?;
+
+    let data_dir = Path::new(&resolved.runtime.data_dir);
+    let identity_path = data_dir.join("identity.json");
+    let needs_identity = !identity_path.exists()
+        || has_placeholder_node_identity(&resolved)
+        || resolved.identity_keypair().is_err();
+    if needs_identity {
+        let _ = crate::ensure_default_identity_password();
+        let keypair = resolved.identity_keypair().unwrap_or_else(|_| {
+            let kp = generate_identity_keypair();
+            let _ = write_identity_file(data_dir, &kp);
+            kp
+        });
+        resolved.node_id_hex = node_id_hex_from_identity(&keypair);
+        if resolved.reward_address_hex.is_empty()
+            || resolved.reward_address_hex == hex_32([0x11; 32])
+            || resolved.reward_address_hex == hex_32([0x31; 32])
+        {
+            resolved.reward_address_hex = resolved.node_id_hex.clone();
+        }
+        resolved.save_json(config_path)?;
+    }
+
     Ok(resolved)
 }
 
 fn ensure_player_autostart(
     config_path: &Path,
 ) -> Result<AutostartRegistrationOutcome, Box<dyn std::error::Error>> {
-    let startup_dir = player_startup_dir()?;
-    fs::create_dir_all(&startup_dir)?;
+    let startup_dir = match player_startup_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            return Ok(AutostartRegistrationOutcome::Skipped {
+                reason: err.to_string(),
+            })
+        }
+    };
+    if let Err(err) = fs::create_dir_all(&startup_dir) {
+        return Ok(AutostartRegistrationOutcome::Skipped {
+            reason: err.to_string(),
+        });
+    }
 
     let launcher_path = startup_dir.join(player_launcher_filename(config_path));
-    let launcher_contents = render_windows_startup_launcher(&env::current_exe()?, config_path);
+    let current_exe = match env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => {
+            return Ok(AutostartRegistrationOutcome::Skipped {
+                reason: err.to_string(),
+            })
+        }
+    };
+    let launcher_contents = render_windows_startup_launcher(&current_exe, config_path);
 
     if fs::read_to_string(&launcher_path).ok().as_deref() == Some(launcher_contents.as_str()) {
         return Ok(AutostartRegistrationOutcome::AlreadyRegistered { launcher_path });
     }
 
-    fs::write(&launcher_path, launcher_contents)?;
-    Ok(AutostartRegistrationOutcome::Registered { launcher_path })
+    match fs::write(&launcher_path, launcher_contents) {
+        Ok(_) => Ok(AutostartRegistrationOutcome::Registered { launcher_path }),
+        Err(err) => Ok(AutostartRegistrationOutcome::Skipped {
+            reason: err.to_string(),
+        }),
+    }
 }
 
 fn probe_player_autostart(config_path: &Path) -> Option<PathBuf> {
@@ -3324,17 +3493,12 @@ fn ensure_control_api_server(
     bind_addr: &str,
 ) -> Result<ControlApiLaunchOutcome, Box<dyn std::error::Error>> {
     let dashboard_addr = bind_addr.parse()?;
-    if std::net::TcpListener::bind(bind_addr).is_ok() {
+    if probe_control_api_ready(dashboard_addr) {
+        Ok(ControlApiLaunchOutcome::AlreadyRunning)
+    } else {
         let pid = spawn_control_api_server(config_path, config, bind_addr)?;
         wait_for_control_api_ready(dashboard_addr, Duration::from_secs(5))?;
         Ok(ControlApiLaunchOutcome::Started { pid })
-    } else if probe_control_api_ready(dashboard_addr) {
-        Ok(ControlApiLaunchOutcome::AlreadyRunning)
-    } else {
-        Err(
-            format!("bind address {bind_addr} is unavailable and control api is not reachable")
-                .into(),
-        )
     }
 }
 
@@ -3366,7 +3530,12 @@ fn spawn_control_api_server(
     }
 
     let child = command.spawn()?;
-    Ok(child.id())
+    let pid = child.id();
+    let _ = fs::write(
+        Path::new(&config.runtime.data_dir).join("control-api.pid"),
+        pid.to_string(),
+    );
+    Ok(pid)
 }
 
 fn wait_for_control_api_ready(
