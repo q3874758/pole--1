@@ -24,10 +24,4 @@ if exist "target\release\pole.exe" (
     start "" "target\debug\pole.exe"
 )
 
-echo.
-echo [成功] PoLE 已在后台静默运行！
-echo [提示] 网页控制面板 (http://127.0.0.1:8787/) 已自动为您打开。
-echo [提示] 您可以随时正常玩游戏或挂机，PoLE 将自动进行有效游戏验证与记账。
-echo.
-timeout /t 3 >nul
-exit
+exit /b 0

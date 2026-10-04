@@ -10,18 +10,27 @@ use std::path::PathBuf;
 /// `pole-client.exe` / `pole-node.exe` / `pole-genesis.exe` /
 /// `pole-sbom.exe` — all command logic runs inside this single binary.
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let is_background_daemon = args.iter().any(|arg| {
+        arg == "watch"
+            || arg == "watch-p2p-sim"
+            || arg == "watch-p2p-fs"
+            || arg == "watch-p2p-socket"
+            || arg == "control-api-serve"
+    });
+
     #[cfg(windows)]
-    unsafe {
-        extern "system" {
-            fn AttachConsole(dwProcessId: u32) -> i32;
+    if !is_background_daemon {
+        unsafe {
+            extern "system" {
+                fn AttachConsole(dwProcessId: u32) -> i32;
+            }
+            const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+            AttachConsole(ATTACH_PARENT_PROCESS);
         }
-        const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
-        AttachConsole(ATTACH_PARENT_PROCESS);
     }
 
     let _ = pole_protocol_draft::ensure_default_identity_password();
-
-    let args: Vec<String> = env::args().collect();
     let program_path = env::args().next().map(PathBuf::from).unwrap();
     let program_name = program_path
         .file_stem()
