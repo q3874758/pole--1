@@ -430,7 +430,8 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let dashboard_url = format!("http://{DEFAULT_CONTROL_API_BIND_ADDR}/");
     let control_api_outcome =
         ensure_control_api_server(&config_path, &config, DEFAULT_CONTROL_API_BIND_ADDR)?;
-    if env::var("POLE_CLIENT_SKIP_BROWSER_OPEN").ok().as_deref() != Some("1") {
+    // Gamers must never be interrupted: do not pop open browser unless explicitly requested.
+    if env::var("POLE_CLIENT_OPEN_BROWSER").ok().as_deref() == Some("1") {
         let _ = open_dashboard_url(&dashboard_url);
     }
 
