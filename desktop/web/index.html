@@ -2,252 +2,401 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PoLE 控制台</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>PoLE 协议 - 玩家控制台与游戏态势中心</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <!-- 顶部状态通知 Toast -->
+    <div id="toast" class="toast">已复制到剪贴板</div>
+
     <div class="shell">
-      <header class="hero dashboard-hero">
-        <div class="hero-left">
-          <p class="eyebrow">PoLE V1 生产控制台</p>
-          <h1>节点仪表盘</h1>
+      <!-- 顶部 Header 导航栏 -->
+      <header class="app-header">
+        <div class="header-brand">
+          <div class="brand-logo-wrap">
+            <span class="brand-logo-icon">🎮</span>
+            <div class="brand-text">
+              <div class="brand-title-row">
+                <span class="brand-title">PoLE</span>
+                <span class="brand-badge" id="app-version-badge">v0.1.3</span>
+              </div>
+              <span class="brand-subtitle">Proof of Live Engagement · 真实游戏活体证明网络</span>
+            </div>
+          </div>
         </div>
-        <div class="hero-actions">
-          <button id="refresh-all" class="ghost-button" type="button">刷新全部</button>
-          <span id="last-refresh" class="last-refresh">等待首次同步</span>
+
+        <div class="header-status-chips">
+          <div class="status-chip" id="chip-daemon">
+            <span class="pulse-dot active"></span>
+            <span class="chip-text" id="header-service-label">节点运行中</span>
+          </div>
+          <div class="status-chip chip-eco">
+            <span class="chip-icon">🛡️</span>
+            <span class="chip-text">EcoQoS 防掉帧已激活</span>
+          </div>
+        </div>
+
+        <div class="header-controls">
+          <div class="auto-refresh-toggle" title="每 3 秒自动同步最新游玩与收益状态">
+            <label class="switch">
+              <input type="checkbox" id="auto-refresh-cb" checked />
+              <span class="slider round"></span>
+            </label>
+            <span class="toggle-label">自动同步</span>
+          </div>
+          <button id="btn-manual-refresh" class="btn-icon" title="手动立即刷新" type="button">
+            <svg class="icon-refresh" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
         </div>
       </header>
 
-      <main class="dashboard-grid">
-        <!-- 第一行: 服务状态 + 节点健康 -->
-        <section class="panel service-panel">
-          <div class="panel-header">
-            <h2>服务状态</h2>
-            <span id="service-state-pill" class="pill">未知</span>
+      <!-- 双翼核心看板 (Gaming & Mining Hero) -->
+      <section class="hero-bento">
+        <!-- 左翼：游戏感知与活体判定卡片 -->
+        <div class="bento-card game-card">
+          <div class="card-glow-game"></div>
+          <div class="card-header">
+            <div class="card-header-left">
+              <span class="card-icon">🎯</span>
+              <h2>实时游戏感知与判定</h2>
+            </div>
+            <span id="game-engagement-badge" class="badge-status badge-waiting">等待游戏启动</span>
           </div>
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span class="stat-label">运行状态</span>
-              <strong id="service-state" class="status-value">未知</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">进程 PID</span>
-              <strong id="service-pid">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">自动恢复</span>
-              <strong id="service-recoverable">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">过期标记</span>
-              <strong id="service-stale">-</strong>
-            </article>
+
+          <div class="game-radar-body">
+            <div class="game-avatar-box">
+              <span id="game-avatar-icon" class="game-avatar-emoji">🕹️</span>
+            </div>
+            <div class="game-info-col">
+              <div class="game-name-row">
+                <h3 id="current-game-title">未检测到前台游戏</h3>
+                <span id="current-game-pid" class="game-pid-pill">PID: -</span>
+              </div>
+              <p id="game-engagement-desc" class="game-desc-text">
+                PoLE 已在后台毫秒级侦测中。直接启动任意 Steam 游戏，系统将自动识别并开启防作弊心跳记账。
+              </p>
+            </div>
           </div>
-          <div class="service-actions">
-            <button data-service-action="status" type="button">检查</button>
-            <button data-service-action="start" type="button">启动</button>
-            <button data-service-action="stop" type="button">停止</button>
+
+          <div class="game-sub-metrics">
+            <div class="sub-metric-item">
+              <span class="sub-label">活体判定模式</span>
+              <strong id="game-eval-mode" class="sub-val">Win32 内存跃迁 + 窗口过滤</strong>
+            </div>
+            <div class="sub-metric-item">
+              <span class="sub-label">挂机睡觉 (AFK)</span>
+              <strong class="sub-val highlight-green">✅ 完全认可发奖</strong>
+            </div>
+            <div class="sub-metric-item">
+              <span class="sub-label">主菜单卡屏</span>
+              <strong class="sub-val highlight-amber">⏸️ 自动暂停防假玩</strong>
+            </div>
+            <div class="sub-metric-item">
+              <span class="sub-label">物理内存占用</span>
+              <strong id="node-memory-usage" class="sub-val">&lt; 15 MB (超低开销)</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右翼：玩家收益与钱包卡片 -->
+        <div class="bento-card reward-card">
+          <div class="card-glow-reward"></div>
+          <div class="card-header">
+            <div class="card-header-left">
+              <span class="card-icon">💰</span>
+              <h2>玩家挖矿收益中心</h2>
+            </div>
+            <span class="badge-tag">双边激励已开启</span>
+          </div>
+
+          <div class="reward-primary-metric">
+            <div class="reward-title-label">已结算挖矿总收益 (POLE)</div>
+            <div class="reward-amount-row">
+              <span id="total-player-reward" class="reward-number">0.00</span>
+              <span class="reward-token">POLE</span>
+            </div>
+            <div class="reward-rate-hint">
+              <span class="sparkle-icon">✨</span>
+              <span>每小时基础激励速率：</span>
+              <strong id="hourly-reward-rate">1,000 POLE / Block</strong>
+            </div>
+          </div>
+
+          <div class="wallet-bar">
+            <div class="wallet-info">
+              <span class="wallet-label">我的奖励收款地址</span>
+              <div class="wallet-address-row">
+                <span id="player-address-preview" class="wallet-address-text">正在读取账户地址...</span>
+                <button id="btn-copy-address" class="btn-copy" type="button" title="点击复制完整地址">
+                  📋 复制
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="reward-split-banner">
+            <div class="split-col">
+              <span class="split-percent">85%</span>
+              <span class="split-role">🎮 玩家主游玩收益</span>
+            </div>
+            <div class="split-divider"></div>
+            <div class="split-col">
+              <span class="split-percent">15%</span>
+              <span class="split-role">🛡️ P2P 见证节点验证池</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 四大核心指标矩阵 (Metric Grid) -->
+      <section class="metrics-grid">
+        <article class="metric-box">
+          <div class="metric-top">
+            <span class="metric-title">有效游玩心跳</span>
+            <span class="metric-icon">💓</span>
+          </div>
+          <div id="stat-heartbeats-count" class="metric-huge">0</div>
+          <div class="metric-footer">
+            <span class="metric-sub">Play Heartbeats 已签名存储</span>
+          </div>
+        </article>
+
+        <article class="metric-box">
+          <div class="metric-top">
+            <span class="metric-title">已见证游戏会话</span>
+            <span class="metric-icon">📦</span>
+          </div>
+          <div id="stat-sessions-count" class="metric-huge">0</div>
+          <div class="metric-footer">
+            <span class="metric-sub">经邻居交叉见证有效打包</span>
+          </div>
+        </article>
+
+        <article class="metric-box">
+          <div class="metric-top">
+            <span class="metric-title">P2P 见证节点网络</span>
+            <span class="metric-icon">🌐</span>
+          </div>
+          <div id="stat-peers-count" class="metric-huge">0</div>
+          <div class="metric-footer">
+            <span class="metric-sub">对等邻居连接 (背书门限 ≥ 2)</span>
+          </div>
+        </article>
+
+        <article class="metric-box">
+          <div class="metric-top">
+            <span class="metric-title">区块链同步高度</span>
+            <span class="metric-icon">⛓️</span>
+          </div>
+          <div id="stat-block-height" class="metric-huge">-</div>
+          <div class="metric-footer">
+            <span id="stat-chain-status-text" class="metric-sub">本地链服务运行中</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- 功能分区选项卡导航 (Tabs) -->
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="tab-gaming" type="button">
+          <span class="tab-icon">🎮</span> 游戏与心跳明细
+        </button>
+        <button class="tab-btn" data-tab="tab-tokenomics" type="button">
+          <span class="tab-icon">🪙</span> 经济模型与通缩销毁
+        </button>
+        <button class="tab-btn" data-tab="tab-network" type="button">
+          <span class="tab-icon">🌐</span> P2P 见证与存储
+        </button>
+        <button class="tab-btn" data-tab="tab-controls" type="button">
+          <span class="tab-icon">⚙️</span> 节点管理与控制台
+        </button>
+      </nav>
+
+      <!-- 标签页内容区域 -->
+      <main class="tab-content-container">
+        <!-- TAB 1: 游戏与心跳明细 -->
+        <section id="tab-gaming" class="tab-pane active">
+          <div class="pane-grid-2">
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>已配置识别的游戏进程列表</h3>
+                <span class="header-hint">自动匹配 Steam 库目录</span>
+              </div>
+              <ul id="game-process-list" class="badge-list">
+                <li class="badge-item">Genesis.exe</li>
+              </ul>
+              <div class="add-game-row">
+                <input id="input-new-game" type="text" placeholder="输入游戏进程名 (如 cs2.exe)" />
+                <button id="btn-add-game" class="btn-secondary" type="button">添加游戏</button>
+              </div>
+              <p class="muted-note">
+                💡 提示：打开新游戏时，系统通常会自动毫秒级发现并注册。若有特殊自制游戏，可在上方手动添加。
+              </p>
+            </div>
+
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>游戏防打扰保障声明 (Anti-Disturbance)</h3>
+              </div>
+              <div class="gaming-safety-rules">
+                <div class="rule-item">
+                  <span class="rule-icon">🛡️</span>
+                  <div>
+                    <strong>绝对零弹窗、零焦点抢占</strong>
+                    <p>启动和运行全程绝不弹出任何浏览器或黑框，不抢夺鼠标键盘焦点，保障游戏 100% 全屏独占与流畅。</p>
+                  </div>
+                </div>
+                <div class="rule-item">
+                  <span class="rule-icon">⚡</span>
+                  <div>
+                    <strong>Windows EcoQoS 调度机制</strong>
+                    <p>后台进程绑定 Windows `IDLE_PRIORITY_CLASS` 与能效核心，物理内存压制在 15MB 内，绝不导致游戏掉帧。</p>
+                  </div>
+                </div>
+                <div class="rule-item">
+                  <span class="rule-icon">🛌</span>
+                  <div>
+                    <strong>支持挂机睡觉 (AFK)</strong>
+                    <p>只要角色在游戏世界内，无论是在建造挂机还是休息，全额生成见证心跳并正常记账发奖。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section class="panel account-panel">
-          <div class="panel-header">
-            <h2>账户信息</h2>
-          </div>
-          <dl class="details">
-            <div><dt>节点 ID</dt><dd id="node-id" class="mono">-</dd></div>
-            <div><dt>奖励地址</dt><dd id="reward-address" class="mono">-</dd></div>
-            <div><dt>链 ID</dt><dd id="chain-id">-</dd></div>
-            <div><dt>版本</dt><dd id="app-version">-</dd></div>
-          </dl>
-        </section>
+        <!-- TAB 2: 经济模型与通缩销毁 -->
+        <section id="tab-tokenomics" class="tab-pane">
+          <div class="pane-grid-2">
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>PoLE 代币通缩与销毁机制</h3>
+                <span class="badge-tag">强保值通缩飞轮</span>
+              </div>
+              <div class="burn-channels-grid">
+                <div class="burn-card">
+                  <div class="burn-card-title">🔥 应用级活动销毁 (MsgActivityBurn)</div>
+                  <p class="burn-card-desc">电竞赛事门票、公会冲榜赞助、游戏道具发行主动打入通缩黑洞。</p>
+                </div>
+                <div class="burn-card">
+                  <div class="burn-card-title">💸 大额提现税阶梯销毁</div>
+                  <p class="burn-card-desc">提取大额收益时自动扣减销毁，长周期持有者免税保值。</p>
+                </div>
+                <div class="burn-card">
+                  <div class="burn-card-title">⚖️ 交易手续费自动销毁</div>
+                  <p class="burn-card-desc">链上转账与验证交互产生的 gas 手续费直接燃烧销毁。</p>
+                </div>
+                <div class="burn-card">
+                  <div class="burn-card-title">🛑 虚假作弊全额罚没销毁</div>
+                  <p class="burn-card-desc">任何企图伪造心跳或篡改数据的节点，质押金将被链上仲裁 100% 销毁。</p>
+                </div>
+              </div>
+            </div>
 
-        <!-- 区块链状态 -->
-        <section class="panel blockchain-panel">
-          <div class="panel-header">
-            <h2>区块链状态</h2>
-            <span id="chain-status-pill" class="pill">离线</span>
-          </div>
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span class="stat-label">区块高度</span>
-              <strong id="block-height">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">链 ID</span>
-              <strong id="bc-chain-id">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">gRPC 状态</span>
-              <strong id="grpc-status">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">HTTP 状态</span>
-              <strong id="http-status">-</strong>
-            </article>
-          </div>
-          <dl class="details">
-            <div><dt>区块哈希</dt><dd id="block-hash" class="mono truncate">-</dd></div>
-            <div><dt>最新区块时间</dt><dd id="block-time">-</dd></div>
-          </dl>
-        </section>
-
-        <!-- 第二行: Epoch 信息 + Tokenomics -->
-        <section class="panel epoch-panel">
-          <div class="panel-header">
-            <h2>Epoch 进度</h2>
-          </div>
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span class="stat-label">下一 Epoch</span>
-              <strong id="next-epoch">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">下一 Slot</span>
-              <strong id="next-slot">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">已完成 Ticks</span>
-              <strong id="ticks-completed">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">低影响模式</span>
-              <strong id="low-impact-mode">-</strong>
-            </article>
-          </div>
-          <dl class="details inline">
-            <div><dt>内联验证</dt><dd id="inline-verify">-</dd></div>
-            <div><dt>内联提议</dt><dd id="inline-propose">-</dd></div>
-          </dl>
-        </section>
-
-        <section class="panel tokenomics-panel">
-          <div class="panel-header">
-            <h2>代币经济</h2>
-          </div>
-          <dl class="details">
-            <div><dt>总供应量</dt><dd id="total-supply" class="mono">-</dd></div>
-            <div><dt>年通胀率</dt><dd id="annual-rate">-</dd></div>
-            <div><dt>当前年份</dt><dd id="current-year">-</dd></div>
-            <div><dt>发行年份</dt><dd id="emission-year">-</dd></div>
-            <div><dt>玩家每小时奖励</dt><dd id="player-reward">-</dd></div>
-            <div><dt>服务每小时奖励</dt><dd id="service-reward">-</dd></div>
-            <div><dt>区块奖励</dt><dd id="block-reward">-</dd></div>
-            <div><dt>尾部排放</dt><dd id="tail-emission">-</dd></div>
-          </dl>
-        </section>
-
-        <!-- 第三行: 存储信息 + 网络状态 -->
-        <section class="panel storage-panel">
-          <div class="panel-header">
-            <h2>存储信息</h2>
-          </div>
-          <div class="stats-grid">
-            <article class="stat-card large">
-              <span class="stat-label">数据目录大小</span>
-              <strong id="total-size" class="size-value">-</strong>
-            </article>
-          </div>
-          <dl class="details grid-2">
-            <div><dt>Batches</dt><dd id="batch-count">-</dd></div>
-            <div><dt>Epochs</dt><dd id="epoch-count">-</dd></div>
-            <div><dt>Payloads</dt><dd id="payload-count">-</dd></div>
-            <div><dt>已准备</dt><dd id="prepared-count">-</dd></div>
-            <div><dt>已结算</dt><dd id="settlement-count">-</dd></div>
-            <div><dt>日志文件</dt><dd id="log-count">-</dd></div>
-            <div><dt>数据库大小</dt><dd id="db-size">-</dd></div>
-            <div><dt>数据目录</dt><dd id="data-dir" class="truncate">-</dd></div>
-          </dl>
-        </section>
-
-        <section class="panel network-panel">
-          <div class="panel-header">
-            <h2>P2P 网络</h2>
-          </div>
-          <dl class="details">
-            <div><dt>网络模式</dt><dd id="p2p-mode">-</dd></div>
-            <div><dt>本地 Peer ID</dt><dd id="local-peer-id" class="mono">-</dd></div>
-            <div><dt>已连接节点</dt><dd id="connected-peers">-</dd></div>
-          </dl>
-          <div class="peers-list" id="peers-list">
-            <p class="muted">暂无连接的节点</p>
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>代币发行与调节参数</h3>
+              </div>
+              <dl class="data-table">
+                <div><dt>总供应量限制</dt><dd class="highlight-val">无上限 (随全网真实游戏活跃度按需弹性铸造)</dd></div>
+                <div><dt>平方根平抑机制</dt><dd>已激活 (高活跃期平抑单位产出，杜绝恶性通胀)</dd></div>
+                <div><dt>当前发行年份</dt><dd id="dt-emission-year">Year 1</dd></div>
+                <div><dt>尾部最低通胀保障</dt><dd id="dt-tail-emission">年化 2% 托底</dd></div>
+                <div><dt>每小时目标网络权重</dt><dd id="dt-target-weight">150,000,000,000,000</dd></div>
+              </dl>
+            </div>
           </div>
         </section>
 
-        <!-- 第四行: 配置 + 活动 -->
-        <section class="panel config-panel">
-          <div class="panel-header">
-            <h2>运行时配置</h2>
+        <!-- TAB 3: P2P 见证与存储 -->
+        <section id="tab-network" class="tab-pane">
+          <div class="pane-grid-2">
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>P2P 见证广播网络拓扑</h3>
+              </div>
+              <dl class="data-table">
+                <div><dt>P2P 传输模式</dt><dd id="net-p2p-mode">Socket Gossip 总线</dd></div>
+                <div><dt>本地 Peer 节点 ID</dt><dd id="net-local-node-id" class="mono truncate">-</dd></div>
+                <div><dt>当前已连接邻居节点</dt><dd id="net-connected-count">0</dd></div>
+                <div><dt>见证背书门限</dt><dd class="highlight-val">≥ 2 独立非同源见证节点</dd></div>
+              </dl>
+              <div class="panel-header margin-top-sm">
+                <h4>已连接邻居见证节点列表</h4>
+              </div>
+              <div id="peers-list-box" class="peers-box">
+                <p class="muted">当前处于局域网/自组网监听状态，等待邻居节点握手</p>
+              </div>
+            </div>
+
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>本地账本与存储健康</h3>
+              </div>
+              <dl class="data-table">
+                <div><dt>本地数据目录</dt><dd id="storage-data-dir" class="truncate mono">-</dd></div>
+                <div><dt>目录总大小</dt><dd id="storage-total-size">-</dd></div>
+                <div><dt>有效批次 (Batches)</dt><dd id="storage-batch-count">0</dd></div>
+                <div><dt>存储载荷 (Payloads)</dt><dd id="storage-payload-count">0</dd></div>
+                <div><dt>本地轻公链大小</dt><dd id="storage-db-size">-</dd></div>
+                <div><dt>数据保留审计</dt><dd class="highlight-green">全部健康且可检索</dd></div>
+              </dl>
+            </div>
           </div>
-          <dl class="details">
-            <div><dt>目标 App IDs</dt><dd id="target-app-ids">-</dd></div>
-            <div><dt>游戏进程</dt><dd id="game-processes">-</dd></div>
-            <div><dt>奖励来源</dt><dd id="reward-source">-</dd></div>
-            <div><dt>后台优先级</dt><dd id="bg-priority">-</dd></div>
-          </dl>
         </section>
 
-        <section class="panel activity-panel">
-          <div class="panel-header">
-            <h2>挑战活动</h2>
-          </div>
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span class="stat-label">活跃挑战</span>
-              <strong id="active-challenges">0</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">已完成</span>
-              <strong id="completed-challenges">0</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">已失败</span>
-              <strong id="failed-challenges">0</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">上次 Epoch</dt>
-              <strong id="last-challenge-epoch">-</strong>
-            </article>
-          </div>
-        </section>
+        <!-- TAB 4: 节点管理与控制台 -->
+        <section id="tab-controls" class="tab-pane">
+          <div class="pane-grid-2">
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>节点服务管理控制</h3>
+              </div>
+              <div class="btn-group-actions">
+                <button id="btn-svc-start" class="btn-action btn-green" type="button">▶️ 启动后台节点</button>
+                <button id="btn-svc-stop" class="btn-action btn-red" type="button">⏹️ 停止后台服务</button>
+                <button id="btn-svc-check" class="btn-action" type="button">🔍 自检健康状态</button>
+              </div>
+              <p class="muted-note">
+                平时无需手动操作，启动游戏直接玩即可。退出请点击“停止后台服务”或双击桌面 `PoLE-停止运行.cmd`。
+              </p>
+            </div>
 
-        <!-- 底部: 操作结果 + 版本信息 -->
-        <section class="panel console-panel span-full">
-          <div class="panel-header">
-            <h2>控制台输出</h2>
+            <div class="card-panel">
+              <div class="panel-header">
+                <h3>软件版本与更新通道</h3>
+              </div>
+              <dl class="data-table">
+                <div><dt>客户端版本</dt><dd id="info-app-version">v0.1.3 (Windows x64)</dd></div>
+                <div><dt>更新发布通道</dt><dd>GitHub Releases Stable</dd></div>
+                <div><dt>热更新状态</dt><dd id="info-update-status">已是最新版本</dd></div>
+              </dl>
+            </div>
           </div>
-          <pre id="service-action-result" class="console-box">等待操作...</pre>
-        </section>
 
-        <section class="panel update-panel span-full">
-          <div class="panel-header">
-            <h2>更新状态</h2>
-            <span id="update-version-badge" class="pill">当前</span>
-          </div>
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span class="stat-label">已安装版本</span>
-              <strong id="update-current-version">-</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">更新通道</span>
-              <strong id="update-channel">stable</strong>
-            </article>
-            <article class="stat-card">
-              <span class="stat-label">更新可用</span>
-              <strong id="update-available">否</strong>
-            </article>
-          </div>
-          <div class="service-actions update-actions">
-            <button data-update-action="stage" type="button">检查并下载更新</button>
-            <button data-update-action="apply" type="button">应用已下载更新</button>
-            <button data-update-action="commit-install" type="button">安装并重启服务</button>
-            <button data-update-action="rollback" type="button">回滚</button>
+          <div class="card-panel span-full margin-top-md">
+            <div class="panel-header">
+              <h3>控制台实时运行日志</h3>
+              <button id="btn-clear-console" class="btn-subtle" type="button">清空输出</button>
+            </div>
+            <pre id="console-stream" class="terminal-box">PoLE Web 控制台已就绪。正在监听 http://127.0.0.1:8787/ ...</pre>
           </div>
         </section>
       </main>
+
+      <!-- 底部 Footer -->
+      <footer class="app-footer">
+        <p>PoLE (Proof of Live Engagement) · 去中心化 PC 游戏真实游玩证明与双边激励网络</p>
+        <p class="footer-links">
+          <a href="https://github.com/q3874758/pole--1" target="_blank" rel="noreferrer">GitHub 开源仓库</a> ·
+          <a href="https://github.com/q3874758/pole--1/releases" target="_blank" rel="noreferrer">版本发布</a> ·
+          <span>本地 API 端口 :8787</span>
+        </p>
+      </footer>
     </div>
+
     <script src="/app.js"></script>
   </body>
 </html>

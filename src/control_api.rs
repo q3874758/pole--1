@@ -303,6 +303,67 @@ pub fn collect_tokenomics(
     })
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ApiGamingResponse {
+    pub gaming: GamingStatusView,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GamingStatusView {
+    pub active_game_processes: Vec<String>,
+    pub configured_game_processes: Vec<String>,
+    pub foreground_process: Option<String>,
+    pub foreground_title: Option<String>,
+    pub engagement_state: String,
+    pub is_gaming: bool,
+    pub play_heartbeats_count: usize,
+    pub play_sessions_count: usize,
+    pub player_blocks_count: usize,
+    pub eco_qos_active: bool,
+    pub working_set_mb: f64,
+}
+
+pub fn collect_gaming(
+    config_path: impl AsRef<Path>,
+) -> Result<ApiGamingResponse, Box<dyn std::error::Error>> {
+    let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    let active_game_processes = crate::node_daemon::detect_active_game_processes(&config);
+    let foreground_process = crate::os_support::detect_foreground_process_name();
+    let foreground_title = crate::os_support::detect_foreground_window_title();
+    let is_gaming = !active_game_processes.is_empty();
+    let engagement_state = if let Some(ref first_game) = active_game_processes.first() {
+        match crate::os_support::evaluate_game_engagement(first_game, None) {
+            crate::os_support::PlayEngagementState::InWorld => "InWorld",
+            crate::os_support::PlayEngagementState::MainMenu => "MainMenu",
+        }
+    } else {
+        "NoGame"
+    };
+
+    let play_heartbeats_count = count_files_in_dir(&data_dir.join("play-heartbeats"), ".json");
+    let play_sessions_count = count_files_in_dir(&data_dir.join("play-sessions"), ".json");
+    let player_blocks_count = count_files_in_dir(&data_dir.join("player-reward-blocks"), ".json");
+    let working_set_mb = (crate::os_support::detect_process_working_set_bytes(std::process::id()) as f64)
+        / (1024.0 * 1024.0);
+
+    Ok(ApiGamingResponse {
+        gaming: GamingStatusView {
+            active_game_processes,
+            configured_game_processes: config.runtime.game_process_names,
+            foreground_process,
+            foreground_title,
+            engagement_state: engagement_state.to_string(),
+            is_gaming,
+            play_heartbeats_count,
+            play_sessions_count,
+            player_blocks_count,
+            eco_qos_active: config.runtime.low_impact_mode && config.runtime.os_background_priority,
+            working_set_mb: (working_set_mb * 10.0).round() / 10.0,
+        },
+    })
+}
+
 pub fn collect_dashboard(
     config_path: impl AsRef<Path>,
 ) -> Result<ApiDashboardResponse, Box<dyn std::error::Error>> {
@@ -1028,6 +1089,10 @@ pub fn handle_connection(
         }
         ("GET", "/api/status") => {
             let body = serde_json::to_string(&collect_status(config_path)?)?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/gaming") => {
+            let body = serde_json::to_string(&collect_gaming(config_path)?)?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/dashboard") => {

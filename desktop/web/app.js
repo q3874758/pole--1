@@ -1,362 +1,566 @@
+/**
+ * PoLE Protocol - Esports / Cyberpunk Gamer Web Dashboard JS
+ * v0.1.3 - Proof of Live Engagement
+ */
+
 const state = {
+  gaming: null,
   dashboard: null,
-  logs: null,
   blockchain: null,
-  activeView: "overview",
+  storage: null,
+  logs: [],
+  rewardAddress: "",
+  autoRefreshTimer: null,
+  isRefreshing: false,
 };
 
+// UI Elements Cache
 const els = {};
 
 function initElements() {
-  els.refreshAll = document.getElementById("refresh-all");
-  els.lastRefresh = document.getElementById("last-refresh");
-  els.serviceStatePill = document.getElementById("service-state-pill");
-  els.serviceState = document.getElementById("service-state");
-  els.servicePid = document.getElementById("service-pid");
-  els.serviceRecoverable = document.getElementById("service-recoverable");
-  els.serviceStale = document.getElementById("service-stale");
-  els.serviceActionResult = document.getElementById("service-action-result");
+  // Header
+  els.appVersionBadge = document.getElementById("app-version-badge");
+  els.headerServiceLabel = document.getElementById("header-service-label");
+  els.chipDaemon = document.getElementById("chip-daemon");
+  els.autoRefreshCb = document.getElementById("auto-refresh-cb");
+  els.btnManualRefresh = document.getElementById("btn-manual-refresh");
+  els.toast = document.getElementById("toast");
 
-  els.nodeId = document.getElementById("node-id");
-  els.rewardAddress = document.getElementById("reward-address");
-  els.chainId = document.getElementById("chain-id");
-  els.appVersion = document.getElementById("app-version");
+  // Hero Bento - Left (Game)
+  els.gameEngagementBadge = document.getElementById("game-engagement-badge");
+  els.gameAvatarIcon = document.getElementById("game-avatar-icon");
+  els.currentGameTitle = document.getElementById("current-game-title");
+  els.currentGamePid = document.getElementById("current-game-pid");
+  els.gameEngagementDesc = document.getElementById("game-engagement-desc");
+  els.nodeMemoryUsage = document.getElementById("node-memory-usage");
 
-  els.chainStatusPill = document.getElementById("chain-status-pill");
-  els.blockHeight = document.getElementById("block-height");
-  els.bcChainId = document.getElementById("bc-chain-id");
-  els.grpcStatus = document.getElementById("grpc-status");
-  els.httpStatus = document.getElementById("http-status");
-  els.blockHash = document.getElementById("block-hash");
-  els.blockTime = document.getElementById("block-time");
+  // Hero Bento - Right (Reward & Wallet)
+  els.totalPlayerReward = document.getElementById("total-player-reward");
+  els.hourlyRewardRate = document.getElementById("hourly-reward-rate");
+  els.playerAddressPreview = document.getElementById("player-address-preview");
+  els.btnCopyAddress = document.getElementById("btn-copy-address");
 
-  els.nextEpoch = document.getElementById("next-epoch");
-  els.nextSlot = document.getElementById("next-slot");
-  els.ticksCompleted = document.getElementById("ticks-completed");
-  els.lowImpactMode = document.getElementById("low-impact-mode");
-  els.inlineVerify = document.getElementById("inline-verify");
-  els.inlinePropose = document.getElementById("inline-propose");
+  // 4 Core Metrics
+  els.statHeartbeatsCount = document.getElementById("stat-heartbeats-count");
+  els.statSessionsCount = document.getElementById("stat-sessions-count");
+  els.statPeersCount = document.getElementById("stat-peers-count");
+  els.statBlockHeight = document.getElementById("stat-block-height");
+  els.statChainStatusText = document.getElementById("stat-chain-status-text");
 
-  els.totalSupply = document.getElementById("total-supply");
-  els.annualRate = document.getElementById("annual-rate");
-  els.currentYear = document.getElementById("current-year");
-  els.emissionYearEl = document.getElementById("emission-year");
-  els.playerReward = document.getElementById("player-reward");
-  els.serviceReward = document.getElementById("service-reward");
-  els.blockReward = document.getElementById("block-reward");
-  els.tailEmission = document.getElementById("tail-emission");
+  // Tabs
+  els.tabButtons = document.querySelectorAll(".tab-btn");
+  els.tabPanes = document.querySelectorAll(".tab-pane");
 
-  els.totalSize = document.getElementById("total-size");
-  els.batchCount = document.getElementById("batch-count");
-  els.epochCount = document.getElementById("epoch-count");
-  els.payloadCount = document.getElementById("payload-count");
-  els.preparedCount = document.getElementById("prepared-count");
-  els.settlementCount = document.getElementById("settlement-count");
-  els.logCount = document.getElementById("log-count");
-  els.dbSize = document.getElementById("db-size");
-  els.dataDir = document.getElementById("data-dir");
+  // Tab 1: Gaming Detail
+  els.gameProcessList = document.getElementById("game-process-list");
+  els.inputNewGame = document.getElementById("input-new-game");
+  els.btnAddGame = document.getElementById("btn-add-game");
 
-  els.p2pMode = document.getElementById("p2p-mode");
-  els.localPeerId = document.getElementById("local-peer-id");
-  els.connectedPeers = document.getElementById("connected-peers");
-  els.peersList = document.getElementById("peers-list");
+  // Tab 2: Tokenomics
+  els.dtEmissionYear = document.getElementById("dt-emission-year");
+  els.dtTailEmission = document.getElementById("dt-tail-emission");
+  els.dtTargetWeight = document.getElementById("dt-target-weight");
 
-  els.targetAppIds = document.getElementById("target-app-ids");
-  els.gameProcesses = document.getElementById("game-processes");
-  els.rewardSourceEl = document.getElementById("reward-source");
-  els.bgPriority = document.getElementById("bg-priority");
+  // Tab 3: Network & Storage
+  els.netP2pMode = document.getElementById("net-p2p-mode");
+  els.netLocalNodeId = document.getElementById("net-local-node-id");
+  els.netConnectedCount = document.getElementById("net-connected-count");
+  els.peersListBox = document.getElementById("peers-list-box");
+  els.storageDataDir = document.getElementById("storage-data-dir");
+  els.storageTotalSize = document.getElementById("storage-total-size");
+  els.storageBatchCount = document.getElementById("storage-batch-count");
+  els.storagePayloadCount = document.getElementById("storage-payload-count");
+  els.storageDbSize = document.getElementById("storage-db-size");
 
-  els.activeChallenges = document.getElementById("active-challenges");
-  els.completedChallenges = document.getElementById("completed-challenges");
-  els.failedChallenges = document.getElementById("failed-challenges");
-  els.lastChallengeEpoch = document.getElementById("last-challenge-epoch");
-
-  els.updateCurrentVersion = document.getElementById("update-current-version");
-  els.updateChannel = document.getElementById("update-channel");
-  els.updateAvailable = document.getElementById("update-available");
-  els.updateVersionBadge = document.getElementById("update-version-badge");
-
-  els.logsList = document.getElementById("logs-list");
-  els.refreshLogs = document.getElementById("refresh-logs");
+  // Tab 4: Node Controls & Logs
+  els.btnSvcStart = document.getElementById("btn-svc-start");
+  els.btnSvcStop = document.getElementById("btn-svc-stop");
+  els.btnSvcCheck = document.getElementById("btn-svc-check");
+  els.infoAppVersion = document.getElementById("info-app-version");
+  els.infoUpdateStatus = document.getElementById("info-update-status");
+  els.btnClearConsole = document.getElementById("btn-clear-console");
+  els.consoleStream = document.getElementById("console-stream");
 }
 
-async function requestJson(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `请求失败: ${response.status}`);
-  }
-  return response.json();
-}
-
-function setText(element, value) {
-  if (element) {
-    element.textContent = value ?? "-";
-  }
-}
-
-function boolLabel(value) {
-  return value ? "是" : "否";
-}
-
-function boolLabelEnabled(value) {
-  return value ? "已启用" : "已禁用";
-}
-
-function renderDashboard(data) {
-  state.dashboard = data;
-  const d = data.dashboard;
-  const service = d.service;
-  const node = d.node;
-  const storage = d.storage;
-  const tokenomics = d.tokenomics;
-  const network = d.network;
-  const challenge = d.challenge_activity;
-  const config = d.config;
-
-  setText(els.serviceState, service.state);
-  els.serviceState.textContent = service.state;
-  els.serviceState.dataset.state = service.state;
-  els.serviceStatePill.textContent = service.state;
-  els.serviceStatePill.dataset.state = service.state;
-  setText(els.servicePid, service.pid ?? "-");
-  setText(els.serviceRecoverable, boolLabel(service.recoverable_without_manual_cleanup));
-  setText(els.serviceStale, boolLabel(service.stale));
-
-  setText(els.nodeId, node.node_id);
-  setText(els.rewardAddress, node.reward_address);
-  setText(els.chainId, node.chain_id);
-  setText(els.appVersion, d.current_version);
-
-  setText(els.nextEpoch, String(node.next_epoch_id));
-  setText(els.nextSlot, String(node.next_slot_id));
-  setText(els.ticksCompleted, String(node.ticks_completed));
-  setText(els.lowImpactMode, boolLabelEnabled(node.low_impact_mode));
-  setText(els.inlineVerify, boolLabelEnabled(node.inline_verify_enabled));
-  setText(els.inlinePropose, boolLabelEnabled(node.inline_propose_enabled));
-
-  setText(els.totalSupply, tokenomics.total_supply);
-  setText(els.annualRate, `${tokenomics.annual_emission_rate_bps / 100}%`);
-  setText(els.currentYear, String(tokenomics.current_year));
-  setText(els.emissionYearEl, String(tokenomics.emission_year));
-  setText(els.playerReward, tokenomics.player_reward_budget_per_hour);
-  setText(els.serviceReward, tokenomics.service_reward_budget_per_hour);
-  setText(els.blockReward, tokenomics.player_block_reward);
-  setText(els.tailEmission, tokenomics.tail_emission_active ? `已启用 (${tokenomics.tail_emission_rate_bps} bps)` : "已禁用");
-
-  setText(els.totalSize, storage.total_size_formatted);
-  setText(els.batchCount, String(storage.batch_count));
-  setText(els.epochCount, String(storage.epoch_count));
-  setText(els.payloadCount, String(storage.payload_count));
-  setText(els.preparedCount, String(storage.prepared_epoch_count));
-  setText(els.settlementCount, String(storage.settlement_count));
-  setText(els.logCount, String(storage.log_files_count));
-  setText(els.dbSize, formatBytes(storage.db_size_bytes));
-  setText(els.dataDir, storage.data_dir);
-
-  setText(els.p2pMode, network.mode);
-  setText(els.localPeerId, network.local_peer_id);
-  setText(els.connectedPeers, String(network.connected_peers));
-
-  if (network.peers && network.peers.length > 0) {
-    els.peersList.innerHTML = network.peers.map(peer => `
-      <div class="peer-item">
-        <span class="peer-id">${peer.peer_id.substring(0, 16)}...</span>
-        <span class="peer-status">${peer.connected ? "已连接" : "未连接"}</span>
-      </div>
-    `).join("");
-  } else {
-    els.peersList.innerHTML = '<p class="muted">暂无连接的节点</p>';
-  }
-
-  setText(els.targetAppIds, config.target_app_ids.join(", ") || "-");
-  setText(els.gameProcesses, config.game_process_names.join(", ") || "-");
-  setText(els.rewardSourceEl, config.reward_source);
-  setText(els.bgPriority, boolLabelEnabled(config.os_background_priority));
-
-  setText(els.activeChallenges, String(challenge.active_challenges));
-  setText(els.completedChallenges, String(challenge.completed_challenges));
-  setText(els.failedChallenges, String(challenge.failed_challenges));
-  setText(els.lastChallengeEpoch, challenge.last_challenge_epoch > 0 ? String(challenge.last_challenge_epoch) : "-");
-
-  setText(els.updateCurrentVersion, d.current_version);
-  setText(els.updateChannel, "stable");
-  setText(els.updateAvailable, d.update_available ? "是" : "否");
-  els.updateVersionBadge.textContent = d.update_available ? "有可用更新" : "当前";
-}
-
-function renderBlockchain(data) {
-  state.blockchain = data;
-  const bc = data.blockchain;
-  const status = bc.online ? "运行中" : "离线";
-  els.chainStatusPill.textContent = status;
-  els.chainStatusPill.dataset.state = bc.online ? "running" : "offline";
-  setText(els.blockHeight, bc.block_height > 0 ? String(bc.block_height) : "-");
-  setText(els.bcChainId, bc.chain_id || "-");
-  setText(els.grpcStatus, bc.grpc_online ? "在线" : "离线");
-  setText(els.httpStatus, bc.http_online ? "在线" : "离线");
-  setText(els.blockHash, bc.block_hash ? bc.block_hash.substring(0, 16) + "..." : "-");
-  setText(els.blockTime, bc.block_time ? bc.block_time.replace("T", " ").replace("Z", "") : "-");
-}
-
-async function refreshBlockchain() {
+// HTTP Helper
+async function apiGet(path) {
   try {
-    const data = await requestJson("/api/blockchain");
-    renderBlockchain(data);
-  } catch (error) {
-    if (state.blockchain === null) {
-      renderBlockchain({ blockchain: { online: false, block_height: 0, block_hash: "", chain_id: "", http_online: false, grpc_online: false, block_time: "" } });
+    const res = await fetch(path, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
+    return await res.json();
+  } catch (err) {
+    console.warn(`[PoLE API GET ${path}] failed:`, err);
+    return null;
   }
+}
+
+async function apiPost(path, data = {}) {
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `HTTP ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[PoLE API POST ${path}] failed:`, err);
+    throw err;
+  }
+}
+
+// Helpers
+function formatNumber(num) {
+  if (num === null || num === undefined) return "0";
+  return Number(num).toLocaleString("en-US");
+}
+
+function truncateStr(str, front = 8, back = 6) {
+  if (!str) return "-";
+  if (str.length <= front + back + 3) return str;
+  return `${str.slice(0, front)}...${str.slice(-back)}`;
 }
 
 function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  if (!bytes || isNaN(bytes)) return "-";
+  const num = Number(bytes);
+  if (num >= 1024 * 1024 * 1024) return (num / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  if (num >= 1024 * 1024) return (num / (1024 * 1024)).toFixed(2) + " MB";
+  if (num >= 1024) return (num / 1024).toFixed(2) + " KB";
+  return num + " B";
 }
 
-async function runServiceAction(action) {
-  els.serviceActionResult.textContent = `正在执行 ${action} ...`;
-  try {
-    const result = await requestJson(`/api/service/${action}`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    els.serviceActionResult.textContent = JSON.stringify(result, null, 2);
-    await refreshDashboard();
-  } catch (error) {
-    els.serviceActionResult.textContent = `服务操作失败: ${error.message}`;
+function showToast(message) {
+  if (!els.toast) return;
+  els.toast.textContent = message;
+  els.toast.classList.add("show");
+  clearTimeout(els.toastTimeout);
+  els.toastTimeout = setTimeout(() => {
+    els.toast.classList.remove("show");
+  }, 2200);
+}
+
+function logToConsole(message) {
+  if (!els.consoleStream) return;
+  const now = new Date().toLocaleTimeString();
+  const line = `[${now}] ${message}\n`;
+  els.consoleStream.textContent += line;
+  els.consoleStream.scrollTop = els.consoleStream.scrollHeight;
+}
+
+// Renderers
+function renderGaming(rawData) {
+  if (!rawData) return;
+  const data = rawData.gaming || rawData;
+  state.gaming = data;
+
+  const {
+    active_game_processes = [],
+    configured_game_processes = [],
+    foreground_process,
+    foreground_title,
+    engagement_state = "NoGame",
+    play_heartbeats_count = 0,
+    play_sessions_count = 0,
+    player_blocks_count = 0,
+    working_set_mb = 0,
+  } = data;
+
+  // Engagement Status Badge & Radar
+  if (engagement_state === "InWorld") {
+    els.gameEngagementBadge.className = "badge-status badge-active";
+    els.gameEngagementBadge.textContent = "🟢 有效游玩中 (发奖中)";
+    els.gameAvatarIcon.textContent = "🎮";
+    els.currentGameTitle.textContent =
+      foreground_title || foreground_process || (active_game_processes.length ? active_game_processes.join(", ") : "游戏进行中");
+    els.currentGamePid.textContent = foreground_process
+      ? `进程: ${foreground_process}`
+      : (active_game_processes.length ? `已识别: ${active_game_processes[0]}` : "已识别");
+    els.gameEngagementDesc.textContent =
+      "PoLE 正在见证真实游玩活跃度。支持挂机睡觉 (AFK) 全额发放见证心跳，收益持续累积中。";
+  } else if (engagement_state === "MainMenu") {
+    els.gameEngagementBadge.className = "badge-status badge-paused";
+    els.gameEngagementBadge.textContent = "⏸️ 主菜单 (卡屏暂停)";
+    els.gameAvatarIcon.textContent = "⏸️";
+    els.currentGameTitle.textContent =
+      foreground_title || foreground_process || "游戏主菜单等待中";
+    els.currentGamePid.textContent = foreground_process ? `进程: ${foreground_process}` : "暂停中";
+    els.gameEngagementDesc.textContent =
+      "检测到处于游戏标题/暂停主菜单，记账自动平滑暂停以防挂机作弊。进入游戏世界后自动恢复记账。";
+  } else {
+    els.gameEngagementBadge.className = "badge-status badge-waiting";
+    els.gameEngagementBadge.textContent = "⚪ 等待游戏启动";
+    els.gameAvatarIcon.textContent = "🕹️";
+    els.currentGameTitle.textContent = "未检测到前台游戏";
+    els.currentGamePid.textContent = "PID: -";
+    els.gameEngagementDesc.textContent =
+      "PoLE 后台静默侦测中。直接启动任意 Steam 游戏，系统将毫秒级自动识别并开始见证记账。";
+  }
+
+  // Working Set Memory
+  if (working_set_mb > 0) {
+    els.nodeMemoryUsage.textContent = `${working_set_mb.toFixed(1)} MB (极低开销)`;
+  }
+
+  // Core Metrics
+  els.statHeartbeatsCount.textContent = formatNumber(play_heartbeats_count);
+  els.statSessionsCount.textContent = formatNumber(play_sessions_count);
+
+  // Player Rewards
+  if (player_blocks_count > 0) {
+    const calculatedReward = player_blocks_count * 850; // 85% of 1000 POLE per block
+    els.totalPlayerReward.textContent = formatNumber(calculatedReward);
   }
 }
 
-async function runUpdateAction(action) {
-  els.serviceActionResult.textContent = `正在执行更新操作 ${action} ...`;
-  try {
-    const payload =
-      action === "commit-install"
-        ? { stop_service_before_install: true, start_service_after_install: true }
-        : {};
-    const result = await requestJson(`/api/update/${action}`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    els.serviceActionResult.textContent = JSON.stringify(result, null, 2);
-    await refreshUpdateStatus();
-    await refreshDashboard();
-  } catch (error) {
-    els.serviceActionResult.textContent = `更新操作失败: ${error.message}`;
-  }
-}
+function renderDashboard(rawData) {
+  if (!rawData) return;
+  const data = rawData.dashboard || rawData;
+  state.dashboard = data;
 
-async function refreshUpdateStatus() {
-  try {
-    const result = await requestJson("/api/update");
-    if (!result || !result.update) return;
-    const u = result.update;
-    setText(els.updateCurrentVersion, u.current_version);
-    setText(els.updateAvailable, u.update_available ? "是" : "否");
-    els.updateVersionBadge.textContent = u.update_available ? "有可用更新" : "当前";
-    if (u.latest_available_version && u.latest_available_version !== u.current_version) {
-      els.serviceActionResult.textContent = `最新可用版本: ${u.latest_available_version} (当前 ${u.current_version})`;
+  const {
+    service = {},
+    node = {},
+    tokenomics = {},
+    network = {},
+    storage = {},
+    config = {},
+    meta = {},
+    update_available = false,
+  } = data;
+
+  // Header Service State
+  const isRunning =
+    service.state === "running" ||
+    service.state === "starting" ||
+    service.running ||
+    service.managed_status === "running" ||
+    Boolean(service.pid);
+
+  const pulseDot = els.chipDaemon.querySelector(".pulse-dot");
+  if (isRunning) {
+    els.headerServiceLabel.textContent = `节点运行中${service.pid ? ` (PID: ${service.pid})` : ""}`;
+    pulseDot.className = "pulse-dot active";
+  } else {
+    els.headerServiceLabel.textContent = "节点已停止";
+    pulseDot.className = "pulse-dot stopped";
+  }
+
+  // Reward Address
+  const addr = config.reward_address || node.reward_address;
+  if (addr) {
+    state.rewardAddress = addr;
+    els.playerAddressPreview.textContent = truncateStr(addr, 10, 8);
+    els.playerAddressPreview.title = addr;
+  }
+
+  // Tokenomics
+  if (tokenomics.player_block_reward) {
+    els.hourlyRewardRate.textContent = `${tokenomics.player_block_reward} / Block`;
+  }
+  if (tokenomics.player_reward && !state.gaming?.player_blocks_count) {
+    els.totalPlayerReward.textContent = formatNumber(tokenomics.player_reward);
+  }
+  if (els.dtEmissionYear && (tokenomics.emission_year || config.emission_year)) {
+    els.dtEmissionYear.textContent = `Year ${tokenomics.emission_year || config.emission_year}`;
+  }
+  if (els.dtTailEmission) {
+    els.dtTailEmission.textContent = "年化 2% 托底";
+  }
+  if (els.dtTargetWeight && tokenomics.player_reward_budget_per_hour) {
+    els.dtTargetWeight.textContent = tokenomics.player_reward_budget_per_hour;
+  }
+
+  // Network
+  els.statPeersCount.textContent = formatNumber(network.connected_peers || 0);
+  if (els.netP2pMode) els.netP2pMode.textContent = network.mode || "Socket Gossip 总线";
+  if (els.netLocalNodeId) els.netLocalNodeId.textContent = network.local_peer_id || config.node_id || node.node_id || "-";
+  if (els.netConnectedCount) els.netConnectedCount.textContent = formatNumber(network.connected_peers || 0);
+
+  if (els.peersListBox) {
+    if (network.peers && Array.isArray(network.peers) && network.peers.length > 0) {
+      els.peersListBox.innerHTML = network.peers
+        .map(
+          (p) =>
+            `<div class="badge-item" style="margin-bottom:6px">🌐 ${p.addr || p.id || p}</div>`
+        )
+        .join("");
+    } else {
+      els.peersListBox.innerHTML =
+        '<p class="muted">当前处于局域网/自组网监听状态，等待邻居节点握手广播</p>';
     }
-  } catch (error) {
-    els.lastRefresh.textContent = `更新状态刷新失败: ${error.message}`;
+  }
+
+  // Storage
+  if (storage.data_dir && els.storageDataDir) els.storageDataDir.textContent = storage.data_dir;
+  if (els.storageTotalSize) {
+    els.storageTotalSize.textContent = storage.total_size_formatted || formatBytes(storage.total_size_bytes);
+  }
+  if (storage.batch_count !== undefined && els.storageBatchCount)
+    els.storageBatchCount.textContent = formatNumber(storage.batch_count);
+  if (storage.payload_count !== undefined && els.storagePayloadCount)
+    els.storagePayloadCount.textContent = formatNumber(storage.payload_count);
+  if (els.storageDbSize) {
+    els.storageDbSize.textContent = storage.db_size_bytes > 0 ? formatBytes(storage.db_size_bytes) : "< 1 MB (轻公链)";
+  }
+
+  // Game Processes List in Tab 1
+  const games = Array.isArray(config.game_process_names)
+    ? config.game_process_names
+    : (config.game_process_names ? [config.game_process_names] : ["Genesis.exe"]);
+
+  if (els.gameProcessList) {
+    els.gameProcessList.innerHTML = games
+      .map((name) => `<li class="badge-item">${name}</li>`)
+      .join("");
+  }
+
+  // Versions
+  if (meta.app_version && els.appVersionBadge) {
+    els.appVersionBadge.textContent = `v${meta.app_version}`;
+  }
+  if (meta.app_version && els.infoAppVersion) {
+    els.infoAppVersion.textContent = `v${meta.app_version} (Windows x64)`;
+  }
+  if (els.infoUpdateStatus) {
+    els.infoUpdateStatus.textContent = update_available ? "发现新版本，可随时更新" : "已是最新版本";
   }
 }
 
-async function refreshDashboard() {
-  try {
-    const data = await requestJson("/api/dashboard");
-    renderDashboard(data);
-    els.lastRefresh.textContent = `上次同步: ${new Date().toLocaleString("zh-CN")}`;
-  } catch (error) {
-    els.lastRefresh.textContent = `同步失败: ${error.message}`;
+function renderBlockchain(rawData) {
+  if (!rawData) return;
+  const bc = rawData.blockchain || rawData;
+  state.blockchain = bc;
+
+  if (bc.block_height !== undefined) {
+    els.statBlockHeight.textContent = `#${formatNumber(bc.block_height)}`;
+  }
+  if (els.statChainStatusText) {
+    els.statChainStatusText.textContent = bc.online
+      ? `本地链在线 · ${bc.chain_id || "pole-local"}`
+      : "本地链就绪 (共识正常)";
   }
 }
 
+function renderLogs(rawData) {
+  if (!rawData || !els.consoleStream) return;
+  const logsArr = rawData.logs || [];
+  if (Array.isArray(logsArr) && logsArr.length > 0) {
+    const combined = logsArr
+      .map((item) => (typeof item === "string" ? item : (item.text || "")))
+      .filter(Boolean)
+      .join("\n");
+    if (combined && combined !== els.consoleStream.textContent) {
+      els.consoleStream.textContent = combined;
+      els.consoleStream.scrollTop = els.consoleStream.scrollHeight;
+    }
+  }
+}
+
+// Fetch all data
 async function refreshAll() {
-  await refreshDashboard();
-  await refreshBlockchain();
-}
+  if (state.isRefreshing) return;
+  state.isRefreshing = true;
 
-async function refreshLogs() {
+  if (els.btnManualRefresh) {
+    els.btnManualRefresh.classList.add("spinning");
+  }
+
   try {
-    const data = await requestJson("/api/logs");
-    renderLogs(data);
-  } catch (error) {
-    els.logsList.innerHTML = `<article><pre>日志刷新失败: ${escapeHtml(error.message)}</pre></article>`;
+    const [gamingData, dashData, bcData, storageData, logsData] = await Promise.all([
+      apiGet("/api/gaming"),
+      apiGet("/api/dashboard"),
+      apiGet("/api/blockchain"),
+      apiGet("/api/storage"),
+      apiGet("/api/logs"),
+    ]);
+
+    if (gamingData) renderGaming(gamingData);
+    if (dashData) renderDashboard(dashData);
+    if (bcData) renderBlockchain(bcData);
+    if (storageData && dashData) {
+      renderDashboard({ ...dashData, storage: { ...dashData.storage, ...storageData } });
+    }
+    if (logsData) renderLogs(logsData);
+  } catch (err) {
+    console.error("refreshAll error:", err);
+  } finally {
+    state.isRefreshing = false;
+    if (els.btnManualRefresh) {
+      els.btnManualRefresh.classList.remove("spinning");
+    }
   }
 }
 
-function renderLogs(response) {
-  state.logs = response;
-  if (!response.logs || !response.logs.length) {
-    els.logsList.innerHTML = "<article><pre>没有可用的日志文件。</pre></article>";
-    return;
+// Setup Auto-Refresh
+function setupAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
   }
-  els.logsList.innerHTML = response.logs
-    .map(
-      (entry) => `
-        <article>
-          <header>
-            <strong>${entry.source}</strong>
-            <code>${entry.path}</code>
-          </header>
-          <pre>${escapeHtml(entry.text || "(空)")}</pre>
-        </article>
-      `,
-    )
-    .join("");
+
+  if (els.autoRefreshCb && els.autoRefreshCb.checked) {
+    state.autoRefreshTimer = setInterval(refreshAll, 3000);
+  }
 }
 
-function escapeHtml(text) {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function initEventListeners() {
-  if (els.refreshAll) {
-    els.refreshAll.addEventListener("click", () => {
-      refreshAll().catch((error) => {
-        els.lastRefresh.textContent = `刷新失败: ${error.message}`;
-      });
+// Setup Event Listeners
+function setupEvents() {
+  // Manual Refresh
+  if (els.btnManualRefresh) {
+    els.btnManualRefresh.addEventListener("click", () => {
+      refreshAll();
+      showToast("已刷新最新数据");
     });
   }
 
-  if (els.refreshLogs) {
-    els.refreshLogs.addEventListener("click", refreshLogs);
+  // Auto-refresh Toggle
+  if (els.autoRefreshCb) {
+    els.autoRefreshCb.addEventListener("change", () => {
+      setupAutoRefresh();
+      showToast(els.autoRefreshCb.checked ? "已启用每 3 秒自动同步" : "已暂停自动同步");
+    });
   }
 
-  document.querySelectorAll("[data-service-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      runServiceAction(button.dataset.serviceAction);
+  // Copy Address
+  if (els.btnCopyAddress) {
+    els.btnCopyAddress.addEventListener("click", async () => {
+      const address = state.rewardAddress || els.playerAddressPreview.textContent;
+      if (!address || address === "正在读取账户地址...") {
+        showToast("地址暂不可用");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(address);
+        showToast("✅ 已复制收款地址到剪贴板！");
+      } catch (err) {
+        const textarea = document.createElement("textarea");
+        textarea.value = address;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        showToast("✅ 已复制收款地址！");
+      }
+    });
+  }
+
+  // Tab Switching
+  els.tabButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetTab = btn.getAttribute("data-tab");
+      els.tabButtons.forEach((b) => b.classList.remove("active"));
+      els.tabPanes.forEach((p) => p.classList.remove("active"));
+
+      btn.classList.add("active");
+      const targetPane = document.getElementById(targetTab);
+      if (targetPane) {
+        targetPane.classList.add("active");
+      }
     });
   });
 
-  document.querySelectorAll("[data-update-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      runUpdateAction(button.dataset.updateAction);
+  // Add Game Process
+  if (els.btnAddGame && els.inputNewGame) {
+    els.btnAddGame.addEventListener("click", async () => {
+      const val = els.inputNewGame.value.trim();
+      if (!val) {
+        showToast("请输入游戏进程名 (如 cs2.exe)");
+        return;
+      }
+
+      const currentList = Array.isArray(state.dashboard?.config?.game_process_names)
+        ? state.dashboard.config.game_process_names
+        : ["Genesis.exe"];
+
+      if (currentList.includes(val)) {
+        showToast("该游戏进程已在列表中");
+        return;
+      }
+
+      const updated = [...currentList, val];
+      try {
+        await apiPost("/api/config", { game_process_names: updated });
+        els.inputNewGame.value = "";
+        showToast(`已成功添加游戏: ${val}`);
+        logToConsole(`已添加游戏进程: ${val}`);
+        refreshAll();
+      } catch (err) {
+        showToast(`添加失败: ${err.message}`);
+      }
     });
-  });
+  }
+
+  // Service Management Actions
+  if (els.btnSvcStart) {
+    els.btnSvcStart.addEventListener("click", async () => {
+      try {
+        logToConsole("正在发送服务启动请求...");
+        showToast("正在启动后台节点...");
+        await apiPost("/api/service/start");
+        logToConsole("启动命令已发送，正在检查运行状态...");
+        setTimeout(refreshAll, 1500);
+      } catch (err) {
+        showToast(`启动失败: ${err.message}`);
+        logToConsole(`启动错误: ${err.message}`);
+      }
+    });
+  }
+
+  if (els.btnSvcStop) {
+    els.btnSvcStop.addEventListener("click", async () => {
+      try {
+        logToConsole("正在发送服务停止请求...");
+        showToast("正在停止后台服务...");
+        await apiPost("/api/service/stop");
+        logToConsole("停止命令已执行");
+        setTimeout(refreshAll, 1000);
+      } catch (err) {
+        showToast(`停止失败: ${err.message}`);
+        logToConsole(`停止错误: ${err.message}`);
+      }
+    });
+  }
+
+  if (els.btnSvcCheck) {
+    els.btnSvcCheck.addEventListener("click", async () => {
+      try {
+        logToConsole("执行节点自检与健康排查...");
+        showToast("正在自检健康状态...");
+        const res = await apiPost("/api/service/status");
+        logToConsole(`自检结果: ${JSON.stringify(res)}`);
+        refreshAll();
+      } catch (err) {
+        logToConsole(`自检异常: ${err.message}`);
+      }
+    });
+  }
+
+  // Clear Console
+  if (els.btnClearConsole && els.consoleStream) {
+    els.btnClearConsole.addEventListener("click", () => {
+      els.consoleStream.textContent = "";
+      showToast("控制台已清空");
+    });
+  }
 }
 
+// Bootstrap
 document.addEventListener("DOMContentLoaded", () => {
   initElements();
-  initEventListeners();
-
-  refreshDashboard().catch((error) => {
-    els.lastRefresh.textContent = `初始加载失败: ${error.message}`;
-  });
-  refreshBlockchain().catch(() => {});
-
-  setInterval(refreshDashboard, 30000);
-  setInterval(refreshBlockchain, 15000);
+  setupEvents();
+  refreshAll();
+  setupAutoRefresh();
+  logToConsole("PoLE 玩家控制台已就绪，正在实时监听并连接后台服务...");
 });
