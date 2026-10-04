@@ -452,31 +452,62 @@ fn list_running_process_names() -> Vec<String> {
     let mut names = Vec::new();
     unsafe {
         let snapshot = win32::CreateToolhelp32Snapshot(win32::TH32CS_SNAPPROCESS, 0);
-        if snapshot.is_null() || snapshot == win32::INVALID_HANDLE_VALUE {
-            return names;
+        if !snapshot.is_null() && snapshot != win32::INVALID_HANDLE_VALUE {
+            let mut entry = std::mem::zeroed::<win32::PROCESSENTRY32W>();
+            entry.dw_size = std::mem::size_of::<win32::PROCESSENTRY32W>() as u32;
+
+            if win32::Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    let len = entry
+                        .sz_exe_file
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.sz_exe_file.len());
+                    let exe_name = String::from_utf16_lossy(&entry.sz_exe_file[..len]);
+                    if !exe_name.is_empty() {
+                        names.push(exe_name);
+                    }
+
+                    entry.dw_size = std::mem::size_of::<win32::PROCESSENTRY32W>() as u32;
+                    if win32::Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            win32::CloseHandle(snapshot);
         }
 
-        let mut entry = std::mem::zeroed::<win32::PROCESSENTRY32W>();
-        entry.dw_size = std::mem::size_of::<win32::PROCESSENTRY32W>() as u32;
-
-        if win32::Process32FirstW(snapshot, &mut entry) != 0 {
-            loop {
-                let len = entry
-                    .sz_exe_file
-                    .iter()
-                    .position(|&c| c == 0)
-                    .unwrap_or(entry.sz_exe_file.len());
-                let exe_name = String::from_utf16_lossy(&entry.sz_exe_file[..len]);
-                if !exe_name.is_empty() {
-                    names.push(exe_name);
-                }
-
-                if win32::Process32NextW(snapshot, &mut entry) == 0 {
-                    break;
+        // When running in job objects or sandboxed developer tools, Toolhelp32 may only return
+        // processes within the job object. Supplement by scanning active process IDs with
+        // OpenProcess (< 10ms, zero child processes) to ensure all system games are detected.
+        if names.len() < 50 {
+            let mut seen = names
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            for pid in (4..32768).step_by(4) {
+                let handle = win32::OpenProcess(win32::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if !handle.is_null() {
+                    let mut buf = [0u16; 512];
+                    let mut size = buf.len() as u32;
+                    if win32::QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size)
+                        != 0
+                        && size > 0
+                    {
+                        let path = String::from_utf16_lossy(&buf[..size as usize]);
+                        if let Some(file_name) = std::path::Path::new(&path)
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                        {
+                            if seen.insert(file_name.to_string()) {
+                                names.push(file_name.to_string());
+                            }
+                        }
+                    }
+                    win32::CloseHandle(handle);
                 }
             }
         }
-        win32::CloseHandle(snapshot);
     }
     names
 }
