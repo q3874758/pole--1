@@ -39,6 +39,7 @@ function initElements() {
   els.hourlyRewardRate = document.getElementById("hourly-reward-rate");
   els.playerAddressPreview = document.getElementById("player-address-preview");
   els.btnCopyAddress = document.getElementById("btn-copy-address");
+  els.btnChangeAddress = document.getElementById("btn-change-address");
 
   // 4 Core Metrics
   els.statHeartbeatsCount = document.getElementById("stat-heartbeats-count");
@@ -456,6 +457,33 @@ function setupEvents() {
         document.execCommand("copy");
         document.body.removeChild(textarea);
         showToast("✅ 已复制收款地址！");
+      }
+    });
+  }
+
+  // Change Address
+  if (els.btnChangeAddress) {
+    els.btnChangeAddress.addEventListener("click", async () => {
+      const current = state.rewardAddress || "";
+      const input = window.prompt("请输入新的 64 位十六进制收款地址 (32 字节)：", current);
+      if (!input) return;
+      const clean = input.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(clean)) {
+        alert("地址格式不正确！必须为 64 位十六进制字符 (例如: 8fb4159595f244b7...)");
+        return;
+      }
+      try {
+        const resp = await apiPost("/api/config", { reward_address: clean });
+        if (resp && resp.config) {
+          state.rewardAddress = clean;
+          els.playerAddressPreview.textContent = truncateStr(clean, 10, 8);
+          els.playerAddressPreview.title = clean;
+          showToast("✅ 收款地址已成功更新并生效！");
+        } else {
+          showToast("❌ 保存失败，请检查控制台");
+        }
+      } catch (err) {
+        showToast("❌ 更新请求失败: " + err.message);
       }
     });
   }
