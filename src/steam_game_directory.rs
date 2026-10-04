@@ -18,6 +18,8 @@ const KNOWN_STEAM_GAMES: &[(&str, AppId, u32)] = &[
     ("r5apex.exe", 1_172_470, 1_000_000),
     ("helldivers2.exe", 553_850, 1_000_000),
     ("tslgame.exe", 578_080, 1_000_000),
+    ("Genesis.exe", 4_891_320, 1_000_000),
+    ("TaskbarHero.exe", 3_678_970, 1_000_000),
 ];
 
 const KNOWN_EPIC_GAMES: &[(&str, AppId, u32)] = &[
@@ -305,11 +307,35 @@ pub fn discover_steam_library_roots() -> Vec<PathBuf> {
         }
     }
 
+    // 1. Query Windows Registry for configured SteamPath / InstallPath
+    for reg_path in crate::os_support::query_windows_steam_registry() {
+        roots.insert(reg_path);
+    }
+
+    // 2. Query environment variables
     if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
         roots.insert(PathBuf::from(program_files_x86).join("Steam"));
     }
     if let Some(program_files) = env::var_os("ProgramFiles") {
         roots.insert(PathBuf::from(program_files).join("Steam"));
+    }
+
+    // 3. Proactively scan all drive letters for common custom Steam install locations
+    for drive in ['C', 'D', 'E', 'F', 'G', 'H', 'Z'] {
+        let candidates = [
+            format!("{drive}:\\Steam"),
+            format!("{drive}:\\steam\\1"),
+            format!("{drive}:\\SteamLibrary"),
+            format!("{drive}:\\Games\\Steam"),
+            format!("{drive}:\\Program Files (x86)\\Steam"),
+            format!("{drive}:\\Program Files\\Steam"),
+        ];
+        for cand in candidates {
+            let p = PathBuf::from(cand);
+            if p.join("steamapps").exists() {
+                roots.insert(p);
+            }
+        }
     }
 
     let mut discovered = Vec::new();
@@ -365,3 +391,24 @@ fn normalize_process_name(input: &str) -> String {
         .trim_end_matches(".exe")
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_genesis_game_recognition() {
+        let mapping = infer_reward_game_mapping("Genesis.exe").expect("Genesis.exe must be recognized");
+        assert_eq!(mapping.process_name, "Genesis.exe");
+        assert_eq!(mapping.app_id, 4_891_320);
+        assert_eq!(mapping.game_coefficient_ppm, 1_000_000);
+    }
+
+    #[test]
+    fn test_discover_steam_library_roots() {
+        let roots = discover_steam_library_roots();
+        println!("Discovered Steam library roots: {:?}", roots);
+        assert!(!roots.is_empty(), "Must discover at least one steam root on this machine");
+    }
+}
+

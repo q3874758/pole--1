@@ -329,8 +329,21 @@ pub fn collect_gaming(
     let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
     let data_dir = PathBuf::from(&config.runtime.data_dir);
     let active_game_processes = crate::node_daemon::detect_active_game_processes(&config);
-    let foreground_process = crate::os_support::detect_foreground_process_name();
-    let foreground_title = crate::os_support::detect_foreground_window_title();
+    let raw_foreground_process = crate::os_support::detect_foreground_process_name();
+    let is_game_in_foreground = raw_foreground_process
+        .as_deref()
+        .map(crate::os_support::should_capture_foreground_process)
+        .unwrap_or(false);
+
+    let (foreground_process, foreground_title) = if is_game_in_foreground {
+        (
+            raw_foreground_process,
+            crate::os_support::detect_foreground_window_title(),
+        )
+    } else {
+        (None, None)
+    };
+
     let is_gaming = !active_game_processes.is_empty();
     let engagement_state = if let Some(ref first_game) = active_game_processes.first() {
         match crate::os_support::evaluate_game_engagement(first_game, None) {
@@ -347,10 +360,20 @@ pub fn collect_gaming(
     let working_set_mb = (crate::os_support::detect_process_working_set_bytes(std::process::id()) as f64)
         / (1024.0 * 1024.0);
 
+    let mut display_configured_games = config.runtime.game_process_names.clone();
+    for game in &active_game_processes {
+        if !display_configured_games
+            .iter()
+            .any(|g| g.eq_ignore_ascii_case(game))
+        {
+            display_configured_games.push(game.clone());
+        }
+    }
+
     Ok(ApiGamingResponse {
         gaming: GamingStatusView {
             active_game_processes,
-            configured_game_processes: config.runtime.game_process_names,
+            configured_game_processes: display_configured_games,
             foreground_process,
             foreground_title,
             engagement_state: engagement_state.to_string(),

@@ -520,6 +520,49 @@ pub fn normalize_process_name(input: &str) -> String {
         .to_string()
 }
 
+pub fn should_capture_foreground_process(process_name: &str) -> bool {
+    let normalized = normalize_process_name(process_name);
+    !normalized.is_empty()
+        && !matches!(
+            normalized.as_str(),
+            "pole"
+                | "pole-client"
+                | "pole-node"
+                | "cmd"
+                | "powershell"
+                | "pwsh"
+                | "conhost"
+                | "windowsterminal"
+                | "explorer"
+                | "devenv"
+                | "code"
+                | "idea64"
+                | "notepad"
+                | "notepad++"
+                | "svchost"
+                | "taskhostw"
+                | "taskmgr"
+                | "system"
+                | "idle"
+                | "registry"
+                | "smss"
+                | "csrss"
+                | "wininit"
+                | "services"
+                | "lsass"
+                | "fontdrvhost"
+                | "dwm"
+                | "antigravity"
+                | "msedge"
+                | "chrome"
+                | "firefox"
+                | "wemeetapp"
+                | "qq"
+                | "wechat"
+                | "steamwebhelper"
+        )
+}
+
 pub fn normalize_process_names(process_names: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut normalized = Vec::new();
@@ -554,6 +597,85 @@ pub fn match_configured_process_names(configured: &[String], running: &[String])
         .filter(|name| running_set.contains(*name))
         .cloned()
         .collect()
+}
+
+#[cfg(windows)]
+pub fn query_windows_steam_registry() -> Vec<std::path::PathBuf> {
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegOpenKeyExW(
+            h_key: isize,
+            lp_sub_key: *const u16,
+            ul_options: u32,
+            sam_desired: u32,
+            phk_result: *mut isize,
+        ) -> i32;
+        fn RegQueryValueExW(
+            h_key: isize,
+            lp_value_name: *const u16,
+            lp_reserved: *mut u32,
+            lp_type: *mut u32,
+            lp_data: *mut u8,
+            lpcb_data: *mut u32,
+        ) -> i32;
+        fn RegCloseKey(h_key: isize) -> i32;
+    }
+
+    const HKEY_CURRENT_USER: isize = -2147483647i32 as isize; // 0x80000001
+    const HKEY_LOCAL_MACHINE: isize = -2147483646i32 as isize; // 0x80000002
+    const KEY_READ: u32 = 0x20019;
+
+    let targets = [
+        (HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath"),
+        (HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SourceModInstallPath"),
+        (HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath"),
+        (HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", "InstallPath"),
+    ];
+
+    let mut roots = Vec::new();
+    for (hive, sub_key, val_name) in targets {
+        let sub_key_wide: Vec<u16> = sub_key.encode_utf16().chain(std::iter::once(0)).collect();
+        let val_name_wide: Vec<u16> = val_name.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut h_key: isize = 0;
+        unsafe {
+            if RegOpenKeyExW(hive, sub_key_wide.as_ptr(), 0, KEY_READ, &mut h_key) == 0 {
+                let mut buf = [0u8; 1024];
+                let mut size = buf.len() as u32;
+                let mut val_type = 0u32;
+                if RegQueryValueExW(
+                    h_key,
+                    val_name_wide.as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut val_type,
+                    buf.as_mut_ptr(),
+                    &mut size,
+                ) == 0
+                    && size > 0
+                {
+                    let u16_slice = std::slice::from_raw_parts(
+                        buf.as_ptr() as *const u16,
+                        (size as usize) / 2,
+                    );
+                    let len = u16_slice
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(u16_slice.len());
+                    let path_str = String::from_utf16_lossy(&u16_slice[..len]);
+                    let trimmed = path_str.trim().replace('/', "\\");
+                    if !trimmed.is_empty() {
+                        roots.push(std::path::PathBuf::from(trimmed));
+                    }
+                }
+                RegCloseKey(h_key);
+            }
+        }
+    }
+    roots
+}
+
+#[cfg(not(windows))]
+pub fn query_windows_steam_registry() -> Vec<std::path::PathBuf> {
+    Vec::new()
 }
 
 #[cfg(test)]

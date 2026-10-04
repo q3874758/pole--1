@@ -3387,7 +3387,29 @@ fn apply_background_runtime_hints(config: &NodeConfig) {
 }
 
 pub fn detect_active_game_processes(config: &NodeConfig) -> Vec<String> {
-    crate::os_support::detect_active_process_names(&config.runtime.game_process_names)
+    let mut detected =
+        crate::os_support::detect_active_process_names(&config.runtime.game_process_names);
+
+    // Also auto-discover running games directly from system processes against
+    // known game catalogs and discovered Steam library installations
+    let running = crate::os_support::list_running_process_names();
+    let steam_roots = crate::steam_game_directory::discover_steam_library_roots();
+    for proc in &running {
+        if !crate::os_support::should_capture_foreground_process(proc) {
+            continue;
+        }
+        let canonical = crate::steam_game_directory::canonical_process_name(proc);
+        if canonical.is_empty() || detected.iter().any(|g| g.eq_ignore_ascii_case(&canonical)) {
+            continue;
+        }
+        if crate::steam_game_directory::infer_reward_game_mapping_from_roots(&canonical, &steam_roots)
+            .is_some()
+        {
+            detected.push(canonical);
+        }
+    }
+
+    detected
 }
 
 pub fn detect_foreground_process_name() -> Option<String> {

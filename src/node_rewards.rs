@@ -1065,26 +1065,32 @@ fn select_active_game_mapping(
     active_game_processes: &[String],
 ) -> Option<(String, u32, u32)> {
     let foreground = foreground_process.and_then(|process_name| {
-        find_game_mapping(config, process_name).map(|mapping| {
-            (
-                canonical_process_name(&mapping.process_name),
-                mapping.app_id,
-                game_coefficient_ppm_for_app(config, mapping.app_id),
-            )
-        })
+        find_game_mapping(config, process_name)
+            .cloned()
+            .or_else(|| crate::steam_game_directory::infer_reward_game_mapping(process_name))
+            .map(|mapping| {
+                (
+                    canonical_process_name(&mapping.process_name),
+                    mapping.app_id,
+                    game_coefficient_ppm_for_app(config, mapping.app_id),
+                )
+            })
     });
     if foreground.is_some() {
         return foreground;
     }
 
     active_game_processes.iter().find_map(|process_name| {
-        find_game_mapping(config, process_name).map(|mapping| {
-            (
-                canonical_process_name(&mapping.process_name),
-                mapping.app_id,
-                game_coefficient_ppm_for_app(config, mapping.app_id),
-            )
-        })
+        find_game_mapping(config, process_name)
+            .cloned()
+            .or_else(|| crate::steam_game_directory::infer_reward_game_mapping(process_name))
+            .map(|mapping| {
+                (
+                    canonical_process_name(&mapping.process_name),
+                    mapping.app_id,
+                    game_coefficient_ppm_for_app(config, mapping.app_id),
+                )
+            })
     })
 }
 
@@ -1101,7 +1107,10 @@ pub fn active_mapped_apps(
 ) -> Vec<(String, u32)> {
     let mut apps = Vec::new();
     for process_name in active_game_processes {
-        if let Some(mapping) = find_game_mapping(config, process_name) {
+        let mapping_opt = find_game_mapping(config, process_name)
+            .cloned()
+            .or_else(|| crate::steam_game_directory::infer_reward_game_mapping(process_name));
+        if let Some(mapping) = mapping_opt {
             let entry = (
                 canonical_process_name(&mapping.process_name),
                 mapping.app_id,
