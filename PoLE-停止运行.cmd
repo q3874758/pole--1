@@ -1,24 +1,20 @@
-@echo off
-title PoLE - 停止运行
+﻿@echo off
 chcp 65001 >nul
-
-echo ===================================================
-echo             PoLE 协议 - 停止运行
-echo ===================================================
+title PoLE - 停止运行
 
 cd /d "%~dp0"
 
-if exist "target\release\pole.exe" (
-    "target\release\pole.exe" player-stop
-) else if exist "target\debug\pole.exe" (
-    "target\debug\pole.exe" player-stop
-) else if exist "pole.exe" (
-    "pole.exe" player-stop
-) else (
-    taskkill /f /im pole.exe >nul 2>&1
+echo [1/2] 正在停止 PoLE 后台服务...
+if exist "pole.exe" (
+    "pole.exe" player-stop >nul 2>&1
+) else if exist "target\release\pole.exe" (
+    "target\release\pole.exe" player-stop >nul 2>&1
 )
 
+echo [2/2] 正在清理进程...
+taskkill /f /im pole.exe >nul 2>&1
+
 echo.
-echo [完成] PoLE 后台服务及面板已完全停止。
-timeout /t 3 >nul
+echo [完成] PoLE 后台服务已停止。
+ping 127.0.0.1 -n 2 >nul
 exit

@@ -1195,6 +1195,7 @@ fn install_script_copies_binary_and_bootstraps_player_mode() {
         .join("Startup");
     let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
+        .join("archive")
         .join("install-pole-player.ps1");
     let binary = env!("CARGO_BIN_EXE_pole-client");
 
