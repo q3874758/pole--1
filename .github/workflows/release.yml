@@ -31,7 +31,7 @@ jobs:
       - name: Create portable zip
         run: |
           New-Item -ItemType Directory -Force -Path dist/packages | Out-Null
-          Compress-Archive -Path target/release/pole.exe,target/release/pole-client.exe,target/release/pole-node.exe,target/release/pole-genesis.exe,target/release/pole-sbom.exe -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
+          Compress-Archive -Path target/release/pole.exe,target/release/pole-client.exe,target/release/pole-node.exe,target/release/pole-genesis.exe,target/release/pole-sbom.exe,"PoLE-一键运行.cmd","PoLE-停止运行.cmd" -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums
         run: |
@@ -200,7 +200,8 @@ jobs:
           ## Windows Installation
           1. Download \`PoLE-${VERSION}-x64-portable.zip\`
           2. Extract to any folder
-          3. Run \`pole-node.exe\` (daemon) and \`pole-client.exe\` (CLI)
+          3. Double-click \`PoLE-一键运行.cmd\` (or \`pole.exe\`) to start with zero configuration
+          4. Double-click \`PoLE-停止运行.cmd\` to cleanly stop background services
 
           ## Verification
           Checksums are provided in \`.sha256\` files alongside each artifact.
