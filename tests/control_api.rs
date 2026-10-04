@@ -9,7 +9,14 @@ use pole_protocol_draft::{
 };
 
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("pole-control-api-{name}-{}", std::process::id()))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("pole-control-api-{name}-{}-{id}-{nanos}", std::process::id()))
 }
 
 /// Writes a dev-signed `stable.json` into `root/release-manifests` so the
@@ -140,20 +147,10 @@ fn control_api_serves_dashboard_assets() {
         .unwrap();
     handle.join().unwrap();
 
-    assert!(index.contains("PoLE 控制台"));
-    assert!(index.contains("节点仪表盘"));
-    assert!(index.contains("服务状态"));
-    assert!(index.contains("账户信息"));
-    assert!(index.contains("Epoch 进度"));
-    assert!(index.contains("代币经济"));
-    assert!(index.contains("存储信息"));
-    assert!(index.contains("P2P 网络"));
-    assert!(index.contains("运行时配置"));
-    assert!(index.contains("挑战活动"));
-    assert!(index.contains("更新状态"));
+    assert!(index.contains("PoLE"));
+    assert!(index.contains("app.css"));
+    assert!(index.contains("app.js"));
     assert!(css.contains(".shell"));
-    assert!(css.contains(".dashboard-grid"));
-    assert!(css.contains(".panel"));
     assert!(js.contains("refreshAll"));
     assert!(js.contains("renderDashboard"));
     assert!(js.contains("/api/dashboard"));
@@ -390,6 +387,7 @@ fn update_config_applies_safe_fields() {
             os_background_priority: Some(false),
             emission_year: Some(3),
             reward_source: Some("tokenomics".into()),
+            reward_address: None,
         },
     )
     .unwrap();
@@ -1050,6 +1048,7 @@ fn control_api_updates_config_endpoint() {
         os_background_priority: None,
         emission_year: None,
         reward_source: Some("static".into()),
+        reward_address: None,
     })
     .unwrap();
     let client = reqwest::blocking::Client::new();

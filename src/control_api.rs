@@ -79,6 +79,7 @@ pub fn collect_status(
         daemon_pid.map(process_is_running).unwrap_or(false),
     );
     let service_snapshot = runtime.snapshot();
+    let reward_address = config.effective_reward_address_hex();
 
     Ok(ApiStatusResponse {
         service: ServiceStatusView {
@@ -89,8 +90,8 @@ pub fn collect_status(
         },
         node: NodeHealthView {
             chain_id: config.chain_id,
+            reward_address,
             node_id: config.node_id_hex,
-            reward_address: config.reward_address_hex,
             data_dir: config.runtime.data_dir,
             next_epoch_id: summary.next_epoch_id,
             next_slot_id: summary.next_slot_id,
@@ -433,7 +434,7 @@ pub fn collect_dashboard(
             node: NodeHealthView {
                 chain_id: config.chain_id.clone(),
                 node_id: config.node_id_hex.clone(),
-                reward_address: config.reward_address_hex.clone(),
+                reward_address: config.effective_reward_address_hex(),
                 data_dir: config.runtime.data_dir.clone(),
                 next_epoch_id: summary.next_epoch_id,
                 next_slot_id: summary.next_slot_id,
@@ -504,7 +505,7 @@ pub fn collect_dashboard(
                 config_path: config_path.to_string_lossy().to_string(),
                 chain_id: config.chain_id.clone(),
                 node_id: config.node_id_hex.clone(),
-                reward_address: config.reward_address_hex.clone(),
+                reward_address: config.effective_reward_address_hex(),
                 data_dir: config.runtime.data_dir.clone(),
                 target_app_ids: config.runtime.target_app_ids.clone(),
                 game_process_names: config.runtime.game_process_names.clone(),
@@ -748,11 +749,12 @@ pub fn execute_update_action(
 }
 
 fn config_view_from_config(config_path: &Path, config: NodeConfig) -> ConfigView {
+    let reward_address = config.effective_reward_address_hex();
     ConfigView {
         config_path: config_path.to_string_lossy().into_owned(),
         chain_id: config.chain_id,
         node_id: config.node_id_hex,
-        reward_address: config.reward_address_hex,
+        reward_address,
         data_dir: config.runtime.data_dir,
         target_app_ids: config.runtime.target_app_ids,
         game_process_names: config.runtime.game_process_names,
@@ -796,6 +798,12 @@ pub fn update_config(
                 .into())
             }
         };
+    }
+    if let Some(reward_address) = request.reward_address {
+        let trimmed = reward_address.trim().to_string();
+        if !trimmed.is_empty() {
+            config.reward_address_hex = trimmed;
+        }
     }
 
     config.save_json(&resolved_path)?;

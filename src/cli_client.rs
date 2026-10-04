@@ -3254,12 +3254,14 @@ fn load_or_init_player_config(
             kp
         });
         resolved.node_id_hex = node_id_hex_from_identity(&keypair);
-        if resolved.reward_address_hex.is_empty()
-            || resolved.reward_address_hex == hex_32([0x11; 32])
-            || resolved.reward_address_hex == hex_32([0x31; 32])
-        {
+        if NodeConfig::is_placeholder_reward_address(&resolved.reward_address_hex) {
             resolved.reward_address_hex = resolved.node_id_hex.clone();
         }
+        resolved.save_json(config_path)?;
+    }
+
+    if NodeConfig::is_placeholder_reward_address(&resolved.reward_address_hex) {
+        resolved.reward_address_hex = resolved.node_id_hex.clone();
         resolved.save_json(config_path)?;
     }
 

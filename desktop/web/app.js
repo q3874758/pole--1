@@ -258,7 +258,11 @@ function renderDashboard(rawData) {
   }
 
   // Reward Address
-  const addr = config.reward_address || node.reward_address;
+  const isPlaceholderAddr = (a) => !a || /^0+$/.test(a) || /^1+$/.test(a) || /^2+$/.test(a) || /^3+$/.test(a) || /^4+$/.test(a);
+  let addr = config.reward_address || node.reward_address;
+  if (isPlaceholderAddr(addr) && node.node_id && !isPlaceholderAddr(node.node_id)) {
+    addr = node.node_id;
+  }
   if (addr) {
     state.rewardAddress = addr;
     els.playerAddressPreview.textContent = truncateStr(addr, 10, 8);

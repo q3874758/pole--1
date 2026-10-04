@@ -577,7 +577,33 @@ impl NodeConfig {
     }
 
     pub fn reward_address(&self) -> Result<Address, NodeConfigError> {
-        decode_hex_32(&self.reward_address_hex, "reward_address_hex")
+        decode_hex_32(&self.effective_reward_address_hex(), "reward_address_hex")
+    }
+
+    pub fn is_placeholder_reward_address(addr: &str) -> bool {
+        let trimmed = addr.trim();
+        trimmed.is_empty()
+            || trimmed == hex_32([0x00; 32])
+            || trimmed == hex_32([0x11; 32])
+            || trimmed == hex_32([0x22; 32])
+            || trimmed == hex_32([0x31; 32])
+            || trimmed == hex_32([0x41; 32])
+    }
+
+    pub fn has_placeholder_reward_address(&self) -> bool {
+        Self::is_placeholder_reward_address(&self.reward_address_hex)
+    }
+
+    pub fn effective_reward_address_hex(&self) -> String {
+        if self.has_placeholder_reward_address()
+            && !self.node_id_hex.trim().is_empty()
+            && self.node_id_hex != hex_32([0x11; 32])
+            && self.node_id_hex != hex_32([0x31; 32])
+        {
+            self.node_id_hex.clone()
+        } else {
+            self.reward_address_hex.clone()
+        }
     }
 
     /// Loads the node's Ed25519 identity key pair from `identity.json` in the
@@ -747,5 +773,27 @@ mod tests {
         assert_eq!(legacy.address_hex(), keypair.address_hex());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn placeholder_reward_address_detection_and_fallback() {
+        let mut config = NodeConfig::default();
+        assert!(config.has_placeholder_reward_address());
+        assert_eq!(config.reward_address_hex, hex_32([0x22; 32]));
+
+        // When node_id_hex is still default placeholder (0x11), effective address remains reward_address_hex
+        assert_eq!(config.effective_reward_address_hex(), hex_32([0x22; 32]));
+
+        // Once node_id_hex is set to a real key, effective address falls back to node_id_hex
+        let real_node_id = "b63fdcf0cf4330f74fe58dc854c6f5050191c76e0823fa09d16c1c4f0fa9cb8d";
+        config.node_id_hex = real_node_id.to_string();
+        assert_eq!(config.effective_reward_address_hex(), real_node_id);
+        assert_eq!(config.reward_address().unwrap(), decode_hex_32(real_node_id, "reward_address_hex").unwrap());
+
+        // Custom real reward address is honored
+        let custom_reward = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        config.reward_address_hex = custom_reward.to_string();
+        assert!(!config.has_placeholder_reward_address());
+        assert_eq!(config.effective_reward_address_hex(), custom_reward);
     }
 }

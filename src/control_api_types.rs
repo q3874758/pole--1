@@ -161,6 +161,8 @@ pub struct ConfigUpdateRequest {
     pub emission_year: Option<u32>,
     #[serde(default)]
     pub reward_source: Option<String>,
+    #[serde(default)]
+    pub reward_address: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
