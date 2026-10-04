@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -262,13 +262,18 @@ pub fn default_available_channels() -> Vec<ChannelOption> {
     ]
 }
 
-pub fn get_update_channel_status(start_dir: Option<&Path>, force_refresh: bool) -> UpdateChannelInfo {
+pub fn get_update_channel_status(
+    start_dir: Option<&Path>,
+    force_refresh: bool,
+) -> UpdateChannelInfo {
     let active_channel = get_active_channel(start_dir);
 
     if !force_refresh {
         if let Ok(lock) = UPDATE_CACHE.lock() {
             if let Some(ref entry) = *lock {
-                if entry.channel == active_channel && entry.fetched_at.elapsed() < Duration::from_secs(300) {
+                if entry.channel == active_channel
+                    && entry.fetched_at.elapsed() < Duration::from_secs(300)
+                {
                     return entry.info.clone();
                 }
             }
@@ -311,7 +316,12 @@ fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateCh
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let now_str = format!("{}:{:02}:{:02}", (now_secs / 3600) % 24, (now_secs / 60) % 60, now_secs % 60);
+    let now_str = format!(
+        "{}:{:02}:{:02}",
+        (now_secs / 3600) % 24,
+        (now_secs / 60) % 60,
+        now_secs % 60
+    );
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(2500))
@@ -322,7 +332,10 @@ fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateCh
         "dev" => {
             let mut remote_commit = None;
             if let Ok(ref c) = client {
-                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/commits/main").send() {
+                if let Ok(resp) = c
+                    .get("https://api.github.com/repos/q3874758/pole--1/commits/main")
+                    .send()
+                {
                     if resp.status().is_success() {
                         if let Ok(json) = resp.json::<serde_json::Value>() {
                             if let Some(sha) = json.get("sha").and_then(|s| s.as_str()) {
@@ -365,7 +378,9 @@ fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateCh
                 synced,
                 release_name: Some("GitHub main 分支实时提交".to_string()),
                 release_notes: None,
-                download_url: Some("https://github.com/q3874758/pole--1/archive/refs/heads/main.zip".to_string()),
+                download_url: Some(
+                    "https://github.com/q3874758/pole--1/archive/refs/heads/main.zip".to_string(),
+                ),
                 html_url: "https://github.com/q3874758/pole--1".to_string(),
                 last_checked: now_str,
                 message,
@@ -378,18 +393,36 @@ fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateCh
             let mut download_url = None;
 
             if let Ok(ref c) = client {
-                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/releases").send() {
+                if let Ok(resp) = c
+                    .get("https://api.github.com/repos/q3874758/pole--1/releases")
+                    .send()
+                {
                     if resp.status().is_success() {
                         if let Ok(json) = resp.json::<serde_json::Value>() {
                             if let Some(first) = json.as_array().and_then(|arr| arr.first()) {
-                                remote_tag = first.get("tag_name").and_then(|s| s.as_str()).map(|s| s.to_string());
-                                release_name = first.get("name").and_then(|s| s.as_str()).map(|s| s.to_string());
-                                release_notes = first.get("body").and_then(|s| s.as_str()).map(|s| s.to_string());
-                                if let Some(assets) = first.get("assets").and_then(|a| a.as_array()) {
+                                remote_tag = first
+                                    .get("tag_name")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.to_string());
+                                release_name = first
+                                    .get("name")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.to_string());
+                                release_notes = first
+                                    .get("body")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.to_string());
+                                if let Some(assets) = first.get("assets").and_then(|a| a.as_array())
+                                {
                                     for asset in assets {
-                                        if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                                        if let Some(name) =
+                                            asset.get("name").and_then(|n| n.as_str())
+                                        {
                                             if name.ends_with(".zip") {
-                                                download_url = asset.get("browser_download_url").and_then(|u| u.as_str()).map(|u| u.to_string());
+                                                download_url = asset
+                                                    .get("browser_download_url")
+                                                    .and_then(|u| u.as_str())
+                                                    .map(|u| u.to_string());
                                                 break;
                                             }
                                         }
@@ -438,17 +471,32 @@ fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateCh
             let mut download_url = None;
 
             if let Ok(ref c) = client {
-                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/releases/latest").send() {
+                if let Ok(resp) = c
+                    .get("https://api.github.com/repos/q3874758/pole--1/releases/latest")
+                    .send()
+                {
                     if resp.status().is_success() {
                         if let Ok(json) = resp.json::<serde_json::Value>() {
-                            remote_tag = json.get("tag_name").and_then(|s| s.as_str()).map(|s| s.to_string());
-                            release_name = json.get("name").and_then(|s| s.as_str()).map(|s| s.to_string());
-                            release_notes = json.get("body").and_then(|s| s.as_str()).map(|s| s.to_string());
+                            remote_tag = json
+                                .get("tag_name")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.to_string());
+                            release_name = json
+                                .get("name")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.to_string());
+                            release_notes = json
+                                .get("body")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.to_string());
                             if let Some(assets) = json.get("assets").and_then(|a| a.as_array()) {
                                 for asset in assets {
                                     if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
                                         if name.ends_with(".zip") {
-                                            download_url = asset.get("browser_download_url").and_then(|u| u.as_str()).map(|u| u.to_string());
+                                            download_url = asset
+                                                .get("browser_download_url")
+                                                .and_then(|u| u.as_str())
+                                                .map(|u| u.to_string());
                                             break;
                                         }
                                     }
@@ -495,8 +543,14 @@ fn is_version_higher(remote: &str, current: &str) -> bool {
     let clean_remote = remote.trim_start_matches('v').trim();
     let clean_current = current.trim_start_matches('v').trim();
 
-    let r_parts: Vec<u64> = clean_remote.split('.').filter_map(|s| s.parse().ok()).collect();
-    let c_parts: Vec<u64> = clean_current.split('.').filter_map(|s| s.parse().ok()).collect();
+    let r_parts: Vec<u64> = clean_remote
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let c_parts: Vec<u64> = clean_current
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
 
     for i in 0..std::cmp::max(r_parts.len(), c_parts.len()) {
         let r_val = r_parts.get(i).copied().unwrap_or(0);
@@ -522,7 +576,10 @@ pub fn apply_update_channel(start_dir: Option<&Path>) -> GitSyncResult {
                 ok: true,
                 updated: false,
                 current_commit: info.current_version.clone(),
-                message: format!("🎉 发现新版本 {}！已获取下载链接，请下载解压后覆盖更新。", info.remote_version),
+                message: format!(
+                    "🎉 发现新版本 {}！已获取下载链接，请下载解压后覆盖更新。",
+                    info.remote_version
+                ),
                 details: info.download_url,
             }
         } else {
@@ -562,7 +619,7 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
 
         let mut pull_cmd = Command::new("git");
         pull_cmd.current_dir(root);
-        pull_cmd.args(&["pull", "--ff-only", "origin", &branch]);
+        pull_cmd.args(["pull", "--ff-only", "origin", &branch]);
         pull_cmd.stdin(Stdio::null());
         pull_cmd.stdout(Stdio::piped());
         pull_cmd.stderr(Stdio::piped());
@@ -600,7 +657,11 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let combined = if stderr.trim().is_empty() { stdout } else { stderr };
+                let combined = if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                };
                 if combined.contains("Already up to date") {
                     GitSyncResult {
                         ok: true,
@@ -619,15 +680,13 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
                     }
                 }
             }
-            Err(e) => {
-                GitSyncResult {
-                    ok: false,
-                    updated: false,
-                    current_commit: old_commit,
-                    message: format!("执行 git 进程失败: {e}"),
-                    details: None,
-                }
-            }
+            Err(e) => GitSyncResult {
+                ok: false,
+                updated: false,
+                current_commit: old_commit,
+                message: format!("执行 git 进程失败: {e}"),
+                details: None,
+            },
         }
     } else {
         let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
@@ -635,7 +694,9 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
             ok: true,
             updated: false,
             current_commit: current_version.clone(),
-            message: format!("绿色便携版已连接 GitHub Releases 通道，当前版本 {current_version} 为最新。"),
+            message: format!(
+                "绿色便携版已连接 GitHub Releases 通道，当前版本 {current_version} 为最新。"
+            ),
             details: None,
         }
     }

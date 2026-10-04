@@ -3402,8 +3402,11 @@ pub fn detect_active_game_processes(config: &NodeConfig) -> Vec<String> {
         if canonical.is_empty() || detected.iter().any(|g| g.eq_ignore_ascii_case(&canonical)) {
             continue;
         }
-        if crate::steam_game_directory::infer_reward_game_mapping_from_roots(&canonical, &steam_roots)
-            .is_some()
+        if crate::steam_game_directory::infer_reward_game_mapping_from_roots(
+            &canonical,
+            &steam_roots,
+        )
+        .is_some()
         {
             detected.push(canonical);
         }

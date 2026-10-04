@@ -398,7 +398,8 @@ mod tests {
 
     #[test]
     fn test_genesis_game_recognition() {
-        let mapping = infer_reward_game_mapping("Genesis.exe").expect("Genesis.exe must be recognized");
+        let mapping =
+            infer_reward_game_mapping("Genesis.exe").expect("Genesis.exe must be recognized");
         assert_eq!(mapping.process_name, "Genesis.exe");
         assert_eq!(mapping.app_id, 4_891_320);
         assert_eq!(mapping.game_coefficient_ppm, 1_000_000);
@@ -408,7 +409,9 @@ mod tests {
     fn test_discover_steam_library_roots() {
         let roots = discover_steam_library_roots();
         println!("Discovered Steam library roots: {:?}", roots);
-        assert!(!roots.is_empty(), "Must discover at least one steam root on this machine");
+        assert!(
+            !roots.is_empty(),
+            "Must discover at least one steam root on this machine"
+        );
     }
 }
-

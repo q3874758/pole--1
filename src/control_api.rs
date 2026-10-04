@@ -346,7 +346,7 @@ pub fn collect_gaming(
     };
 
     let is_gaming = !active_game_processes.is_empty();
-    let engagement_state = if let Some(ref first_game) = active_game_processes.first() {
+    let engagement_state = if let Some(first_game) = active_game_processes.first() {
         match crate::os_support::evaluate_game_engagement(first_game, None) {
             crate::os_support::PlayEngagementState::InWorld => "InWorld",
             crate::os_support::PlayEngagementState::MainMenu => "MainMenu",
@@ -358,7 +358,8 @@ pub fn collect_gaming(
     let play_heartbeats_count = count_files_in_dir(&data_dir.join("play-heartbeats"), ".json");
     let play_sessions_count = count_files_in_dir(&data_dir.join("play-sessions"), ".json");
     let player_blocks_count = count_files_in_dir(&data_dir.join("player-reward-blocks"), ".json");
-    let working_set_mb = (crate::os_support::detect_process_working_set_bytes(std::process::id()) as f64)
+    let working_set_mb = (crate::os_support::detect_process_working_set_bytes(std::process::id())
+        as f64)
         / (1024.0 * 1024.0);
 
     let mut display_configured_games = config.runtime.game_process_names.clone();
@@ -1206,29 +1207,42 @@ pub fn handle_connection(
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/git/status") => {
-            let body = serde_json::to_string(&crate::git_sync::get_git_status(Some(config_path.as_ref())))?;
+            let body = serde_json::to_string(&crate::git_sync::get_git_status(Some(config_path)))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("POST", "/api/git/sync") => {
-            let body = serde_json::to_string(&crate::git_sync::sync_git(Some(config_path.as_ref())))?;
+            let body = serde_json::to_string(&crate::git_sync::sync_git(Some(config_path)))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/update/status") => {
-            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(Some(config_path.as_ref()), false))?;
+            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(
+                Some(config_path),
+                false,
+            ))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("POST", "/api/update/channel") => {
             let req: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-            let channel = req.get("channel").and_then(|v| v.as_str()).unwrap_or("stable");
-            let body = serde_json::to_string(&crate::git_sync::set_active_channel(Some(config_path.as_ref()), channel))?;
+            let channel = req
+                .get("channel")
+                .and_then(|v| v.as_str())
+                .unwrap_or("stable");
+            let body = serde_json::to_string(&crate::git_sync::set_active_channel(
+                Some(config_path),
+                channel,
+            ))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("POST", "/api/update/check") => {
-            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(Some(config_path.as_ref()), true))?;
+            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(
+                Some(config_path),
+                true,
+            ))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("POST", "/api/update/sync") => {
-            let body = serde_json::to_string(&crate::git_sync::apply_update_channel(Some(config_path.as_ref())))?;
+            let body =
+                serde_json::to_string(&crate::git_sync::apply_update_channel(Some(config_path)))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/config") => {

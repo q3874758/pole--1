@@ -579,10 +579,7 @@ fn status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         DEFAULT_CONFIG_PATH.to_string()
     };
-    let config_path = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or(&default_path);
+    let config_path = args.get(2).map(String::as_str).unwrap_or(&default_path);
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
     let summary = load_status(&config)?;
     let active_game_processes = detect_active_game_processes(&config);

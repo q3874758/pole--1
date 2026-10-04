@@ -16,7 +16,10 @@ fn temp_root(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!("pole-control-api-{name}-{}-{id}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "pole-control-api-{name}-{}-{id}-{nanos}",
+        std::process::id()
+    ))
 }
 
 /// Writes a dev-signed `stable.json` into `root/release-manifests` so the

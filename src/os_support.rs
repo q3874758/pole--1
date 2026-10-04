@@ -627,8 +627,16 @@ pub fn query_windows_steam_registry() -> Vec<std::path::PathBuf> {
 
     let targets = [
         (HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath"),
-        (HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SourceModInstallPath"),
-        (HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath"),
+        (
+            HKEY_CURRENT_USER,
+            "Software\\Valve\\Steam",
+            "SourceModInstallPath",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            "SOFTWARE\\WOW6432Node\\Valve\\Steam",
+            "InstallPath",
+        ),
         (HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", "InstallPath"),
     ];
 
@@ -652,10 +660,8 @@ pub fn query_windows_steam_registry() -> Vec<std::path::PathBuf> {
                 ) == 0
                     && size > 0
                 {
-                    let u16_slice = std::slice::from_raw_parts(
-                        buf.as_ptr() as *const u16,
-                        (size as usize) / 2,
-                    );
+                    let u16_slice =
+                        std::slice::from_raw_parts(buf.as_ptr() as *const u16, (size as usize) / 2);
                     let len = u16_slice
                         .iter()
                         .position(|&c| c == 0)

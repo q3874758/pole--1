@@ -788,7 +788,10 @@ mod tests {
         let real_node_id = "b63fdcf0cf4330f74fe58dc854c6f5050191c76e0823fa09d16c1c4f0fa9cb8d";
         config.node_id_hex = real_node_id.to_string();
         assert_eq!(config.effective_reward_address_hex(), real_node_id);
-        assert_eq!(config.reward_address().unwrap(), decode_hex_32(real_node_id, "reward_address_hex").unwrap());
+        assert_eq!(
+            config.reward_address().unwrap(),
+            decode_hex_32(real_node_id, "reward_address_hex").unwrap()
+        );
 
         // Custom real reward address is honored
         let custom_reward = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
