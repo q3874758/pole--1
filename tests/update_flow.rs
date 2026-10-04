@@ -19,9 +19,6 @@ fn temp_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pole-update-flow-{name}-{}", std::process::id()))
 }
 
-// Platform-aware test artifact: the updater selects artifacts matching the
-// current platform, so tests must not hardcode the Windows-only variant.
-#[cfg(windows)]
 fn test_artifact() -> ReleaseArtifact {
     ReleaseArtifact {
         platform: "windows".into(),
@@ -32,37 +29,12 @@ fn test_artifact() -> ReleaseArtifact {
     }
 }
 
-#[cfg(not(windows))]
-fn test_artifact() -> ReleaseArtifact {
-    ReleaseArtifact {
-        platform: "linux".into(),
-        kind: "deb".into(),
-        path: "pole-node_0.2.0_amd64.deb".into(),
-        sha256: "abc".into(),
-        size_bytes: 42,
-    }
-}
-
-#[cfg(windows)]
 const TEST_ARTIFACT_KIND: &str = "msi";
-#[cfg(not(windows))]
-const TEST_ARTIFACT_KIND: &str = "deb";
-
-#[cfg(windows)]
 const TEST_ARTIFACT_PATH: &str = "PoLE-0.2.0-x64.msi";
-#[cfg(not(windows))]
-const TEST_ARTIFACT_PATH: &str = "pole-node_0.2.0_amd64.deb";
 
-// Install-target binary name per platform: msi installs to
-// pole-node.exe, deb to pole-node.
-#[cfg(windows)]
+// Install-target binary name on Windows
 fn target_binary_name() -> &'static str {
     "pole-node.exe"
-}
-
-#[cfg(not(windows))]
-fn target_binary_name() -> &'static str {
-    "pole-node"
 }
 
 fn env_lock() -> &'static Mutex<()> {
@@ -264,11 +236,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
                 .join("stable.json")
                 .to_string_lossy()
                 .into_owned(),
-            artifact_kind: if cfg!(windows) {
-                TEST_ARTIFACT_KIND.into()
-            } else {
-                "deb".into()
-            },
+            artifact_kind: TEST_ARTIFACT_KIND.into(),
             artifact_path: TEST_ARTIFACT_PATH.into(),
             applied_at_millis: applied.applied_at_millis,
         }
@@ -285,10 +253,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
     );
     let switch_execution =
         load_switch_execution_record(switch_execution_record_path(&update_dir)).unwrap();
-    assert_eq!(
-        switch_execution.artifact_kind,
-        if cfg!(windows) { "msi" } else { "deb" }
-    );
+    assert_eq!(switch_execution.artifact_kind, "msi");
     assert!(PathBuf::from(&switch_execution.source_artifact_path).exists());
     assert!(PathBuf::from(&switch_execution.applied_artifact_path).exists());
     let install_action = load_install_action_plan(install_action_plan_path(&update_dir)).unwrap();
@@ -299,10 +264,7 @@ fn apply_update_promotes_pending_plan_to_applied_record() {
     assert_eq!(overview.current_version, "0.2.0");
     assert_eq!(overview.pending_target_version, None);
     assert_eq!(overview.applied_target_version.as_deref(), Some("0.2.0"));
-    assert_eq!(
-        overview.selected_artifact_kind.as_deref(),
-        Some(if cfg!(windows) { "msi" } else { "deb" })
-    );
+    assert_eq!(overview.selected_artifact_kind.as_deref(), Some("msi"));
     assert!(overview.executed_artifact_path.is_some());
     assert!(overview.planned_install_path.is_some());
     assert!(overview.planned_backup_path.is_some());
@@ -333,16 +295,8 @@ fn apply_update_requires_service_window_when_daemon_pid_is_running() {
         channel: "stable".into(),
         version: "0.2.0".into(),
         artifacts: vec![ReleaseArtifact {
-            platform: if cfg!(windows) {
-                "windows".into()
-            } else {
-                "linux".into()
-            },
-            kind: if cfg!(windows) {
-                TEST_ARTIFACT_KIND.into()
-            } else {
-                "deb".into()
-            },
+            platform: "windows".into(),
+            kind: TEST_ARTIFACT_KIND.into(),
             path: "artifact.bin".into(),
             sha256: "abc".into(),
             size_bytes: 42,
@@ -387,16 +341,8 @@ fn update_overview_uses_managed_service_status_for_window_check() {
         channel: "stable".into(),
         version: "0.2.0".into(),
         artifacts: vec![ReleaseArtifact {
-            platform: if cfg!(windows) {
-                "windows".into()
-            } else {
-                "linux".into()
-            },
-            kind: if cfg!(windows) {
-                TEST_ARTIFACT_KIND.into()
-            } else {
-                "deb".into()
-            },
+            platform: "windows".into(),
+            kind: TEST_ARTIFACT_KIND.into(),
             path: "artifact.bin".into(),
             sha256: "abc".into(),
             size_bytes: 42,

@@ -107,10 +107,6 @@ pub struct UpdateActionRequest {
     #[serde(default)]
     pub start_service_after_rollback: bool,
     #[serde(default)]
-    pub systemd_unit_root: Option<String>,
-    #[serde(default)]
-    pub systemctl_binary: Option<String>,
-    #[serde(default)]
     pub windows_service_root: Option<String>,
     #[serde(default)]
     pub windows_sc_binary: Option<String>,
@@ -181,10 +177,6 @@ pub struct ApiLogsResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ServiceActionRequest {
-    #[serde(default)]
-    pub systemd_unit_root: Option<String>,
-    #[serde(default)]
-    pub systemctl_binary: Option<String>,
     #[serde(default)]
     pub windows_service_root: Option<String>,
     #[serde(default)]

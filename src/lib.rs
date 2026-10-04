@@ -37,7 +37,6 @@ pub mod params;
 pub mod primitives;
 pub mod records;
 pub mod service_runtime;
-pub mod service_systemd;
 pub mod service_windows;
 pub mod signing;
 pub mod state;
@@ -192,7 +191,6 @@ pub use service_runtime::{
     ManagedServiceStatus, ServiceManager, ServiceManagerError, ServiceRuntime, ServiceSnapshot,
     ServiceState,
 };
-pub use service_systemd::{SystemdServiceManager, SystemdUnitDefinition, SYSTEMD_SERVICE_NAME};
 pub use service_windows::{
     WindowsServiceDefinition, WindowsServiceManager, WINDOWS_SERVICE_DISPLAY_NAME,
     WINDOWS_SERVICE_NAME,

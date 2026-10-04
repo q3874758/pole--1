@@ -18,7 +18,7 @@
 1. **真实游玩，相互见证**：无需可信中心化服务器，通过对等节点间的**相互证明与反作弊见证**确认玩家真实在玩游戏且未作假。**玩家挂机睡觉（AFK）在游戏世界中完全认可**，但**停留在启动器（Launcher）、登录界面或主菜单（Title Screen）将被精准甄别并拒绝发奖**。
 2. **双边激励，全网发奖**：协议同时为**玩游戏的节点（玩家主奖励）**与**提供见证背书的节点（见证服务奖励）**发放双边激励，形成“玩即挖矿，见证即挖矿”的双边自驱生态。
 3. **无上限弹性发行 + 活动销毁保值（通缩飞轮）**：奖励随全网真实游戏活跃度按需铸造，**无固定发行上限**；单位产出通过平方根负反馈平抑（`AdjustedHourlyReward`）。同时，协议开放**应用级活动销毁接口（`MsgActivityBurn`）**（由游戏发行商促销、电竞赛事门票、公会冲榜、赛季战令等自主销毁）及底层 5 大协议销毁通道，活动越繁荣、通缩销毁越强劲，持续支撑代币内在价值。
-4. **原生零开销静默后台（EcoQoS）**：硬件调度级后台服务，基于 Win32 / POSIX 原生系统调用，强制绑定能效小核（E-Core）与自动物理内存裁剪（空闲驻留 **< 15MB**，CPU 占用 **< 0.1%**），彻底杜绝游戏掉帧与微卡顿（Micro-stuttering）。
+4. **原生零开销静默后台（EcoQoS）**：硬件调度级后台服务，基于 Win32 原生系统调用，强制绑定能效小核（E-Core）与自动物理内存裁剪（空闲驻留 **< 15MB**，CPU 占用 **< 0.1%**），彻底杜绝游戏掉帧与微卡顿（Micro-stuttering）。
 
 ---
 
@@ -75,7 +75,7 @@ flowchart TD
 * **原生零开销多维感知**：
   - **窗口标题实时过滤**：基于 Win32 `GetWindowText` 过滤带有 `Launcher`、`Login`、`Title Screen` 等字样的主窗口；
   - **物理工作集内存跃迁检测**：区分主菜单（通常 < 120MB UI 内存）与 3D 游戏真实世界资产载入（数 GB 内存阶跃）；
-  - **跨平台支持**：Linux 环境读取 `/proc/[pid]/exe` 软链接与 cmdline，精准匹配长进程名称。
+  - **极速免子进程侦测**：直接调用 Win32 Toolhelp32 快照与 FFI，毫秒级比对目标游戏进程，无任何外部脚本或控制台弹出。
 
 ### 2. P2P 邻居相互见证自动广播闭环
 * **去中心化广播总线**：
@@ -115,7 +115,7 @@ flowchart TD
 | **去中心化节点与客户端** | Rust (Tokio, Borsh, Ed25519) | 游戏进程感知、前台焦点探测、心跳分桶、本地验证与原生后台调度 (`pole-client` / `pole-node` / `pole`) |
 | **专用结算与验证公链** | Cosmos SDK v0.54, CometBFT (Go) | 节点质押、批次承诺、互证判定 (`session.go`)、奖励根校验、按需铸币与活动销毁 (`x/pole`, `poled`) |
 | **桌面控制面与仪表盘** | Rust (HTTP / REST) + HTML5 / CSS3 / JS | 节点状态自检、P2P 拓扑监控、奖励收益查看、服务启停与本地仪表盘 (`desktop/web/`) |
-| **原生后台服务驱动** | Win32 API / Linux systemd | Windows EcoQoS 调度、`IDLE_PRIORITY_CLASS`、工作集物理内存精简，零卡顿运行 |
+| **原生后台服务驱动** | Win32 API / Windows Service (sc.exe) | Windows EcoQoS 调度、`IDLE_PRIORITY_CLASS`、工作集物理内存精简，零卡顿运行 |
 
 ---
 
@@ -184,7 +184,7 @@ cargo test --features integration --test integration
   - [代码追踪矩阵 (Traceability)](TRACEABILITY.md)：白皮书协议公式到 Rust / Go 源码实现的文件映射。
 - **运维与操作指南**：
   - [节点安装指引](docs/operations/install.md)：各平台便携包与系统依赖部署。
-  - [后台服务管理](docs/operations/service-management.md)：Windows Service 与 Linux systemd 注册运维。
+  - [后台服务管理](docs/operations/service-management.md)：Windows Service 注册运维与 EcoQoS 能效配置。
   - [测试网与联调](docs/operations/testnet.md)：本地多节点集群联调与跨网络测试。
   - [故障排查手册](docs/operations/troubleshooting.md)：常见问题排查与节点诊断。
   - [自动更新机制](docs/operations/update.md)：签名清单验证、增量更新与安全回滚。

@@ -1,4 +1,4 @@
-//! OS-level support for lightweight, zero-overhead background operations.
+//! OS-level support for lightweight, zero-overhead background operations on Windows.
 //!
 //! Designed specifically to eliminate game performance impacts:
 //! - Direct Win32 FFI for process priority (Idle / Background mode) and EcoQoS (Efficiency Mode on E-cores)
@@ -6,14 +6,12 @@
 //! - Direct Win32 FFI for foreground window and process detection (< 0.01ms overhead)
 //! - Direct Win32 FFI for active process enumeration via Toolhelp32 snapshot (< 1ms overhead)
 //! - Working set memory trimming to keep RAM usage minimal (< 15MB)
-//! - POSIX equivalents for Unix/Linux platforms
 
 #![allow(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[cfg(windows)]
 mod win32 {
     pub use std::ffi::c_void;
 
@@ -102,12 +100,10 @@ mod win32 {
 }
 
 /// Applies background OS priority hints to ensure zero interference with games:
-/// - Windows: sets `PROCESS_MODE_BACKGROUND_BEGIN` (or `IDLE_PRIORITY_CLASS`) for lowest CPU and Disk I/O priority.
-/// - Windows: sets `PROCESS_POWER_THROTTLING_EXECUTION_SPEED` (EcoQoS) to route execution strictly to E-cores.
-/// - Windows: trims working set to minimize physical RAM consumption.
-/// - Unix: sets `nice(19)` via `setpriority`.
+/// - Sets `IDLE_PRIORITY_CLASS` for lowest CPU and Disk I/O priority.
+/// - Sets `PROCESS_POWER_THROTTLING_EXECUTION_SPEED` (EcoQoS) to route execution strictly to E-cores.
+/// - Trims working set to minimize physical RAM consumption.
 pub fn apply_process_background_priority() {
-    #[cfg(windows)]
     unsafe {
         let handle = win32::GetCurrentProcess();
 
@@ -131,20 +127,10 @@ pub fn apply_process_background_priority() {
         // 3. Trim working set
         trim_process_working_set();
     }
-
-    #[cfg(not(windows))]
-    unsafe {
-        extern "C" {
-            fn setpriority(which: i32, who: i32, prio: i32) -> i32;
-        }
-        // PRIO_PROCESS = 0, who = 0 (current process), prio = 19 (lowest CPU scheduling priority)
-        let _ = setpriority(0, 0, 19);
-    }
 }
 
 /// Trims unused pages from the process working set, keeping physical memory footprint minimal.
 pub fn trim_process_working_set() {
-    #[cfg(windows)]
     unsafe {
         let handle = win32::GetCurrentProcess();
         win32::SetProcessWorkingSetSize(handle, usize::MAX, usize::MAX);
@@ -158,7 +144,6 @@ pub fn is_process_running(pid: u32) -> bool {
         return false;
     }
 
-    #[cfg(windows)]
     unsafe {
         let handle = win32::OpenProcess(win32::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
@@ -169,14 +154,6 @@ pub fn is_process_running(pid: u32) -> bool {
         win32::CloseHandle(handle);
         ok != 0 && exit_code == win32::STILL_ACTIVE
     }
-
-    #[cfg(not(windows))]
-    unsafe {
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        kill(pid as i32, 0) == 0
-    }
 }
 
 /// Terminates a process by PID using native OS APIs.
@@ -185,42 +162,22 @@ pub fn kill_process(pid: u32) -> bool {
         return false;
     }
 
-    #[cfg(windows)]
-    {
-        unsafe {
-            let handle = win32::OpenProcess(win32::PROCESS_TERMINATE, 0, pid);
-            if !handle.is_null() {
-                let res = win32::TerminateProcess(handle, 1);
-                win32::CloseHandle(handle);
-                if res != 0 {
-                    return true;
-                }
-            }
-        }
-        // Fallback to taskkill if TerminateProcess was refused (e.g. cross-session or elevation)
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(windows))]
-    {
-        unsafe {
-            extern "C" {
-                fn kill(pid: i32, sig: i32) -> i32;
-            }
-            if kill(pid as i32, 15) == 0 {
+    unsafe {
+        let handle = win32::OpenProcess(win32::PROCESS_TERMINATE, 0, pid);
+        if !handle.is_null() {
+            let res = win32::TerminateProcess(handle, 1);
+            win32::CloseHandle(handle);
+            if res != 0 {
                 return true;
             }
         }
-        std::process::Command::new("sh")
-            .args(["-c", &format!("kill -TERM {pid} >/dev/null 2>&1")])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
     }
+    // Fallback to taskkill if TerminateProcess was refused (e.g. cross-session or elevation)
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 /// Detects the executable name of the active foreground window without child process spawning.
@@ -229,7 +186,6 @@ pub fn detect_foreground_process_name() -> Option<String> {
         return display_process_name(&override_name);
     }
 
-    #[cfg(windows)]
     unsafe {
         let user32 = win32::LoadLibraryA(b"user32.dll\0".as_ptr());
         if user32.is_null() {
@@ -292,11 +248,6 @@ pub fn detect_foreground_process_name() -> Option<String> {
 
         display_process_name(file_name)
     }
-
-    #[cfg(not(windows))]
-    {
-        None
-    }
 }
 
 /// Detects the window title of the current foreground active window.
@@ -308,7 +259,6 @@ pub fn detect_foreground_window_title() -> Option<String> {
         }
     }
 
-    #[cfg(windows)]
     unsafe {
         let user32 = win32::LoadLibraryA(b"user32.dll\0".as_ptr());
         if user32.is_null() {
@@ -347,11 +297,6 @@ pub fn detect_foreground_window_title() -> Option<String> {
             Some(trimmed.to_string())
         }
     }
-
-    #[cfg(not(windows))]
-    {
-        None
-    }
 }
 
 /// Detects the physical working set size (in bytes) of a process by PID.
@@ -360,7 +305,6 @@ pub fn detect_process_working_set_bytes(pid: u32) -> u64 {
         return 0;
     }
 
-    #[cfg(windows)]
     unsafe {
         let kernel32 = win32::LoadLibraryA(b"kernel32.dll\0".as_ptr());
         if kernel32.is_null() {
@@ -397,12 +341,6 @@ pub fn detect_process_working_set_bytes(pid: u32) -> u64 {
         } else {
             0
         }
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = pid;
-        0
     }
 }
 
@@ -478,7 +416,6 @@ pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEng
     }
 
     // 3. Low working-set threshold check for 3D PC games
-    #[cfg(windows)]
     if let Some(pid_val) = pid {
         let working_set = detect_process_working_set_bytes(pid_val);
         // Modern 3D PC games (cs2, elden ring, etc.) occupy multi-GB when world assets load;
@@ -507,36 +444,10 @@ pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
         return Vec::new();
     }
 
-    #[cfg(windows)]
-    {
-        let running = list_running_process_names();
-        match_configured_process_names(&configured, &running)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut running = Vec::new();
-        if let Ok(entries) = std::fs::read_dir("/proc") {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if let Ok(target) = std::fs::read_link(p.join("exe")) {
-                    if let Some(file_name) = target.file_name().and_then(|f| f.to_str()) {
-                        running.push(file_name.to_string());
-                    }
-                }
-                if let Ok(comm) = std::fs::read_to_string(p.join("comm")) {
-                    let name = comm.trim().to_string();
-                    if !name.is_empty() {
-                        running.push(name);
-                    }
-                }
-            }
-        }
-        match_configured_process_names(&configured, &running)
-    }
+    let running = list_running_process_names();
+    match_configured_process_names(&configured, &running)
 }
 
-#[cfg(windows)]
 fn list_running_process_names() -> Vec<String> {
     let mut names = Vec::new();
     unsafe {
@@ -609,16 +520,7 @@ pub fn match_configured_process_names(configured: &[String], running: &[String])
         .collect::<BTreeSet<_>>();
     configured
         .iter()
-        .filter(|name| {
-            if running_set.contains(*name) {
-                return true;
-            }
-            // On Linux /proc/[pid]/comm is capped at 15 chars (TASK_COMM_LEN - 1).
-            // Allow prefix match when the running name is 15 chars and configured is longer.
-            running_set
-                .iter()
-                .any(|r| r.len() == 15 && name.starts_with(r))
-        })
+        .filter(|name| running_set.contains(*name))
         .cloned()
         .collect()
 }
@@ -628,11 +530,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_match_configured_process_names_truncated_comm() {
-        let configured = vec!["pole_protocol_draft-96c1047ed732d60a".to_string()];
-        let running = vec!["pole_protocol_d".to_string()];
+    fn test_match_configured_process_names() {
+        let configured = vec!["cs2".to_string(), "dota2".to_string()];
+        let running = vec!["cs2.exe".to_string(), "explorer.exe".to_string()];
         let matched = match_configured_process_names(&configured, &running);
-        assert_eq!(matched, vec!["pole_protocol_draft-96c1047ed732d60a"]);
+        assert_eq!(matched, vec!["cs2"]);
     }
 
     #[test]

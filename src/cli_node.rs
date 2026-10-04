@@ -725,7 +725,7 @@ fn service_run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     let (_config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     println!("service_mode=true");
-    println!("service_name={}", crate::SYSTEMD_SERVICE_NAME);
+    println!("service_name={}", crate::WINDOWS_SERVICE_NAME);
     println!("config_path={}", args[2]);
     println!("data_dir={}", config.runtime.data_dir);
     Ok(())
@@ -739,20 +739,11 @@ fn service_install_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>
     #[cfg(windows)]
     let _ = &config;
     let exe = std::env::current_exe()?;
-    #[cfg(windows)]
     let manager = windows_service_manager(&exe, &config_path);
-    #[cfg(not(windows))]
-    let manager = linux_service_manager(&exe, &config_path, &config);
     manager.install()?;
     println!("service_name={}", manager.service_name());
     println!("service_install_supported=true");
     println!("config_path={}", config_path.to_string_lossy());
-    #[cfg(not(windows))]
-    println!(
-        "service_unit_path={}",
-        linux_service_unit_path(&exe, &config_path, &config).display()
-    );
-    #[cfg(windows)]
     println!(
         "service_registration_path={}",
         windows_service_registration_path(&exe, &config_path).display()
@@ -764,14 +755,9 @@ fn service_uninstall_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Erro
     if args.len() != 3 {
         return Err("usage: pole-node service-uninstall <config-path>".into());
     }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
+    let (config_path, _config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     let exe = std::env::current_exe()?;
-    #[cfg(windows)]
-    let _ = &config;
-    #[cfg(windows)]
     let manager = windows_service_manager(&exe, &config_path);
-    #[cfg(not(windows))]
-    let manager = linux_service_manager(&exe, &config_path, &config);
     manager.uninstall()?;
     println!("service_uninstall_supported=true");
     println!("config_path={}", config_path.to_string_lossy());
@@ -782,14 +768,9 @@ fn service_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
     if args.len() != 3 {
         return Err("usage: pole-node service-start <config-path>".into());
     }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    #[cfg(windows)]
-    let _ = &config;
+    let (config_path, _config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     let exe = std::env::current_exe()?;
-    #[cfg(windows)]
     let manager = windows_service_manager(&exe, &config_path);
-    #[cfg(not(windows))]
-    let manager = linux_service_manager(&exe, &config_path, &config);
     manager.start()?;
     println!("service_start_supported=true");
     println!("config_path={}", config_path.to_string_lossy());
@@ -800,14 +781,9 @@ fn service_stop_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
         return Err("usage: pole-node service-stop <config-path>".into());
     }
-    let (config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
-    #[cfg(windows)]
-    let _ = &config;
+    let (config_path, _config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     let exe = std::env::current_exe()?;
-    #[cfg(windows)]
     let manager = windows_service_manager(&exe, &config_path);
-    #[cfg(not(windows))]
-    let manager = linux_service_manager(&exe, &config_path, &config);
     manager.stop()?;
     println!("service_stop_supported=true");
     println!("config_path={}", config_path.to_string_lossy());
@@ -820,20 +796,11 @@ fn service_status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
     }
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(&args[2])?;
     let exe = std::env::current_exe()?;
-    #[cfg(windows)]
     let manager = windows_service_manager(&exe, &config_path);
-    #[cfg(not(windows))]
-    let manager = linux_service_manager(&exe, &config_path, &config);
     let status = manager.status()?;
     println!("service_name={}", manager.service_name());
     println!("service_status={status:?}");
     println!("data_dir={}", config.runtime.data_dir);
-    #[cfg(not(windows))]
-    println!(
-        "service_unit_path={}",
-        linux_service_unit_path(&exe, &config_path, &config).display()
-    );
-    #[cfg(windows)]
     println!(
         "service_registration_path={}",
         windows_service_registration_path(&exe, &config_path).display()
@@ -841,12 +808,10 @@ fn service_status_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-#[cfg(windows)]
 fn windows_service_manager(exe: &Path, config_path: &Path) -> crate::WindowsServiceManager {
     crate::WindowsServiceManager::new(windows_service_definition(exe, config_path))
 }
 
-#[cfg(windows)]
 fn windows_service_definition(exe: &Path, config_path: &Path) -> crate::WindowsServiceDefinition {
     let definition = crate::WindowsServiceDefinition::new(exe, config_path);
     let definition = if let Ok(service_root) = env::var("POLE_WINDOWS_SERVICE_ROOT") {
@@ -861,42 +826,8 @@ fn windows_service_definition(exe: &Path, config_path: &Path) -> crate::WindowsS
     }
 }
 
-#[cfg(windows)]
 fn windows_service_registration_path(exe: &Path, config_path: &Path) -> PathBuf {
     windows_service_definition(exe, config_path).registration_path()
-}
-
-#[cfg(not(windows))]
-fn linux_service_manager(
-    exe: &Path,
-    config_path: &Path,
-    config: &NodeConfig,
-) -> crate::SystemdServiceManager {
-    crate::SystemdServiceManager::new(linux_service_definition(exe, config_path, config))
-}
-
-#[cfg(not(windows))]
-fn linux_service_definition(
-    exe: &Path,
-    config_path: &Path,
-    config: &NodeConfig,
-) -> crate::SystemdUnitDefinition {
-    let definition = crate::SystemdUnitDefinition::new(exe, config_path, &config.runtime.data_dir);
-    let definition = if let Ok(unit_root) = env::var("POLE_SYSTEMD_UNIT_ROOT") {
-        definition.with_unit_root(unit_root)
-    } else {
-        definition
-    };
-    if let Ok(systemctl_binary) = env::var("POLE_SYSTEMCTL_BINARY") {
-        definition.with_systemctl_binary(systemctl_binary)
-    } else {
-        definition
-    }
-}
-
-#[cfg(not(windows))]
-fn linux_service_unit_path(exe: &Path, config_path: &Path, config: &NodeConfig) -> PathBuf {
-    linux_service_definition(exe, config_path, config).unit_path()
 }
 
 fn print_node_storage_and_network_status(summary: &crate::NodeStatusSummary) {

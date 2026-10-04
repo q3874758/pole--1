@@ -622,11 +622,11 @@ fn control_api_serves_commit_install_endpoint() {
         serde_json::json!({
             "channel": "stable",
             "target_version": "0.2.0",
-            "artifact_kind": "deb",
+            "artifact_kind": "msi",
             "target_mode": "override_root",
             "staged_artifact_path": current_dir.join("artifact.bin").to_string_lossy().into_owned(),
-            "target_install_path": "/opt/pole/pole-node",
-            "backup_path": "/opt/pole/pole-node.bak",
+            "target_install_path": "pole-node.exe",
+            "backup_path": "pole-node.exe.bak",
             "strategy": "copy_then_swap",
             "planned_at_millis": 1
         })
@@ -654,8 +654,6 @@ fn control_api_serves_commit_install_endpoint() {
         start_service_after_install: false,
         stop_service_before_rollback: false,
         start_service_after_rollback: false,
-        systemd_unit_root: None,
-        systemctl_binary: None,
         windows_service_root: None,
         windows_sc_binary: None,
     })
@@ -673,7 +671,7 @@ fn control_api_serves_commit_install_endpoint() {
     assert!(response.contains("\"action\":\"commit-install\""));
     assert!(response.contains("\"status\":\"install_executed\""));
     assert!(response.contains("\"install_execution_path\":\""));
-    assert!(install_root.join("pole-node").exists());
+    assert!(install_root.join("pole-node.exe").exists());
 
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -701,11 +699,11 @@ fn control_api_serves_commit_install_with_installed_layout_override() {
         serde_json::json!({
             "channel": "stable",
             "target_version": "0.2.0",
-            "artifact_kind": "deb",
+            "artifact_kind": "msi",
             "target_mode": "installed_layout_override",
             "staged_artifact_path": current_dir.join("artifact.bin").to_string_lossy().into_owned(),
-            "target_install_path": "/opt/pole/pole-node",
-            "backup_path": "/opt/pole/pole-node.bak",
+            "target_install_path": "pole-node.exe",
+            "backup_path": "pole-node.exe.bak",
             "strategy": "copy_then_swap",
             "planned_at_millis": 1
         })
@@ -733,8 +731,6 @@ fn control_api_serves_commit_install_with_installed_layout_override() {
         start_service_after_install: false,
         stop_service_before_rollback: false,
         start_service_after_rollback: false,
-        systemd_unit_root: None,
-        systemctl_binary: None,
         windows_service_root: None,
         windows_sc_binary: None,
     })
@@ -751,7 +747,7 @@ fn control_api_serves_commit_install_with_installed_layout_override() {
 
     assert!(response.contains("\"action\":\"commit-install\""));
     assert!(response.contains("\"status\":\"install_executed\""));
-    assert!(installed_root.join("pole-node").exists());
+    assert!(installed_root.join("pole-node.exe").exists());
 
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -779,11 +775,11 @@ fn control_api_commit_install_can_stop_service_when_requested() {
         serde_json::json!({
             "channel": "stable",
             "target_version": "0.2.0",
-            "artifact_kind": "deb",
+            "artifact_kind": "msi",
             "target_mode": "override_root",
             "staged_artifact_path": current_dir.join("artifact.bin").to_string_lossy().into_owned(),
-            "target_install_path": "/opt/pole/pole-node",
-            "backup_path": "/opt/pole/pole-node.bak",
+            "target_install_path": "pole-node.exe",
+            "backup_path": "pole-node.exe.bak",
             "strategy": "copy_then_swap",
             "planned_at_millis": 1
         })
@@ -791,38 +787,13 @@ fn control_api_commit_install_can_stop_service_when_requested() {
     )
     .unwrap();
 
-    #[cfg(not(windows))]
-    let manager_root = root.join("systemd");
-    #[cfg(windows)]
     let manager_root = root.join("windows-service");
     std::fs::create_dir_all(&manager_root).unwrap();
-    #[cfg(not(windows))]
-    std::fs::write(manager_root.join("pole-node.service"), "unit").unwrap();
-    #[cfg(windows)]
     std::fs::write(manager_root.join("PoLENode.service.json"), "{}").unwrap();
 
-    #[cfg(not(windows))]
-    let control_binary = root.join("systemctl");
-    #[cfg(windows)]
     let control_binary = root.join("sc.cmd");
     let control_log = root.join("control.log");
 
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &control_binary,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"is-active\" ]; then echo active; fi\nif [ \"$1\" = \"stop\" ] || [ \"$1\" = \"start\" ]; then echo \"$@\" >> \"{}\"; fi\nexit 0\n",
-                control_log.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&control_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&control_binary, perms).unwrap();
-    }
-    #[cfg(windows)]
     std::fs::write(
         &control_binary,
         format!(
@@ -850,10 +821,8 @@ fn control_api_commit_install_can_stop_service_when_requested() {
         "allow_system_install_write": false,
         "stop_service_before_install": true,
         "start_service_after_install": true,
-        "systemd_unit_root": if cfg!(not(windows)) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "systemctl_binary": if cfg!(not(windows)) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_service_root": if cfg!(windows) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_sc_binary": if cfg!(windows) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> }
+        "windows_service_root": Some(manager_root.to_string_lossy().into_owned()),
+        "windows_sc_binary": Some(control_binary.to_string_lossy().into_owned())
     })
     .to_string();
     let response = client
@@ -868,16 +837,8 @@ fn control_api_commit_install_can_stop_service_when_requested() {
 
     assert!(response.contains("\"status\":\"install_executed_service_restarted\""));
     let log = std::fs::read_to_string(&control_log).unwrap();
-    #[cfg(not(windows))]
-    {
-        assert!(log.contains("stop pole-node.service"));
-        assert!(log.contains("start pole-node.service"));
-    }
-    #[cfg(windows)]
-    {
-        assert!(log.contains("stop PoLENode"));
-        assert!(log.contains("start PoLENode"));
-    }
+    assert!(log.contains("stop PoLENode"));
+    assert!(log.contains("start PoLENode"));
 }
 
 #[test]
@@ -908,38 +869,13 @@ fn control_api_rollback_can_stop_and_restart_service_when_requested() {
     )
     .unwrap();
 
-    #[cfg(not(windows))]
-    let manager_root = root.join("systemd");
-    #[cfg(windows)]
     let manager_root = root.join("windows-service");
     std::fs::create_dir_all(&manager_root).unwrap();
-    #[cfg(not(windows))]
-    std::fs::write(manager_root.join("pole-node.service"), "unit").unwrap();
-    #[cfg(windows)]
     std::fs::write(manager_root.join("PoLENode.service.json"), "{}").unwrap();
 
-    #[cfg(not(windows))]
-    let control_binary = root.join("systemctl");
-    #[cfg(windows)]
     let control_binary = root.join("sc.cmd");
     let control_log = root.join("control.log");
 
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &control_binary,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"is-active\" ]; then echo active; exit 0; fi\nif [ \"$1\" = \"stop\" ] || [ \"$1\" = \"start\" ]; then echo \"$@\" >> \"{}\"; exit 0; fi\nexit 0\n",
-                control_log.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&control_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&control_binary, perms).unwrap();
-    }
-    #[cfg(windows)]
     std::fs::write(
         &control_binary,
         format!(
@@ -961,10 +897,8 @@ fn control_api_rollback_can_stop_and_restart_service_when_requested() {
     let payload = serde_json::json!({
         "stop_service_before_rollback": true,
         "start_service_after_rollback": true,
-        "systemd_unit_root": if cfg!(not(windows)) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "systemctl_binary": if cfg!(not(windows)) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_service_root": if cfg!(windows) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_sc_binary": if cfg!(windows) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> }
+        "windows_service_root": Some(manager_root.to_string_lossy().into_owned()),
+        "windows_sc_binary": Some(control_binary.to_string_lossy().into_owned())
     })
     .to_string();
     let response = client
@@ -979,16 +913,8 @@ fn control_api_rollback_can_stop_and_restart_service_when_requested() {
 
     assert!(response.contains("\"status\":\"rolled_back_service_restarted\""));
     let log = std::fs::read_to_string(&control_log).unwrap();
-    #[cfg(not(windows))]
-    {
-        assert!(log.contains("stop pole-node.service"));
-        assert!(log.contains("start pole-node.service"));
-    }
-    #[cfg(windows)]
-    {
-        assert!(log.contains("stop PoLENode"));
-        assert!(log.contains("start PoLENode"));
-    }
+    assert!(log.contains("stop PoLENode"));
+    assert!(log.contains("start PoLENode"));
 }
 
 #[test]
@@ -1014,11 +940,11 @@ fn control_api_commit_install_rolls_back_when_service_restart_fails() {
         serde_json::json!({
             "channel": "stable",
             "target_version": "0.2.0",
-            "artifact_kind": "deb",
+            "artifact_kind": "msi",
             "target_mode": "override_root",
             "staged_artifact_path": current_dir.join("artifact.bin").to_string_lossy().into_owned(),
-            "target_install_path": "/opt/pole/pole-node",
-            "backup_path": "/opt/pole/pole-node.bak",
+            "target_install_path": "pole-node.exe",
+            "backup_path": "pole-node.exe.bak",
             "strategy": "copy_then_swap",
             "planned_at_millis": 1
         })
@@ -1037,39 +963,13 @@ fn control_api_commit_install_rolls_back_when_service_restart_fails() {
     )
     .unwrap();
 
-    #[cfg(not(windows))]
-    let manager_root = root.join("systemd");
-    #[cfg(windows)]
     let manager_root = root.join("windows-service");
     std::fs::create_dir_all(&manager_root).unwrap();
-    #[cfg(not(windows))]
-    std::fs::write(manager_root.join("pole-node.service"), "unit").unwrap();
-    #[cfg(windows)]
     std::fs::write(manager_root.join("PoLENode.service.json"), "{}").unwrap();
 
-    #[cfg(not(windows))]
-    let control_binary = root.join("systemctl");
-    #[cfg(windows)]
     let control_binary = root.join("sc.cmd");
     let control_log = root.join("control.log");
 
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &control_binary,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"is-active\" ]; then echo active; exit 0; fi\nif [ \"$1\" = \"stop\" ]; then echo \"$@\" >> \"{}\"; exit 0; fi\nif [ \"$1\" = \"start\" ]; then echo \"$@\" >> \"{}\"; exit 1; fi\nexit 0\n",
-                control_log.display(),
-                control_log.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&control_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&control_binary, perms).unwrap();
-    }
-    #[cfg(windows)]
     std::fs::write(
         &control_binary,
         format!(
@@ -1082,7 +982,7 @@ fn control_api_commit_install_rolls_back_when_service_restart_fails() {
 
     let install_root = root.join("install-root");
     std::fs::create_dir_all(&install_root).unwrap();
-    std::fs::write(install_root.join("pole-node"), b"old-version").unwrap();
+    std::fs::write(install_root.join("pole-node.exe"), b"old-version").unwrap();
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1099,10 +999,8 @@ fn control_api_commit_install_rolls_back_when_service_restart_fails() {
         "allow_system_install_write": false,
         "stop_service_before_install": true,
         "start_service_after_install": true,
-        "systemd_unit_root": if cfg!(not(windows)) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "systemctl_binary": if cfg!(not(windows)) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_service_root": if cfg!(windows) { Some(manager_root.to_string_lossy().into_owned()) } else { None::<String> },
-        "windows_sc_binary": if cfg!(windows) { Some(control_binary.to_string_lossy().into_owned()) } else { None::<String> }
+        "windows_service_root": Some(manager_root.to_string_lossy().into_owned()),
+        "windows_sc_binary": Some(control_binary.to_string_lossy().into_owned())
     })
     .to_string();
     let response = client
@@ -1117,10 +1015,10 @@ fn control_api_commit_install_rolls_back_when_service_restart_fails() {
 
     assert!(response.contains("\"status\":\"install_executed_service_restart_failed_rolled_back\""));
     assert_eq!(
-        std::fs::read(install_root.join("pole-node")).unwrap(),
+        std::fs::read(install_root.join("pole-node.exe")).unwrap(),
         b"old-version"
     );
-    assert!(!install_root.join("pole-node.bak").exists());
+    assert!(!install_root.join("pole-node.exe.bak").exists());
 }
 
 #[test]
@@ -1217,49 +1115,21 @@ fn execute_service_action_installs_and_uninstalls_service() {
     config.runtime.data_dir = data_dir.to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
 
-    #[cfg(windows)]
     let request = ServiceActionRequest {
         windows_service_root: Some(root.join("windows-service").to_string_lossy().into_owned()),
         windows_sc_binary: Some(root.join("sc.cmd").to_string_lossy().into_owned()),
-        ..ServiceActionRequest::default()
-    };
-    #[cfg(not(windows))]
-    let request = ServiceActionRequest {
-        systemd_unit_root: Some(root.join("systemd").to_string_lossy().into_owned()),
-        systemctl_binary: Some(root.join("systemctl").to_string_lossy().into_owned()),
-        ..ServiceActionRequest::default()
     };
 
-    #[cfg(windows)]
     std::fs::write(root.join("sc.cmd"), "@echo off\r\nexit /b 0\r\n").unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(root.join("systemctl"), "#!/bin/sh\nexit 0\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(root.join("systemctl"))
-            .unwrap()
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(root.join("systemctl"), perms).unwrap();
-    }
 
     let install =
         execute_control_api_service_action(&config_path, "install", request.clone()).unwrap();
     assert_eq!(install.action, "install");
     assert_eq!(install.status, "stopped");
 
-    #[cfg(windows)]
-    {
-        let registration_path = root.join("windows-service").join("PoLENode.service.json");
-        let registration = std::fs::read_to_string(&registration_path).unwrap();
-        assert!(registration.contains("pole-node"));
-    }
-    #[cfg(not(windows))]
-    {
-        let unit_path = root.join("systemd").join("pole-node.service");
-        let unit = std::fs::read_to_string(&unit_path).unwrap();
-        assert!(unit.contains("pole-node service-run"));
-    }
+    let registration_path = root.join("windows-service").join("PoLENode.service.json");
+    let registration = std::fs::read_to_string(&registration_path).unwrap();
+    assert!(registration.contains("pole-node"));
 
     let uninstall =
         execute_control_api_service_action(&config_path, "uninstall", request.clone()).unwrap();
@@ -1283,33 +1153,13 @@ fn control_api_serves_service_action_endpoint() {
     config.runtime.data_dir = data_dir.to_string_lossy().into_owned();
     config.save_json(&config_path).unwrap();
 
-    #[cfg(windows)]
     let payload = serde_json::to_string(&ServiceActionRequest {
         windows_service_root: Some(root.join("windows-service").to_string_lossy().into_owned()),
         windows_sc_binary: Some(root.join("sc.cmd").to_string_lossy().into_owned()),
-        ..ServiceActionRequest::default()
-    })
-    .unwrap();
-    #[cfg(not(windows))]
-    let payload = serde_json::to_string(&ServiceActionRequest {
-        systemd_unit_root: Some(root.join("systemd").to_string_lossy().into_owned()),
-        systemctl_binary: Some(root.join("systemctl").to_string_lossy().into_owned()),
-        ..ServiceActionRequest::default()
     })
     .unwrap();
 
-    #[cfg(windows)]
     std::fs::write(root.join("sc.cmd"), "@echo off\r\nexit /b 0\r\n").unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(root.join("systemctl"), "#!/bin/sh\nexit 0\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(root.join("systemctl"))
-            .unwrap()
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(root.join("systemctl"), perms).unwrap();
-    }
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

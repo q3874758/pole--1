@@ -167,15 +167,12 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
     let config_path = root.join("client.json");
     #[cfg(windows)]
     let app_data = root.join("appdata");
-    #[cfg(windows)]
     let startup_dir = app_data
         .join("Microsoft")
         .join("Windows")
         .join("Start Menu")
         .join("Programs")
         .join("Startup");
-    #[cfg(not(windows))]
-    let app_data = PathBuf::new();
     let binary = env!("CARGO_BIN_EXE_pole-client");
     let output = Command::new(binary)
         .env("APPDATA", &app_data)
@@ -199,12 +196,7 @@ fn player_start_bootstraps_player_mode_and_captures_foreground_game() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PoLE player mode started"));
     assert!(stdout.contains("captured_game_process=Some(\"BlackMythWukong.exe\")"));
-    // Startup-folder autostart is a Windows-only capability; on other
-    // platforms the player-start flow reports it as disabled.
-    #[cfg(windows)]
     assert!(stdout.contains("autostart_enabled=true"));
-    #[cfg(not(windows))]
-    assert!(stdout.contains("autostart_enabled=false"));
     assert!(stdout.contains("background_mode=watch"));
     assert!(stdout.contains("background_start_skipped=true"));
 
@@ -2835,7 +2827,6 @@ fn control_api_open_starts_dashboard_server_and_uses_browser_opener() {
     assert!(init.status.success());
 
     let opener_log = root.join("opened-url.txt");
-    #[cfg(windows)]
     let opener_path = {
         let path = root.join("browser.cmd");
         std::fs::write(
@@ -2846,23 +2837,6 @@ fn control_api_open_starts_dashboard_server_and_uses_browser_opener() {
             ),
         )
         .unwrap();
-        path
-    };
-    #[cfg(not(windows))]
-    let opener_path = {
-        let path = root.join("browser.sh");
-        std::fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\nprintf '%s' \"$1\" > '{}'\n",
-                opener_log.to_string_lossy()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
         path
     };
 

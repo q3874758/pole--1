@@ -680,35 +680,10 @@ fn pole_node_service_commands_are_exposed() {
     NodeConfig::default().save_json(&config_path).unwrap();
     let binary = env!("CARGO_BIN_EXE_pole-node");
 
-    #[cfg(not(windows))]
-    let unit_root = root.join("systemd");
-    #[cfg(windows)]
     let service_root = root.join("windows-service");
-    #[cfg(not(windows))]
-    let control_binary = root.join("systemctl");
-    #[cfg(windows)]
     let control_binary = root.join("sc.cmd");
     let control_log = root.join("control.log");
 
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &control_binary,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n",
-                control_log.display()
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&control_binary).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&control_binary, perms).unwrap();
-        }
-    }
-    #[cfg(windows)]
     std::fs::write(
         &control_binary,
         format!(
@@ -720,16 +695,8 @@ fn pole_node_service_commands_are_exposed() {
 
     let mut status_command = Command::new(binary);
     status_command.arg("service-status").arg(&config_path);
-    #[cfg(not(windows))]
-    {
-        status_command.env("POLE_SYSTEMD_UNIT_ROOT", &unit_root);
-        status_command.env("POLE_SYSTEMCTL_BINARY", &control_binary);
-    }
-    #[cfg(windows)]
-    {
-        status_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
-        status_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
-    }
+    status_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
+    status_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
     let status = status_command.output().unwrap();
     assert!(
         status.status.success(),
@@ -739,48 +706,21 @@ fn pole_node_service_commands_are_exposed() {
     );
     let stdout = String::from_utf8_lossy(&status.stdout);
     assert!(stdout.contains("service_name="));
-    #[cfg(windows)]
-    {
-        assert!(stdout.contains("service_status=NotInstalled"));
-        assert!(stdout.contains(&format!(
-            "service_registration_path={}",
-            service_root.join("PoLENode.service.json").to_string_lossy()
-        )));
-    }
-    #[cfg(not(windows))]
-    {
-        assert!(stdout.contains("service_status=NotInstalled"));
-        assert!(stdout.contains(&format!(
-            "service_unit_path={}",
-            unit_root.join("pole-node.service").to_string_lossy()
-        )));
-    }
+    assert!(stdout.contains("service_status=NotInstalled"));
+    assert!(stdout.contains(&format!(
+        "service_registration_path={}",
+        service_root.join("PoLENode.service.json").to_string_lossy()
+    )));
 
     let mut install_command = Command::new(binary);
     install_command.arg("service-install").arg(&config_path);
-    #[cfg(not(windows))]
-    {
-        install_command.env("POLE_SYSTEMD_UNIT_ROOT", &unit_root);
-        install_command.env("POLE_SYSTEMCTL_BINARY", &control_binary);
-    }
-    #[cfg(windows)]
-    {
-        install_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
-        install_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
-    }
+    install_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
+    install_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
     let install = install_command.output().unwrap();
     assert!(install.status.success());
     let stdout = String::from_utf8_lossy(&install.stdout);
-    #[cfg(windows)]
-    {
-        assert!(stdout.contains("service_install_supported=true"));
-        assert!(service_root.join("PoLENode.service.json").exists());
-    }
-    #[cfg(not(windows))]
-    {
-        assert!(stdout.contains("service_install_supported=true"));
-        assert!(unit_root.join("pole-node.service").exists());
-    }
+    assert!(stdout.contains("service_install_supported=true"));
+    assert!(service_root.join("PoLENode.service.json").exists());
 
     let run = Command::new(binary)
         .arg("service-run")
@@ -793,16 +733,8 @@ fn pole_node_service_commands_are_exposed() {
 
     let mut start_command = Command::new(binary);
     start_command.arg("service-start").arg(&config_path);
-    #[cfg(not(windows))]
-    {
-        start_command.env("POLE_SYSTEMD_UNIT_ROOT", &unit_root);
-        start_command.env("POLE_SYSTEMCTL_BINARY", &control_binary);
-    }
-    #[cfg(windows)]
-    {
-        start_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
-        start_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
-    }
+    start_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
+    start_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
     let start = start_command.output().unwrap();
     assert!(start.status.success());
     let stdout = String::from_utf8_lossy(&start.stdout);
@@ -810,61 +742,28 @@ fn pole_node_service_commands_are_exposed() {
 
     let mut stop_command = Command::new(binary);
     stop_command.arg("service-stop").arg(&config_path);
-    #[cfg(not(windows))]
-    {
-        stop_command.env("POLE_SYSTEMD_UNIT_ROOT", &unit_root);
-        stop_command.env("POLE_SYSTEMCTL_BINARY", &control_binary);
-    }
-    #[cfg(windows)]
-    {
-        stop_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
-        stop_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
-    }
+    stop_command.env("POLE_WINDOWS_SERVICE_ROOT", &service_root);
+    stop_command.env("POLE_WINDOWS_SC_BINARY", &control_binary);
     let stop = stop_command.output().unwrap();
     assert!(stop.status.success());
     let stdout = String::from_utf8_lossy(&stop.stdout);
     assert!(stdout.contains("service_stop_supported=true"));
 
     let control_log_contents = std::fs::read_to_string(&control_log).unwrap();
-    #[cfg(windows)]
-    {
-        assert!(control_log_contents.contains("start PoLENode"));
-        assert!(control_log_contents.contains("stop PoLENode"));
-    }
-    #[cfg(not(windows))]
-    {
-        assert!(control_log_contents.contains("start pole-node.service"));
-        assert!(control_log_contents.contains("stop pole-node.service"));
-    }
+    assert!(control_log_contents.contains("start PoLENode"));
+    assert!(control_log_contents.contains("stop PoLENode"));
 
-    #[cfg(not(windows))]
-    {
-        let mut uninstall_command = Command::new(binary);
-        uninstall_command
-            .arg("service-uninstall")
-            .arg(&config_path)
-            .env("POLE_SYSTEMD_UNIT_ROOT", &unit_root)
-            .env("POLE_SYSTEMCTL_BINARY", &control_binary);
-        let uninstall = uninstall_command.output().unwrap();
-        assert!(uninstall.status.success());
-        let stdout = String::from_utf8_lossy(&uninstall.stdout);
-        assert!(stdout.contains("service_uninstall_supported=true"));
-        assert!(!unit_root.join("pole-node.service").exists());
-    }
-    #[cfg(windows)]
-    {
-        let mut uninstall_command = Command::new(binary);
-        uninstall_command
-            .arg("service-uninstall")
-            .arg(&config_path)
-            .env("POLE_WINDOWS_SERVICE_ROOT", &service_root)
-            .env("POLE_WINDOWS_SC_BINARY", &control_binary);
-        let uninstall = uninstall_command.output().unwrap();
-        assert!(uninstall.status.success());
-        let stdout = String::from_utf8_lossy(&uninstall.stdout);
-        assert!(stdout.contains("service_uninstall_supported=true"));
-        assert!(!service_root.join("PoLENode.service.json").exists());
-    }
+    let mut uninstall_command = Command::new(binary);
+    uninstall_command
+        .arg("service-uninstall")
+        .arg(&config_path)
+        .env("POLE_WINDOWS_SERVICE_ROOT", &service_root)
+        .env("POLE_WINDOWS_SC_BINARY", &control_binary);
+    let uninstall = uninstall_command.output().unwrap();
+    assert!(uninstall.status.success());
+    let stdout = String::from_utf8_lossy(&uninstall.stdout);
+    assert!(stdout.contains("service_uninstall_supported=true"));
+    assert!(!service_root.join("PoLENode.service.json").exists());
 
     std::fs::remove_dir_all(root).unwrap();
 }

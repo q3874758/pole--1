@@ -976,8 +976,7 @@ fn resolve_target_install_path(
 ) -> String {
     let root = Path::new(target_install_root);
     match artifact_kind {
-        "msi" => root.join("pole-node.exe").to_string_lossy().into_owned(),
-        "deb" => root.join("pole-node").to_string_lossy().into_owned(),
+        "msi" | "exe" => root.join("pole-node.exe").to_string_lossy().into_owned(),
         "zip" => {
             let file_name = Path::new(applied_artifact_path)
                 .file_name()
@@ -990,39 +989,18 @@ fn resolve_target_install_path(
 }
 
 fn current_platform_label() -> &'static str {
-    if cfg!(windows) {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else {
-        "linux"
-    }
+    "windows"
 }
 
 fn preferred_kind_for_current_platform() -> &'static str {
-    if cfg!(windows) {
-        "msi"
-    } else if cfg!(target_os = "macos") {
-        "zip"
-    } else {
-        "deb"
-    }
+    "msi"
 }
 
 fn install_root_for_current_platform() -> PathBuf {
-    if cfg!(windows) {
-        // Per-user layout is the V1 portable default (matches the player
-        // config path %LOCALAPPDATA%\PoLE\player\node.json). Fall back to
-        // the system-wide location only when LOCALAPPDATA is unavailable.
-        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-            return PathBuf::from(local_app_data).join("PoLE");
-        }
-        PathBuf::from("C:/Program Files/PoLE")
-    } else if cfg!(target_os = "macos") {
-        PathBuf::from("/Applications/PoLE.app")
-    } else {
-        PathBuf::from("/opt/pole")
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(local_app_data).join("PoLE");
     }
+    PathBuf::from("C:/Program Files/PoLE")
 }
 
 fn default_install_root_path() -> PathBuf {

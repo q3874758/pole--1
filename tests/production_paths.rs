@@ -73,14 +73,3 @@ fn windows_installed_layout_uses_app_local_subdirs() {
         PathBuf::from("C:/Program Files/PoLE/updates")
     );
 }
-
-#[test]
-fn linux_installed_layout_uses_system_directories() {
-    let layout = resolve_install_layout(Platform::Linux, InstallMode::Installed, "/opt/pole");
-
-    assert_eq!(layout.root_dir, PathBuf::from("/opt/pole"));
-    assert_eq!(layout.config_dir, PathBuf::from("/etc/pole"));
-    assert_eq!(layout.data_dir, PathBuf::from("/var/lib/pole"));
-    assert_eq!(layout.log_dir, PathBuf::from("/var/log/pole"));
-    assert_eq!(layout.update_dir, PathBuf::from("/var/lib/pole/updates"));
-}

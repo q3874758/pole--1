@@ -418,23 +418,16 @@ fn player_start_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("background_mode={}", background_mode.subcommand());
     match autostart_outcome {
-        #[cfg(windows)]
         AutostartRegistrationOutcome::Registered { launcher_path } => {
             println!("autostart_enabled=true");
             println!("autostart_registered=true");
             println!("autostart_launcher={}", launcher_path.to_string_lossy());
         }
-        #[cfg(windows)]
         AutostartRegistrationOutcome::AlreadyRegistered { launcher_path } => {
             println!("autostart_enabled=true");
             println!("autostart_registered=true");
             println!("autostart_already_registered=true");
             println!("autostart_launcher={}", launcher_path.to_string_lossy());
-        }
-        #[cfg(not(windows))]
-        AutostartRegistrationOutcome::Unsupported => {
-            println!("autostart_enabled=false");
-            println!("autostart_supported=false");
         }
     }
     print_background_start_outcome(daemon_outcome);
@@ -2973,12 +2966,8 @@ enum BackgroundStartOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AutostartRegistrationOutcome {
-    #[cfg(windows)]
     Registered { launcher_path: PathBuf },
-    #[cfg(windows)]
     AlreadyRegistered { launcher_path: PathBuf },
-    #[cfg(not(windows))]
-    Unsupported,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3133,46 +3122,27 @@ fn load_or_init_player_config(
 fn ensure_player_autostart(
     config_path: &Path,
 ) -> Result<AutostartRegistrationOutcome, Box<dyn std::error::Error>> {
-    #[cfg(windows)]
-    {
-        let startup_dir = player_startup_dir()?;
-        fs::create_dir_all(&startup_dir)?;
+    let startup_dir = player_startup_dir()?;
+    fs::create_dir_all(&startup_dir)?;
 
-        let launcher_path = startup_dir.join(player_launcher_filename(config_path));
-        let launcher_contents = render_windows_startup_launcher(&env::current_exe()?, config_path);
+    let launcher_path = startup_dir.join(player_launcher_filename(config_path));
+    let launcher_contents = render_windows_startup_launcher(&env::current_exe()?, config_path);
 
-        if fs::read_to_string(&launcher_path).ok().as_deref() == Some(launcher_contents.as_str()) {
-            return Ok(AutostartRegistrationOutcome::AlreadyRegistered { launcher_path });
-        }
-
-        fs::write(&launcher_path, launcher_contents)?;
-        Ok(AutostartRegistrationOutcome::Registered { launcher_path })
+    if fs::read_to_string(&launcher_path).ok().as_deref() == Some(launcher_contents.as_str()) {
+        return Ok(AutostartRegistrationOutcome::AlreadyRegistered { launcher_path });
     }
 
-    #[cfg(not(windows))]
-    {
-        let _ = config_path;
-        Ok(AutostartRegistrationOutcome::Unsupported)
-    }
+    fs::write(&launcher_path, launcher_contents)?;
+    Ok(AutostartRegistrationOutcome::Registered { launcher_path })
 }
 
 fn probe_player_autostart(config_path: &Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        let launcher_path = player_startup_dir()
-            .ok()?
-            .join(player_launcher_filename(config_path));
-        launcher_path.exists().then_some(launcher_path)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = config_path;
-        None
-    }
+    let launcher_path = player_startup_dir()
+        .ok()?
+        .join(player_launcher_filename(config_path));
+    launcher_path.exists().then_some(launcher_path)
 }
 
-#[cfg(windows)]
 fn player_startup_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app_data = env::var_os("APPDATA")
         .ok_or("APPDATA is not set; cannot configure Windows startup launcher")?;
@@ -3445,42 +3415,19 @@ fn open_dashboard_url(url: &str) -> Result<(), Box<dyn std::error::Error>> {
                 Command::new(opener.as_str()).arg(url).status()?
             }
         };
-        #[cfg(not(windows))]
-        let status = Command::new(opener).arg(url).status()?;
         if status.success() {
             return Ok(());
         }
         return Err(format!("browser opener failed for {url}").into());
     }
 
-    #[cfg(windows)]
-    {
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .status()?;
-        if status.success() {
-            return Ok(());
-        }
-        Err(format!("failed to open dashboard url {url}").into())
+    let status = Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status()?;
+    if status.success() {
+        return Ok(());
     }
-
-    #[cfg(target_os = "macos")]
-    {
-        let status = Command::new("open").arg(url).status()?;
-        if status.success() {
-            return Ok(());
-        }
-        Err(format!("failed to open dashboard url {url}").into())
-    }
-
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    {
-        let status = Command::new("xdg-open").arg(url).status()?;
-        if status.success() {
-            return Ok(());
-        }
-        Err(format!("failed to open dashboard url {url}").into())
-    }
+    Err(format!("failed to open dashboard url {url}").into())
 }
 
 fn background_watch_mode_from_env() -> BackgroundWatchMode {

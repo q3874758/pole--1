@@ -17,59 +17,6 @@ env:
   VERSION: ${{ github.ref_name }}
 
 jobs:
-  release-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release binaries
-        run: |
-          cargo build --release --manifest-path Cargo.toml
-          strip target/release/pole target/release/pole-node target/release/pole-client target/release/pole-genesis target/release/pole-sbom
-
-      - name: Build DEB package
-        run: |
-          mkdir -p dist/packages/deb-build/DEBIAN
-          mkdir -p dist/packages/deb-build/etc/systemd/system
-          mkdir -p dist/packages/deb-build/etc/pole
-          mkdir -p dist/packages/deb-build/var/lib/pole
-          mkdir -p dist/packages/deb-build/var/log/pole
-          mkdir -p dist/packages/deb-build/opt/pole
-
-          cp target/release/pole-node dist/packages/deb-build/opt/pole/
-          cp target/release/pole-client dist/packages/deb-build/opt/pole/
-          cp target/release/pole dist/packages/deb-build/opt/pole/
-          cp packaging/linux/deb/pole-node.service dist/packages/deb-build/etc/systemd/system/
-          cp packaging/linux/deb/node.json dist/packages/deb-build/etc/pole/node.json
-          cp packaging/linux/deb/control dist/packages/deb-build/DEBIAN/
-          cp packaging/linux/deb/conffiles dist/packages/deb-build/DEBIAN/
-          cp packaging/linux/deb/postinst dist/packages/deb-build/DEBIAN/postinst
-          cp packaging/linux/deb/prerm dist/packages/deb-build/DEBIAN/prerm
-          chmod 755 dist/packages/deb-build/DEBIAN/postinst dist/packages/deb-build/DEBIAN/prerm
-
-          # Strip the leading "v" from the tag so the deb name matches the
-          # control Version (0.1.0, not v0.1.0). Persist for later steps —
-          # `with.path` globs do NOT get bash expansion.
-          DEB_VERSION="${VERSION#v}"
-          echo "DEB_VERSION=$DEB_VERSION" >> "$GITHUB_ENV"
-          dpkg-deb --build dist/packages/deb-build "dist/packages/pole-node_${DEB_VERSION}_amd64.deb"
-
-      - name: Compute checksums
-        run: |
-          cd dist/packages
-          sha256sum "pole-node_${{ env.DEB_VERSION }}_amd64.deb" > "pole-node_${{ env.DEB_VERSION }}_amd64.deb.sha256"
-
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-artifacts
-          path: |
-            dist/packages/pole-node_${{ env.DEB_VERSION }}_amd64.deb
-            dist/packages/pole-node_${{ env.DEB_VERSION }}_amd64.deb.sha256
-
   release-windows:
     runs-on: windows-latest
     steps:
@@ -101,7 +48,7 @@ jobs:
             dist/packages/*.sha256
 
   release-github:
-    needs: [release-linux, release-windows]
+    needs: [release-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,12 +67,10 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create portable tarball (Linux binary + client)
+      - name: Stage Windows release artifacts
         run: |
           mkdir -p dist/release
-          cp "artifacts/linux-artifacts/pole-node_${VERSION#v}_amd64.deb" dist/release/
           cp artifacts/windows-artifacts/PoLE-${VERSION}-x64-portable.zip dist/release/
-          cp artifacts/linux-artifacts/*.sha256 dist/release/
           cp artifacts/windows-artifacts/*.sha256 dist/release/
 
       - name: Build pole-sbom
@@ -226,7 +171,6 @@ jobs:
 
           ## Downloads
           - **Windows Portable**: \`PoLE-${VERSION}-x64-portable.zip\` - No installation required
-          - **Linux DEB**: \`pole-node_${VERSION#v}_amd64.deb\` - For Debian/Ubuntu systems
 
           ## Software Bill of Materials (SBOM)
           - \`sbom.cyclonedx.json\` — CycloneDX 1.5, signed with [cosign](https://docs.sigstore.dev/)
@@ -249,7 +193,7 @@ jobs:
           - Full PoLE protocol implementation with hour-based reward blocks
           - P2P network with libp2p (QUIC, TCP, mDNS, Kademlia)
           - Local Web control console (browser dashboard via control API)
-          - Windows Service and Linux systemd integration
+          - Windows Service integration and background EcoQoS optimization
           - Automatic update with rollback support
           - Challenge and dispute resolution system
 
@@ -257,13 +201,6 @@ jobs:
           1. Download \`PoLE-${VERSION}-x64-portable.zip\`
           2. Extract to any folder
           3. Run \`pole-node.exe\` (daemon) and \`pole-client.exe\` (CLI)
-
-          ## Linux Installation
-          \`\`\`bash
-          sudo dpkg -i pole-node_${VERSION#v}_amd64.deb
-          sudo systemctl enable pole-node
-          sudo systemctl start pole-node
-          \`\`\`
 
           ## Verification
           Checksums are provided in \`.sha256\` files alongside each artifact.

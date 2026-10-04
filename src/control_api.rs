@@ -327,16 +327,8 @@ pub fn collect_dashboard(
         + count_files_in_dir(&data_dir.join("payloads"), ".bin");
 
     let layout = crate::runtime_layout_for_config(&config_path, &config.runtime.data_dir);
-    let platform = match crate::current_platform() {
-        crate::Platform::Windows => "windows",
-        crate::Platform::Linux => "linux",
-        crate::Platform::Macos => "macos",
-    };
-    let service_manager = if cfg!(windows) {
-        "windows-service"
-    } else {
-        "systemd"
-    };
+    let platform = "windows";
+    let service_manager = "windows-service";
 
     let update_status = crate::collect_update_overview(
         env!("CARGO_PKG_VERSION"),
@@ -457,16 +449,8 @@ pub fn collect_meta(
 ) -> Result<ApiMetaResponse, Box<dyn std::error::Error>> {
     let (config_path, config) = NodeConfig::load_json_with_runtime_paths(config_path.as_ref())?;
     let layout = crate::runtime_layout_for_config(&config_path, &config.runtime.data_dir);
-    let platform = match crate::current_platform() {
-        crate::Platform::Windows => "windows",
-        crate::Platform::Linux => "linux",
-        crate::Platform::Macos => "macos",
-    };
-    let service_manager = if cfg!(windows) {
-        "windows-service"
-    } else {
-        "systemd"
-    };
+    let platform = "windows";
+    let service_manager = "windows-service";
 
     Ok(ApiMetaResponse {
         app: AppMetaView {
@@ -782,37 +766,18 @@ fn build_service_manager(
     request: &ServiceActionRequest,
 ) -> Result<Box<dyn ServiceManager>, Box<dyn std::error::Error>> {
     let exe = resolve_service_executable_path()?;
-    #[cfg(windows)]
-    {
-        let definition = crate::WindowsServiceDefinition::new(&exe, config_path);
-        let definition = if let Some(service_root) = &request.windows_service_root {
-            definition.with_service_root(service_root)
-        } else {
-            definition
-        };
-        let definition = if let Some(sc_binary) = &request.windows_sc_binary {
-            definition.with_sc_binary(sc_binary)
-        } else {
-            definition
-        };
-        Ok(Box::new(crate::WindowsServiceManager::new(definition)))
-    }
-    #[cfg(not(windows))]
-    {
-        let definition =
-            crate::SystemdUnitDefinition::new(&exe, config_path, &_config.runtime.data_dir);
-        let definition = if let Some(unit_root) = &request.systemd_unit_root {
-            definition.with_unit_root(unit_root)
-        } else {
-            definition
-        };
-        let definition = if let Some(systemctl_binary) = &request.systemctl_binary {
-            definition.with_systemctl_binary(systemctl_binary)
-        } else {
-            definition
-        };
-        Ok(Box::new(crate::SystemdServiceManager::new(definition)))
-    }
+    let definition = crate::WindowsServiceDefinition::new(&exe, config_path);
+    let definition = if let Some(service_root) = &request.windows_service_root {
+        definition.with_service_root(service_root)
+    } else {
+        definition
+    };
+    let definition = if let Some(sc_binary) = &request.windows_sc_binary {
+        definition.with_sc_binary(sc_binary)
+    } else {
+        definition
+    };
+    Ok(Box::new(crate::WindowsServiceManager::new(definition)))
 }
 
 fn build_managed_service_status(
@@ -826,8 +791,6 @@ fn build_managed_service_status(
 
 fn service_request_from_update_action(request: &UpdateActionRequest) -> ServiceActionRequest {
     ServiceActionRequest {
-        systemd_unit_root: request.systemd_unit_root.clone(),
-        systemctl_binary: request.systemctl_binary.clone(),
         windows_service_root: request.windows_service_root.clone(),
         windows_sc_binary: request.windows_sc_binary.clone(),
     }

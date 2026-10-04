@@ -3,8 +3,6 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Windows,
-    Linux,
-    Macos,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,18 +21,7 @@ pub struct InstallLayout {
 }
 
 pub fn current_platform() -> Platform {
-    #[cfg(target_os = "windows")]
-    {
-        Platform::Windows
-    }
-    #[cfg(target_os = "linux")]
-    {
-        Platform::Linux
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Platform::Macos
-    }
+    Platform::Windows
 }
 
 pub fn resolve_install_layout(
@@ -129,25 +116,5 @@ fn installed_install_layout(platform: Platform, root_dir: PathBuf) -> InstallLay
             log_dir: root_dir.join("logs"),
             update_dir: root_dir.join("updates"),
         },
-        Platform::Linux => {
-            let data_dir = PathBuf::from("/var/lib/pole");
-            InstallLayout {
-                root_dir,
-                config_dir: PathBuf::from("/etc/pole"),
-                log_dir: PathBuf::from("/var/log/pole"),
-                update_dir: data_dir.join("updates"),
-                data_dir,
-            }
-        }
-        Platform::Macos => {
-            let data_dir = PathBuf::from("/Library/Application Support/PoLE");
-            InstallLayout {
-                root_dir,
-                config_dir: PathBuf::from("/Library/Application Support/PoLE/config"),
-                log_dir: PathBuf::from("/Library/Logs/PoLE"),
-                update_dir: data_dir.join("updates"),
-                data_dir,
-            }
-        }
     }
 }

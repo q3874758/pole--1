@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use pole_protocol_draft::{
-    ManagedServiceStatus, ServiceManager, SystemdServiceManager, SystemdUnitDefinition,
-    WindowsServiceDefinition, WindowsServiceManager, SYSTEMD_SERVICE_NAME, WINDOWS_SERVICE_NAME,
+    ManagedServiceStatus, ServiceManager, WindowsServiceDefinition, WindowsServiceManager,
+    WINDOWS_SERVICE_NAME,
 };
 use serde_json::json;
 
@@ -49,51 +49,6 @@ fn windows_service_definition_renders_binary_path() {
 }
 
 #[test]
-fn systemd_unit_definition_renders_expected_unit_file() {
-    let definition = SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    );
-    let rendered = definition.render();
-
-    assert_eq!(definition.service_name, SYSTEMD_SERVICE_NAME);
-    assert!(rendered.contains("Description=PoLE node service"));
-    assert!(rendered.contains("ExecStart=/opt/pole/pole-node service-run /etc/pole/node.json"));
-    assert!(rendered.contains("WorkingDirectory=/var/lib/pole"));
-    assert_eq!(
-        definition.unit_path(),
-        PathBuf::from("/etc/systemd/system/pole-node.service")
-    );
-    assert_eq!(
-        definition.systemctl_start_command(),
-        "systemctl start pole-node.service"
-    );
-    assert_eq!(
-        definition.systemctl_stop_command(),
-        "systemctl stop pole-node.service"
-    );
-    assert_eq!(
-        definition.systemctl_status_command(),
-        "systemctl is-active pole-node.service"
-    );
-}
-
-#[test]
-fn packaged_systemd_unit_matches_default_rendering() {
-    let definition = SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    );
-    // Normalize CRLF: Windows CI checkouts convert the LF-committed file
-    // to CRLF, while the renderer always emits LF.
-    let packaged = include_str!("../packaging/linux/deb/pole-node.service").replace("\r\n", "\n");
-
-    assert_eq!(packaged, definition.render());
-}
-
-#[test]
 fn packaged_windows_service_payload_matches_default_rendering() {
     let definition = WindowsServiceDefinition::new(
         "C:/Program Files/PoLE/pole-node.exe",
@@ -134,102 +89,11 @@ fn service_managers_default_to_not_installed_status() {
         )
         .with_service_root(root.join("windows-services")),
     );
-    let linux = SystemdServiceManager::new(
-        SystemdUnitDefinition::new(
-            "/opt/pole/pole-node",
-            "/etc/pole/node.json",
-            "/var/lib/pole",
-        )
-        .with_unit_root(root.join("systemd")),
-    );
 
     assert_eq!(
         windows.status().unwrap(),
         ManagedServiceStatus::NotInstalled
     );
-    assert_eq!(linux.status().unwrap(), ManagedServiceStatus::NotInstalled);
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn systemd_manager_install_and_uninstall_track_unit_file() {
-    let root = temp_root("systemd");
-
-    let definition = SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    )
-    .with_unit_root(&root);
-    let unit_path = definition.unit_path();
-    let manager = SystemdServiceManager::new(definition);
-
-    assert_eq!(
-        manager.status().unwrap(),
-        ManagedServiceStatus::NotInstalled
-    );
-    manager.install().unwrap();
-    assert!(unit_path.exists());
-    assert_eq!(manager.status().unwrap(), ManagedServiceStatus::Stopped);
-
-    manager.uninstall().unwrap();
-    assert!(!unit_path.exists());
-    assert_eq!(
-        manager.status().unwrap(),
-        ManagedServiceStatus::NotInstalled
-    );
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn systemd_manager_start_and_stop_use_configured_binary() {
-    let root = temp_root("systemd-start-stop");
-
-    #[cfg(windows)]
-    let command_binary = root.join("systemctl.cmd");
-    #[cfg(not(windows))]
-    let command_binary = root.join("systemctl");
-    let log_path = root.join("systemctl.log");
-
-    #[cfg(windows)]
-    std::fs::write(
-        &command_binary,
-        "@echo off\r\necho %*>>\"%~dp0systemctl.log\"\r\nexit /b 0\r\n",
-    )
-    .unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &command_binary,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n",
-                log_path.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&command_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&command_binary, perms).unwrap();
-    }
-
-    let definition = SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    )
-    .with_unit_root(&root)
-    .with_systemctl_binary(&command_binary);
-    let manager = SystemdServiceManager::new(definition.clone());
-    manager.install().unwrap();
-    manager.start().unwrap();
-    manager.stop().unwrap();
-
-    let log = std::fs::read_to_string(&log_path).unwrap();
-    assert!(log.contains("start pole-node.service"));
-    assert!(log.contains("stop pole-node.service"));
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -238,38 +102,12 @@ fn systemd_manager_start_and_stop_use_configured_binary() {
 fn windows_manager_install_and_uninstall_track_registration_file() {
     let root = temp_root("windows-service");
 
-    // Mock `sc.exe` so the manager never probes the real Windows service
-    // database (which would legitimately report 1060 "service does not exist"
-    // for a service that is only tracked by a local registration file). See
-    // windows_manager_status_uses_binary_output for the status-query convention.
-    #[cfg(windows)]
     let sc_binary = root.join("sc.cmd");
-    #[cfg(not(windows))]
-    let sc_binary = root.join("sc");
-    #[cfg(not(windows))]
-    let log_path = root.join("sc.log");
-
-    #[cfg(windows)]
     std::fs::write(
         &sc_binary,
         "@echo off\r\nif \"%1\"==\"query\" echo STATE              : 1  STOPPED\r\necho %*>>\"%~dp0sc.log\"\r\nexit /b 0\r\n",
     )
     .unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &sc_binary,
-            format!(
-                "#!/bin/sh\necho 'STATE              : 1  STOPPED'\necho \"$@\" >> \"{}\"\nexit 0\n",
-                log_path.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&sc_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&sc_binary, perms).unwrap();
-    }
 
     let definition = WindowsServiceDefinition::new(
         "C:/Program Files/PoLE/pole-node.exe",
@@ -298,7 +136,6 @@ fn windows_manager_install_and_uninstall_track_registration_file() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[cfg(windows)]
 #[test]
 fn windows_service_definition_renders_start_and_stop_commands() {
     let definition = WindowsServiceDefinition::new(
@@ -315,33 +152,14 @@ fn windows_service_definition_renders_start_and_stop_commands() {
 fn windows_manager_start_and_stop_use_configured_binary() {
     let root = temp_root("windows-start-stop");
 
-    #[cfg(windows)]
     let command_binary = root.join("sc.cmd");
-    #[cfg(not(windows))]
-    let command_binary = root.join("sc");
     let log_path = root.join("sc.log");
 
-    #[cfg(windows)]
     std::fs::write(
         &command_binary,
         "@echo off\r\necho %*>>\"%~dp0sc.log\"\r\nexit /b 0\r\n",
     )
     .unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(
-            &command_binary,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n",
-                log_path.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&command_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&command_binary, perms).unwrap();
-    }
 
     let definition = WindowsServiceDefinition::new(
         "C:/Program Files/PoLE/pole-node.exe",
@@ -362,77 +180,16 @@ fn windows_manager_start_and_stop_use_configured_binary() {
 }
 
 #[test]
-fn systemd_manager_status_uses_binary_output() {
-    let root = temp_root("systemd-status");
-
-    #[cfg(windows)]
-    let command_binary = root.join("systemctl.cmd");
-    #[cfg(not(windows))]
-    let command_binary = root.join("systemctl");
-
-    #[cfg(windows)]
-    std::fs::write(
-        &command_binary,
-        "@echo off\r\nif \"%1\"==\"is-active\" echo active\r\nexit /b 0\r\n",
-    )
-    .unwrap();
-    #[cfg(not(windows))]
-    {
-        std::fs::write(&command_binary, "#!/bin/sh\necho 'active'\nexit 0\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&command_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&command_binary, perms).unwrap();
-    }
-
-    let definition = SystemdUnitDefinition::new(
-        "/opt/pole/pole-node",
-        "/etc/pole/node.json",
-        "/var/lib/pole",
-    )
-    .with_unit_root(&root)
-    .with_systemctl_binary(&command_binary);
-    let manager = SystemdServiceManager::new(definition);
-    manager.install().unwrap();
-
-    assert_eq!(
-        manager.status().unwrap(),
-        ManagedServiceStatus::Running { pid: None }
-    );
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
 fn windows_manager_status_uses_binary_output() {
     let root = temp_root("windows-status");
 
-    #[cfg(windows)]
     let command_binary = root.join("sc.cmd");
-    #[cfg(not(windows))]
-    let command_binary = root.join("sc");
 
-    #[cfg(windows)]
     std::fs::write(
         &command_binary,
         "@echo off\r\nif \"%1\"==\"query\" echo STATE              : 4  RUNNING\r\nexit /b 0\r\n",
     )
     .unwrap();
-    #[cfg(not(windows))]
-    {
-        // Unconditional output: `sc query` must always report the service
-        // as running regardless of argument quoting differences between
-        // shells (dash vs bash) across runners.
-        std::fs::write(
-            &command_binary,
-            "#!/bin/sh\necho 'STATE              : 4  RUNNING'\nexit 0\n",
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&command_binary).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&command_binary, perms).unwrap();
-    }
 
     let definition = WindowsServiceDefinition::new(
         "C:/Program Files/PoLE/pole-node.exe",
