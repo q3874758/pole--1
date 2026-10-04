@@ -369,23 +369,35 @@
 
             <div class="card-panel">
               <div class="panel-header">
-                <h3>软件版本与 Git 仓库同步</h3>
-                <span id="git-sync-badge" class="badge badge-success">已连接</span>
+                <h3>软件版本与更新通道</h3>
+                <span id="update-channel-badge" class="badge badge-success">稳定通道</span>
               </div>
               <dl class="data-table">
                 <div><dt>客户端版本</dt><dd id="info-app-version">v0.1.3 (Windows x64)</dd></div>
-                <div><dt>远程仓库</dt><dd><a href="https://github.com/q3874758/pole--1" target="_blank" rel="noreferrer" style="color:var(--accent-cyan);text-decoration:underline;">q3874758/pole--1</a></dd></div>
-                <div><dt>分支 / 提交</dt><dd id="git-commit-info">main (b01e970)</dd></div>
-                <div><dt>同步状态</dt><dd id="info-update-status">已是最新代码</dd></div>
+                <div><dt>运行模式</dt><dd id="info-runtime-mode">绿色便携版</dd></div>
+                <div>
+                  <dt>更新发布通道</dt>
+                  <dd>
+                    <select id="sel-update-channel" style="background:#161d2f;color:#e2e8f0;border:1px solid #2a3652;border-radius:6px;padding:3px 8px;font-size:12px;outline:none;cursor:pointer;">
+                      <option value="stable">🌟 稳定通道 (Stable Releases)</option>
+                      <option value="beta">🧪 测试通道 (Beta Pre-releases)</option>
+                      <option value="dev">⚡ 开发通道 (Git Main 实时提交)</option>
+                    </select>
+                  </dd>
+                </div>
+                <div><dt>最新可用版本</dt><dd id="info-remote-version">v0.1.3</dd></div>
+                <div><dt>版本更新状态</dt><dd id="info-update-status">已是最新版本</dd></div>
               </dl>
+              <div id="update-details-box" style="display:none;margin-top:10px;padding:8px 12px;background:#131c31;border:1px solid #1e2d4d;border-radius:6px;font-size:12px;color:#94a3b8;line-height:1.5;"></div>
               <div class="field-group margin-top-sm" style="display:flex;align-items:center;gap:8px;">
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-secondary);">
                   <input type="checkbox" id="chk-auto-sync" checked style="accent-color:var(--accent-cyan);cursor:pointer;" />
-                  开启后台定时自动同步 (每 10 分钟自动检查并拉取最新代码)
+                  开启后台自动检查更新 (每 15 分钟静默检测)
                 </label>
               </div>
-              <div class="btn-group-actions margin-top-sm">
-                <button id="btn-git-sync" class="btn-action btn-green" type="button">🔄 立即与 GitHub 仓库同步</button>
+              <div class="btn-group-actions margin-top-sm" style="display:flex;gap:8px;">
+                <button id="btn-check-update" class="btn-action" type="button">🔍 检查更新</button>
+                <button id="btn-git-sync" class="btn-action btn-green" type="button">🔄 立即更新</button>
               </div>
             </div>
           </div>

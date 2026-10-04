@@ -65,7 +65,7 @@ fn fetch_release_manifest_from_github(
     fs::create_dir_all(&cache_dir)?;
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(2))
         .build()?;
     let base = format!("https://github.com/{RELEASE_REPO}/releases/latest/download/{channel}.json");
 

@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
@@ -8,6 +10,34 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelOption {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateChannelInfo {
+    pub is_git_repo: bool,
+    pub current_version: String,
+    pub active_channel: String,
+    pub available_channels: Vec<ChannelOption>,
+    pub runtime_mode: String,
+    pub branch: String,
+    pub current_commit: String,
+    pub remote_version: String,
+    pub remote_commit: Option<String>,
+    pub update_available: bool,
+    pub synced: bool,
+    pub release_name: Option<String>,
+    pub release_notes: Option<String>,
+    pub download_url: Option<String>,
+    pub html_url: String,
+    pub last_checked: String,
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitStatusInfo {
@@ -30,6 +60,14 @@ pub struct GitSyncResult {
     pub message: String,
     pub details: Option<String>,
 }
+
+struct CacheEntry {
+    fetched_at: Instant,
+    channel: String,
+    info: UpdateChannelInfo,
+}
+
+static UPDATE_CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
 
 fn strip_unc_prefix(path: PathBuf) -> PathBuf {
     let s = path.to_string_lossy();
@@ -85,8 +123,7 @@ pub fn find_repo_root(start_dir: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
-/// Reads local branch, commit hash, and remote URL directly from `.git` filesystem metadata.
-/// This runs instantaneously (0ms) without spawning any child processes, guaranteeing zero window popups.
+/// Reads local branch, commit hash, and remote URL directly from `.git` filesystem metadata (0ms).
 pub fn read_local_git_info(repo_root: &Path) -> Option<(String, String, String)> {
     let git_dir = repo_root.join(".git");
     let head_path = git_dir.join("HEAD");
@@ -151,60 +188,368 @@ fn find_commit_in_packed_refs(git_dir: &Path, ref_path: &str) -> Option<String> 
     None
 }
 
-pub fn get_git_status(start_dir: Option<&Path>) -> GitStatusInfo {
-    let repo_root = find_repo_root(start_dir);
+fn resolve_channel_file(start_dir: Option<&Path>) -> PathBuf {
+    let base_dir = if let Some(p) = start_dir {
+        if p.is_dir() {
+            p.to_path_buf()
+        } else if let Some(parent) = p.parent() {
+            if !parent.as_os_str().is_empty() {
+                parent.to_path_buf()
+            } else {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            }
+        } else {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        }
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    };
 
-    if let Some(ref root) = repo_root {
-        if let Some((branch, current_commit, repo_url)) = read_local_git_info(root) {
-            let remote_commit = fetch_remote_github_commit_quiet(&branch);
+    let data_dir = base_dir.join("pole-node-data");
+    if data_dir.is_dir() {
+        data_dir.join("update-channel.txt")
+    } else {
+        base_dir.join("update-channel.txt")
+    }
+}
 
-            let (synced, update_available, message) = match &remote_commit {
-                Some(rc) if rc == &current_commit => (
-                    true,
-                    false,
-                    "本地代码已与 GitHub 远程仓库保持实时同步 (最新提交)".to_string(),
-                ),
-                Some(rc) => (
-                    false,
-                    true,
-                    format!("发现远程新提交 ({rc})，可点击一键同步拉取"),
-                ),
-                None => (
-                    true,
-                    false,
-                    "本地 Git 仓库已就绪 (网络离线或无拉取权限)".to_string(),
-                ),
-            };
+pub fn get_active_channel(start_dir: Option<&Path>) -> String {
+    let path = resolve_channel_file(start_dir);
+    if let Ok(c) = fs::read_to_string(&path) {
+        let trimmed = c.trim().to_ascii_lowercase();
+        if trimmed == "beta" || trimmed == "dev" || trimmed == "stable" {
+            return trimmed;
+        }
+    }
+    "stable".to_string()
+}
 
-            return GitStatusInfo {
-                is_git_repo: true,
-                repo_url,
-                branch,
-                current_commit,
-                remote_commit,
-                synced,
-                update_available,
-                auto_sync_enabled: true,
-                message,
-            };
+pub fn set_active_channel(start_dir: Option<&Path>, channel: &str) -> UpdateChannelInfo {
+    let normalized = match channel.to_ascii_lowercase().as_str() {
+        "beta" => "beta",
+        "dev" => "dev",
+        _ => "stable",
+    };
+    let path = resolve_channel_file(start_dir);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&path, normalized);
+
+    if let Ok(mut lock) = UPDATE_CACHE.lock() {
+        *lock = None;
+    }
+    get_update_channel_status(start_dir, true)
+}
+
+pub fn default_available_channels() -> Vec<ChannelOption> {
+    vec![
+        ChannelOption {
+            id: "stable".to_string(),
+            name: "🌟 稳定通道 (Stable Releases)".to_string(),
+            description: "推荐：接收经过严格验证的稳定发行版本，最适合日常游戏节点".to_string(),
+        },
+        ChannelOption {
+            id: "beta".to_string(),
+            name: "🧪 测试通道 (Beta Pre-releases)".to_string(),
+            description: "尝鲜：优先获取即将发布的测试补丁与新功能预览".to_string(),
+        },
+        ChannelOption {
+            id: "dev".to_string(),
+            name: "⚡ 开发通道 (Git Main 实时提交)".to_string(),
+            description: "极速：直接与 GitHub main 分支代码同步，第一时间体验最新特性".to_string(),
+        },
+    ]
+}
+
+pub fn get_update_channel_status(start_dir: Option<&Path>, force_refresh: bool) -> UpdateChannelInfo {
+    let active_channel = get_active_channel(start_dir);
+
+    if !force_refresh {
+        if let Ok(lock) = UPDATE_CACHE.lock() {
+            if let Some(ref entry) = *lock {
+                if entry.channel == active_channel && entry.fetched_at.elapsed() < Duration::from_secs(300) {
+                    return entry.info.clone();
+                }
+            }
         }
     }
 
-    // Portable distribution mode (no .git directory)
-    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-    let repo_url = "https://github.com/q3874758/pole--1".to_string();
-    let remote_commit = fetch_remote_github_commit_quiet("main");
+    let info = check_update_for_channel(start_dir, &active_channel);
+    if let Ok(mut lock) = UPDATE_CACHE.lock() {
+        *lock = Some(CacheEntry {
+            fetched_at: Instant::now(),
+            channel: active_channel,
+            info: info.clone(),
+        });
+    }
+    info
+}
 
+fn check_update_for_channel(start_dir: Option<&Path>, channel: &str) -> UpdateChannelInfo {
+    let repo_root = find_repo_root(start_dir);
+    let is_git_repo = repo_root.is_some();
+    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let available_channels = default_available_channels();
+    let runtime_mode = if is_git_repo {
+        "Git 源码工作区".to_string()
+    } else {
+        "绿色便携免安装版".to_string()
+    };
+
+    let (branch, current_commit) = if let Some(ref root) = repo_root {
+        if let Some((b, c, _)) = read_local_git_info(root) {
+            (b, c)
+        } else {
+            ("main".to_string(), current_version.clone())
+        }
+    } else {
+        ("main".to_string(), current_version.clone())
+    };
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let now_str = format!("{}:{:02}:{:02}", (now_secs / 3600) % 24, (now_secs / 60) % 60, now_secs % 60);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(2500))
+        .user_agent("PoLE-Node")
+        .build();
+
+    match channel {
+        "dev" => {
+            let mut remote_commit = None;
+            if let Ok(ref c) = client {
+                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/commits/main").send() {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>() {
+                            if let Some(sha) = json.get("sha").and_then(|s| s.as_str()) {
+                                remote_commit = Some(sha.chars().take(7).collect::<String>());
+                            }
+                        }
+                    }
+                }
+            }
+
+            let (update_available, synced, message) = match &remote_commit {
+                Some(rc) if rc == &current_commit => (
+                    false,
+                    true,
+                    format!("本地已与 GitHub main 分支保持最新 (Commit: {rc})"),
+                ),
+                Some(rc) => (
+                    true,
+                    false,
+                    format!("发现 GitHub main 分支新提交 ({rc})，可点击立即同步更新"),
+                ),
+                None => (
+                    false,
+                    true,
+                    format!("已连接开发通道 (当前: {current_commit})"),
+                ),
+            };
+
+            UpdateChannelInfo {
+                is_git_repo,
+                current_version,
+                active_channel: "dev".to_string(),
+                available_channels,
+                runtime_mode,
+                branch,
+                current_commit,
+                remote_version: remote_commit.clone().unwrap_or_else(|| "main".to_string()),
+                remote_commit,
+                update_available,
+                synced,
+                release_name: Some("GitHub main 分支实时提交".to_string()),
+                release_notes: None,
+                download_url: Some("https://github.com/q3874758/pole--1/archive/refs/heads/main.zip".to_string()),
+                html_url: "https://github.com/q3874758/pole--1".to_string(),
+                last_checked: now_str,
+                message,
+            }
+        }
+        "beta" => {
+            let mut remote_tag = None;
+            let mut release_name = None;
+            let mut release_notes = None;
+            let mut download_url = None;
+
+            if let Ok(ref c) = client {
+                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/releases").send() {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>() {
+                            if let Some(first) = json.as_array().and_then(|arr| arr.first()) {
+                                remote_tag = first.get("tag_name").and_then(|s| s.as_str()).map(|s| s.to_string());
+                                release_name = first.get("name").and_then(|s| s.as_str()).map(|s| s.to_string());
+                                release_notes = first.get("body").and_then(|s| s.as_str()).map(|s| s.to_string());
+                                if let Some(assets) = first.get("assets").and_then(|a| a.as_array()) {
+                                    for asset in assets {
+                                        if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                                            if name.ends_with(".zip") {
+                                                download_url = asset.get("browser_download_url").and_then(|u| u.as_str()).map(|u| u.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let remote_v = remote_tag.unwrap_or_else(|| current_version.clone());
+            let update_available = is_version_higher(&remote_v, &current_version);
+            let synced = !update_available;
+            let message = if update_available {
+                format!("测试通道发现新版本 {remote_v}，可体验最新特性！")
+            } else {
+                format!("当前已是测试通道最新版本 ({remote_v})")
+            };
+
+            UpdateChannelInfo {
+                is_git_repo,
+                current_version,
+                active_channel: "beta".to_string(),
+                available_channels,
+                runtime_mode,
+                branch,
+                current_commit,
+                remote_version: remote_v,
+                remote_commit: None,
+                update_available,
+                synced,
+                release_name,
+                release_notes,
+                download_url,
+                html_url: "https://github.com/q3874758/pole--1/releases".to_string(),
+                last_checked: now_str,
+                message,
+            }
+        }
+        _ => {
+            // Stable channel
+            let mut remote_tag = None;
+            let mut release_name = None;
+            let mut release_notes = None;
+            let mut download_url = None;
+
+            if let Ok(ref c) = client {
+                if let Ok(resp) = c.get("https://api.github.com/repos/q3874758/pole--1/releases/latest").send() {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>() {
+                            remote_tag = json.get("tag_name").and_then(|s| s.as_str()).map(|s| s.to_string());
+                            release_name = json.get("name").and_then(|s| s.as_str()).map(|s| s.to_string());
+                            release_notes = json.get("body").and_then(|s| s.as_str()).map(|s| s.to_string());
+                            if let Some(assets) = json.get("assets").and_then(|a| a.as_array()) {
+                                for asset in assets {
+                                    if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                                        if name.ends_with(".zip") {
+                                            download_url = asset.get("browser_download_url").and_then(|u| u.as_str()).map(|u| u.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let remote_v = remote_tag.unwrap_or_else(|| current_version.clone());
+            let update_available = is_version_higher(&remote_v, &current_version);
+            let synced = !update_available;
+            let message = if update_available {
+                format!("稳定通道发现新版本 {remote_v}，包含重要功能与安全优化！")
+            } else {
+                format!("当前已是最新稳定版本 ({remote_v})")
+            };
+
+            UpdateChannelInfo {
+                is_git_repo,
+                current_version,
+                active_channel: "stable".to_string(),
+                available_channels,
+                runtime_mode,
+                branch,
+                current_commit,
+                remote_version: remote_v,
+                remote_commit: None,
+                update_available,
+                synced,
+                release_name,
+                release_notes,
+                download_url,
+                html_url: "https://github.com/q3874758/pole--1/releases".to_string(),
+                last_checked: now_str,
+                message,
+            }
+        }
+    }
+}
+
+fn is_version_higher(remote: &str, current: &str) -> bool {
+    let clean_remote = remote.trim_start_matches('v').trim();
+    let clean_current = current.trim_start_matches('v').trim();
+
+    let r_parts: Vec<u64> = clean_remote.split('.').filter_map(|s| s.parse().ok()).collect();
+    let c_parts: Vec<u64> = clean_current.split('.').filter_map(|s| s.parse().ok()).collect();
+
+    for i in 0..std::cmp::max(r_parts.len(), c_parts.len()) {
+        let r_val = r_parts.get(i).copied().unwrap_or(0);
+        let c_val = c_parts.get(i).copied().unwrap_or(0);
+        if r_val > c_val {
+            return true;
+        } else if r_val < c_val {
+            return false;
+        }
+    }
+    false
+}
+
+pub fn apply_update_channel(start_dir: Option<&Path>) -> GitSyncResult {
+    let repo_root = find_repo_root(start_dir);
+    if repo_root.is_some() {
+        sync_git(start_dir)
+    } else {
+        // Portable mode: check if update is available
+        let info = get_update_channel_status(start_dir, true);
+        if info.update_available {
+            GitSyncResult {
+                ok: true,
+                updated: false,
+                current_commit: info.current_version.clone(),
+                message: format!("🎉 发现新版本 {}！已获取下载链接，请下载解压后覆盖更新。", info.remote_version),
+                details: info.download_url,
+            }
+        } else {
+            GitSyncResult {
+                ok: true,
+                updated: false,
+                current_commit: info.current_version.clone(),
+                message: format!("✅ 当前版本 {} 已是最新，无需更新！", info.current_version),
+                details: None,
+            }
+        }
+    }
+}
+
+/// Compatibility wrapper for existing `/api/git/status` endpoint (0ms cached response).
+pub fn get_git_status(start_dir: Option<&Path>) -> GitStatusInfo {
+    let status = get_update_channel_status(start_dir, false);
     GitStatusInfo {
-        is_git_repo: false,
-        repo_url,
-        branch: "release-stable".to_string(),
-        current_commit: current_version.clone(),
-        remote_commit,
-        synced: true,
-        update_available: false,
+        is_git_repo: status.is_git_repo,
+        repo_url: status.html_url,
+        branch: status.branch,
+        current_commit: status.current_commit,
+        remote_commit: status.remote_commit,
+        synced: status.synced,
+        update_available: status.update_available,
         auto_sync_enabled: true,
-        message: format!("当前运行为绿色便携版 ({current_version})，已连接 GitHub Releases 通道"),
+        message: status.message,
     }
 }
 
@@ -215,22 +560,6 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
         let (branch, old_commit, _) = read_local_git_info(root)
             .unwrap_or_else(|| ("main".to_string(), "unknown".to_string(), String::new()));
 
-        let remote_commit = fetch_remote_github_commit_quiet(&branch);
-
-        // First check if already synced according to remote API
-        if let Some(ref rc) = remote_commit {
-            if rc == &old_commit {
-                return GitSyncResult {
-                    ok: true,
-                    updated: false,
-                    current_commit: old_commit.clone(),
-                    message: format!("✅ 代码已与远程保持最新 (Commit: {old_commit})，无需拉取。"),
-                    details: Some("Remote SHA matches local HEAD.".to_string()),
-                };
-            }
-        }
-
-        // Attempt git pull
         let mut pull_cmd = Command::new("git");
         pull_cmd.current_dir(root);
         pull_cmd.args(&["pull", "--ff-only", "origin", &branch]);
@@ -256,6 +585,10 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
                     format!("✅ 代码已是最新 (Commit: {new_commit})，无需更新")
                 };
 
+                if let Ok(mut lock) = UPDATE_CACHE.lock() {
+                    *lock = None;
+                }
+
                 GitSyncResult {
                     ok: true,
                     updated,
@@ -268,7 +601,6 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let combined = if stderr.trim().is_empty() { stdout } else { stderr };
-                // If stdout indicates already up to date despite non-zero exit code
                 if combined.contains("Already up to date") {
                     GitSyncResult {
                         ok: true,
@@ -298,7 +630,6 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
             }
         }
     } else {
-        // Portable mode
         let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
         GitSyncResult {
             ok: true,
@@ -308,29 +639,4 @@ pub fn sync_git(start_dir: Option<&Path>) -> GitSyncResult {
             details: None,
         }
     }
-}
-
-fn fetch_remote_github_commit_quiet(branch: &str) -> Option<String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .user_agent("PoLE-Node")
-        .build()
-        .ok()?;
-
-    let target_branch = if branch.is_empty() || branch.starts_with("HEAD") {
-        "main"
-    } else {
-        branch
-    };
-
-    let url = format!("https://api.github.com/repos/q3874758/pole--1/commits/{target_branch}");
-    let resp = client.get(&url).send().ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    let json: serde_json::Value = resp.json().ok()?;
-    json.get("sha")
-        .and_then(|s| s.as_str())
-        .map(|s| s.chars().take(7).collect())
 }

@@ -1043,6 +1043,7 @@ pub fn handle_connection(
     // Read request with size limit
     let mut buffer = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
+    let mut expected_total_len = None;
     loop {
         let n = stream.read(&mut chunk)?;
         if n == 0 {
@@ -1057,9 +1058,29 @@ pub fn handle_connection(
             return Ok(());
         }
         buffer.extend_from_slice(&chunk[..n]);
-        // Stop reading if we've got a complete HTTP header + body
-        if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
+
+        if expected_total_len.is_none() {
+            if let Some(header_end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                let header_bytes = &buffer[..header_end];
+                let header_str = String::from_utf8_lossy(header_bytes);
+                let mut content_length = 0usize;
+                for line in header_str.lines() {
+                    let lower = line.to_ascii_lowercase();
+                    if lower.starts_with("content-length:") {
+                        if let Some(val) = line.split(':').nth(1) {
+                            content_length = val.trim().parse::<usize>().unwrap_or(0);
+                        }
+                        break;
+                    }
+                }
+                expected_total_len = Some(header_end + 4 + content_length);
+            }
+        }
+
+        if let Some(total) = expected_total_len {
+            if buffer.len() >= total {
+                break;
+            }
         }
     }
 
@@ -1190,6 +1211,24 @@ pub fn handle_connection(
         }
         ("POST", "/api/git/sync") => {
             let body = serde_json::to_string(&crate::git_sync::sync_git(Some(config_path.as_ref())))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("GET", "/api/update/status") => {
+            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(Some(config_path.as_ref()), false))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("POST", "/api/update/channel") => {
+            let req: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let channel = req.get("channel").and_then(|v| v.as_str()).unwrap_or("stable");
+            let body = serde_json::to_string(&crate::git_sync::set_active_channel(Some(config_path.as_ref()), channel))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("POST", "/api/update/check") => {
+            let body = serde_json::to_string(&crate::git_sync::get_update_channel_status(Some(config_path.as_ref()), true))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
+        ("POST", "/api/update/sync") => {
+            let body = serde_json::to_string(&crate::git_sync::apply_update_channel(Some(config_path.as_ref())))?;
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
         ("GET", "/api/config") => {

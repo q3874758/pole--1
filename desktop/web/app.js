@@ -78,10 +78,14 @@ function initElements() {
   els.btnSvcStop = document.getElementById("btn-svc-stop");
   els.btnSvcCheck = document.getElementById("btn-svc-check");
   els.infoAppVersion = document.getElementById("info-app-version");
+  els.infoRuntimeMode = document.getElementById("info-runtime-mode");
+  els.selUpdateChannel = document.getElementById("sel-update-channel");
+  els.infoRemoteVersion = document.getElementById("info-remote-version");
   els.infoUpdateStatus = document.getElementById("info-update-status");
-  els.gitSyncBadge = document.getElementById("git-sync-badge");
-  els.gitCommitInfo = document.getElementById("git-commit-info");
+  els.updateChannelBadge = document.getElementById("update-channel-badge");
+  els.updateDetailsBox = document.getElementById("update-details-box");
   els.chkAutoSync = document.getElementById("chk-auto-sync");
+  els.btnCheckUpdate = document.getElementById("btn-check-update");
   els.btnGitSync = document.getElementById("btn-git-sync");
   els.btnClearConsole = document.getElementById("btn-clear-console");
   els.consoleStream = document.getElementById("console-stream");
@@ -347,22 +351,46 @@ function renderDashboard(rawData) {
   }
 }
 
-function renderGitStatus(git) {
-  if (!git) return;
-  state.git = git;
-  if (els.gitCommitInfo) {
-    els.gitCommitInfo.textContent = `${git.branch} (${git.current_commit})`;
+function renderUpdateStatus(u) {
+  if (!u) return;
+  state.update = u;
+  if (els.infoAppVersion) {
+    els.infoAppVersion.textContent = `${u.current_version} (Windows x64)`;
+  }
+  if (els.infoRuntimeMode) {
+    els.infoRuntimeMode.textContent = u.runtime_mode || (u.is_git_repo ? "Git 源码工作区" : "绿色便携免安装版");
+  }
+  if (els.selUpdateChannel && u.active_channel) {
+    if (els.selUpdateChannel.value !== u.active_channel) {
+      els.selUpdateChannel.value = u.active_channel;
+    }
+  }
+  if (els.infoRemoteVersion) {
+    els.infoRemoteVersion.textContent = u.remote_version || u.current_version;
   }
   if (els.infoUpdateStatus) {
-    els.infoUpdateStatus.textContent = git.message || (git.synced ? "已是最新代码" : "发现远程新提交");
+    els.infoUpdateStatus.textContent = u.message || (u.update_available ? "发现新版本" : "已是最新版本");
   }
-  if (els.gitSyncBadge) {
-    if (git.synced) {
-      els.gitSyncBadge.textContent = git.is_git_repo ? "Git 已同步" : "最新版";
-      els.gitSyncBadge.className = "badge badge-success";
+  if (els.updateChannelBadge) {
+    const channelNames = { stable: "稳定通道", beta: "测试通道", dev: "开发通道" };
+    const cName = channelNames[u.active_channel] || u.active_channel;
+    if (u.update_available) {
+      els.updateChannelBadge.textContent = `${cName} · 发现新版`;
+      els.updateChannelBadge.className = "badge badge-warning";
     } else {
-      els.gitSyncBadge.textContent = "发现新提交";
-      els.gitSyncBadge.className = "badge badge-warning";
+      els.updateChannelBadge.textContent = `${cName} · 最新`;
+      els.updateChannelBadge.className = "badge badge-success";
+    }
+  }
+  if (els.updateDetailsBox) {
+    if (u.update_available && u.download_url) {
+      els.updateDetailsBox.style.display = "block";
+      els.updateDetailsBox.innerHTML = `
+        <strong>💡 新版本提示：</strong>${u.release_name || u.remote_version}<br>
+        <a href="${u.download_url}" target="_blank" rel="noreferrer" style="color:var(--accent-cyan);text-decoration:underline;">📥 点击下载最新便携包 (${u.remote_version})</a>
+      `;
+    } else {
+      els.updateDetailsBox.style.display = "none";
     }
   }
 }
@@ -407,13 +435,13 @@ async function refreshAll() {
   }
 
   try {
-    const [gamingData, dashData, bcData, storageData, logsData, gitData] = await Promise.all([
+    const [gamingData, dashData, bcData, storageData, logsData, updateData] = await Promise.all([
       apiGet("/api/gaming"),
       apiGet("/api/dashboard"),
       apiGet("/api/blockchain"),
       apiGet("/api/storage"),
       apiGet("/api/logs"),
-      apiGet("/api/git/status"),
+      apiGet("/api/update/status").catch(() => apiGet("/api/git/status")),
     ]);
 
     if (gamingData) renderGaming(gamingData);
@@ -423,7 +451,7 @@ async function refreshAll() {
       renderDashboard({ ...dashData, storage: { ...dashData.storage, ...storageData } });
     }
     if (logsData) renderLogs(logsData);
-    if (gitData) renderGitStatus(gitData);
+    if (updateData) renderUpdateStatus(updateData);
   } catch (err) {
     console.error("refreshAll error:", err);
   } finally {
@@ -605,31 +633,74 @@ function setupEvents() {
     });
   }
 
-  // Git Sync button handler
+  // Channel dropdown handler
+  if (els.selUpdateChannel) {
+    els.selUpdateChannel.addEventListener("change", async (e) => {
+      const newChannel = e.target.value;
+      try {
+        showToast(`正在切换至【${newChannel}】通道...`);
+        const res = await apiPost("/api/update/channel", { channel: newChannel });
+        if (res) {
+          renderUpdateStatus(res);
+          showToast(`✅ 已切换至【${res.active_channel}】更新通道`);
+          logToConsole(`[更新通道] 已切换至 ${res.active_channel} 通道，当前版本 ${res.current_version}，最新可用 ${res.remote_version}`);
+        }
+      } catch (err) {
+        showToast(`❌ 切换通道失败: ${err.message}`);
+        logToConsole(`[切换通道失败] ${err.message}`);
+      }
+    });
+  }
+
+  // Check update button handler
+  if (els.btnCheckUpdate) {
+    els.btnCheckUpdate.addEventListener("click", async () => {
+      try {
+        els.btnCheckUpdate.disabled = true;
+        els.btnCheckUpdate.textContent = "🔍 正在检查...";
+        showToast("正在联网检查最新版本...");
+        logToConsole("[检查更新] 正在与 GitHub 检查最新发布版本与代码提交...");
+        const res = await apiPost("/api/update/check");
+        if (res) {
+          renderUpdateStatus(res);
+          showToast(res.update_available ? `🎉 ${res.message}` : `✅ ${res.message}`);
+          logToConsole(`[检查更新结果] ${res.message}`);
+        }
+      } catch (err) {
+        showToast(`❌ 检查更新异常: ${err.message}`);
+        logToConsole(`[检查更新异常] ${err.message}`);
+      } finally {
+        els.btnCheckUpdate.disabled = false;
+        els.btnCheckUpdate.textContent = "🔍 检查更新";
+      }
+    });
+  }
+
+  // Apply update / Git Sync button handler
   if (els.btnGitSync) {
     els.btnGitSync.addEventListener("click", async () => {
       try {
         els.btnGitSync.disabled = true;
-        els.btnGitSync.textContent = "🔄 正在同步 GitHub 仓库...";
-        showToast("正在与 GitHub 仓库同步...");
-        logToConsole("正在与 GitHub 远程仓库同步代码...");
+        els.btnGitSync.textContent = "🔄 正在更新...";
+        showToast("正在执行更新操作...");
+        logToConsole("[执行更新] 正在拉取更新...");
 
-        const res = await apiPost("/api/git/sync");
+        const res = await apiPost("/api/update/sync").catch(() => apiPost("/api/git/sync"));
         if (res && res.ok) {
-          showToast(res.message || "✅ GitHub 仓库同步完成！");
-          logToConsole(`[Git 同步] ${res.message}`);
+          showToast(res.message || "✅ 更新处理完成！");
+          logToConsole(`[更新完成] ${res.message}`);
         } else {
-          const errMsg = res ? res.message : "同步请求失败";
-          showToast(`❌ 同步未完成: ${errMsg}`);
-          logToConsole(`[Git 同步失败] ${errMsg}`);
+          const errMsg = res ? res.message : "更新请求失败";
+          showToast(`❌ 更新未完成: ${errMsg}`);
+          logToConsole(`[更新失败] ${errMsg}`);
         }
         await refreshAll();
       } catch (err) {
-        showToast(`❌ 同步异常: ${err.message}`);
-        logToConsole(`[Git 同步异常] ${err.message}`);
+        showToast(`❌ 更新异常: ${err.message}`);
+        logToConsole(`[更新异常] ${err.message}`);
       } finally {
         els.btnGitSync.disabled = false;
-        els.btnGitSync.textContent = "🔄 立即与 GitHub 仓库同步";
+        els.btnGitSync.textContent = "🔄 立即更新";
       }
     });
   }
@@ -651,22 +722,17 @@ function setupAutoRefresh() {
   }
   state.autoRefreshTimer = setInterval(refreshAll, 5000);
 
-  // Background Git auto-sync check every 5 minutes
+  // Background Git/Update auto-check every 15 minutes
   if (state.autoSyncTimer) clearInterval(state.autoSyncTimer);
   state.autoSyncTimer = setInterval(async () => {
     if (els.chkAutoSync && els.chkAutoSync.checked) {
-      const git = await apiGet("/api/git/status");
-      if (git && !git.synced && git.update_available) {
-        logToConsole(`[GitHub 自动同步] 检测到远程新提交: ${git.remote_commit}，正在拉取同步...`);
-        const res = await apiPost("/api/git/sync");
-        if (res && res.ok) {
-          showToast("🎉 已自动与 GitHub 仓库同步最新代码！");
-          logToConsole(`[GitHub 自动同步] ${res.message}`);
-          refreshAll();
-        }
+      const update = await apiPost("/api/update/check");
+      if (update && update.update_available) {
+        logToConsole(`[后台自动更新检查] 发现新版本: ${update.remote_version} (${update.message})`);
+        renderUpdateStatus(update);
       }
     }
-  }, 300000);
+  }, 900000);
 }
 
 // Bootstrap
