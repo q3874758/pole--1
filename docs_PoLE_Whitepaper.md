@@ -235,18 +235,27 @@ PoLE 的最小经济单元是 **1 小时奖励区块**。每个奖励区块独�
 
 V1 不追求一次性穷尽所有“真实参与”判定技术，但必须做到：可解释、可复算、可争议、可修正。
 
-### 3.2.2 有效游玩时长的互证口径（V1 代码口径）
+### 3.2.2 有效游玩时长的核验体系（V1 代码口径与信号分层）
 
-V1 实现把“节点声称自己玩了”与“别的节点证明它确实玩了”绑定在同一套记录上，因此 `Effective_Play_Time_In_Hour` 不是单方自述，而是**经过他人见证与心跳覆盖约束后的时长**：
+在去中心化协议中，证明“玩家真实在玩游戏”面临两层不同的核验需求：**微观参与信号（Micro-Engagement Signals）** 与 **宏观一致性信号（Macro-Consistency Signals）**。V1 实现坦诚区分两者的可信边界，杜绝循环论证与概念混淆：
 
-1. **游玩声明**：玩家节点提交 `PlaySession`，声明本区块内的 `play_seconds`、游戏 `app_id`、观测载荷 `observation_cid` 与观测到的玩家数。声明时长不得超过奖励区块长度（`reward_block_duration_seconds`，默认 3600 秒）。
-2. **心跳覆盖**：玩家节点按 `heartbeat_bucket_seconds`（默认 300 秒）逐桶提交 `PlayHeartbeat`。心跳覆盖率 `heartbeat_coverage_bps` 必须达到 `min_heartbeat_coverage_bps`（默认 5000，即 50%），且心跳条数不得少于 `min_heartbeat_count`。缺失心跳的时段不被计入有效游玩时长。
-3. **见证证明**：见证节点提交 `WitnessAttestation`，且必须满足链上独立性规则 —— 见证者不能是玩家本人，不能是该会话的采集者，必须具有自己的 `collect` 能力，且在该 epoch 拥有一条**独立的**观测记录（其 `payload_cid` 不得复用会话的 `observation_cid`）。见证者的观测玩家数与玩家声明的偏离不得超过 `min_witness_observation_tolerance_ppm`（默认 500000，即 50%）。
-4. **去重口径**：采纳的见证数 `witness_count` 不得少于 `min_witness_count`（默认 2），且**不同见证指向不同观测**的条数 `distinct_observation_count` 不得少于 `min_distinct_observations`（默认 2）。多个见证递交同一份观测载荷只算一份，不因人数而放大。
+1. **微观存在性信号（Micro-Engagement，玩家本地弱可信自证）**：
+   - **游玩声明（PlaySession）**：玩家节点声明本区块内的 `play_seconds`（上限为区块长度，默认 3600 秒）、游戏 `app_id` 与对应时间片。
+   - **心跳覆盖（PlayHeartbeat）**：玩家客户端在游戏运行期间，按 `heartbeat_bucket_seconds`（默认 300 秒）逐桶向网络提交带签名心跳。覆盖率 `heartbeat_coverage_bps` 必须达到 `min_heartbeat_coverage_bps`（默认 5000，即 50%），且心跳条数不得少于 `min_heartbeat_count`。
+   - **反作弊闸门（OS Enforcement）**：客户端通过 Win32 PE 可执行文件头真实性校验（拒绝虚假进程伪造）、前台活跃窗口检测与内存工作集采样剔除启动器和主菜单挂机。
+   - *协议说明*：由于远程见证节点无法也不应直接侵入玩家本地屏幕，微观层面的“真实游玩”在 V1 阶段属于玩家节点的本地声明与自证，通过反作弊检测、心跳桶签名以及后续的质押与作弊举报（Challenge/Slash）机制予以经济博弈约束。
 
-结算时 `SessionSettlement` 记录该会话是否 `valid` 及失效原因。仅当会话经结算判定为有效时，其权重 `ValidSessionWeightUnitsForEpoch` 才进入全网总权重参与分账；被判定失效的会话既不产生玩家奖励，也不计入单位奖励调节的活跃度信号。
+2. **宏观一致性信号（Macro-Consistency，见证节点环境背书）**：
+   - **见证独立性（WitnessAttestation）**：见证节点比对的是公开观测源（如 Steam API 或可验证第三方数据源）的游戏全网在线规模 `ObservedPlayers`。见证者不能是玩家本人，不能是该会话的采集者，必须具有 `collect` 观测能力，且在该 epoch 拥有独立的观测记录。
+   - **大盘一致性约束**：见证节点观测到的在线人数与玩家申报环境的偏离不得超过 `min_witness_observation_tolerance_ppm`。
+   - **多源去重口径**：有效会话须满足见证数 `witness_count >= min_witness_count`（默认 2），且独立观测数 `distinct_observation_count >= min_distinct_observations`（默认 2）。
+   - *协议说明*：见证人并不证明“我看到了该玩家的具体操作”，而是证明“该玩家所处游戏的大盘宏观活跃环境与全网独立采集节点的客观数据高度一致”。此举杜绝了凭空伪造不存在的游戏或脱离大盘伪造极端参数的攻击。
 
-这一机制的经济含义是：单人自述无法独立构成有效游玩时长，必须由至少两个互不相同的第三方观测共同证明。由此，伪造游玩时长的成本从“零成本自报”变为“需要买通多个具有独立观测能力的节点”。
+3. **V2 演进规划（交互式密码学见证）**：
+   - **持续心跳承诺链（Heartbeat Hash-Chain）**：玩家客户端在会话期间生成单调递增哈希承诺链，见证节点核验时间戳到达规律与熵值。
+   - **随机时延交互挑战（Interactive Latency Challenge）**：见证池随机向玩家节点发起即时带时戳的 Nonce 挑战，玩家须在毫秒级时延内签名回传，使离线批量挂机与虚假代理节点在网络层无所遁形。
+
+结算时 `SessionSettlement` 记录该会话是否 `valid` 及失效原因。仅当会话经微观心跳覆盖与宏观见证独立性双重判定有效时，其权重 `ValidSessionWeightUnitsForEpoch` 才进入全网总权重参与分账。
 
 ## 3.3 小时内奖励分账
 

@@ -211,7 +211,12 @@ func observationDeviationPPM(a, b uint64) uint32 {
 //  4. observation CID differs from the session's — no copying one payload
 //     and presenting it N times.
 //  5. observed player counts agree within tolerance — the witness's own
-//     data must actually corroborate the claim.
+//     macro-telemetry confirms the game activity environment claimed by the
+//     player. Note: In V1, this verifies consistency across external telemetry
+//     sources (preventing fabricated telemetry / offline game spoofing), rather
+//     than direct cryptographic observation of the player's physical screen/input.
+//     Micro-level engagement relies on signed heartbeat bucket coverage and
+//     local OS anti-cheat enforcement.
 func (k Keeper) validateWitnessIndependence(
 	ctx context.Context,
 	session types.PlaySession,
