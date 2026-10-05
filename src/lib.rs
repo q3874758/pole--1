@@ -36,6 +36,7 @@ pub mod os_support;
 pub mod p2p;
 pub mod params;
 pub mod primitives;
+pub mod proof;
 pub mod records;
 pub mod service_runtime;
 pub mod service_windows;

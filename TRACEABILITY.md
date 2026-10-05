@@ -206,6 +206,7 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `src/tokenomics.rs` | 代币经济参数 |
 | `src/params.rs` | 协议参数（含 `MutualProofParams`） |
 | `src/mutual_proof.rs` | 互证记录：PlaySession / PlayHeartbeat / WitnessAttestation 构造、wire 投影与持久化 |
+| `src/proof/` | 证明层重构: L1 物理二进制身份与离线 Authenticode 证书链核验 (Issue #1) |
 | `src/cosmos/` | 链交互：proto3 编码 / 签名 / 广播 / 查询 / 地址 |
 
 ### Cosmos 链文件
@@ -251,3 +252,4 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 14. ✅ **P2P 自动背书节流 (P1-3):** 添加背书幂等防重入、单 Epoch 64 次配额上限与单对端滑动窗口频控。
 15. ✅ **供给压力测试与软护栏 (P1-1):** 跨 30 年多情景（熊/基准/牛/极限）净供给仿真矩阵验证，`ensureRewardPool` 内嵌年度总预算软护栏。
 16. ✅ **复合前缀索引范围查询 (P2):** `keeper.go` / `session.go` 全量采用 `NewPrefixedTripleRange` 与 `NewPrefixedPairRange` 消除 O(n) 全表扫。
+17. ✅ **证明层重构 L1 二进制物理身份与签名验证 (Issue #1):** `src/proof/l1_binary.rs` 引入物理可执行文件路径解析 (`QueryFullProcessImageNameW`)、PE DOS/NT 结构校验、SHA-256 指纹计算、Win32 离线 Authenticode 数字签名验证 (`WinVerifyTrust` 禁用 CRL 在线拉取防卡顿)、发行商证书主题提取与白名单比对，以及 Steam `appmanifest_{appid}.acf` 物理匹配优雅降级。
