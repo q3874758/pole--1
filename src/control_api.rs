@@ -320,6 +320,18 @@ pub struct GamingStatusView {
     pub play_heartbeats_count: usize,
     pub play_sessions_count: usize,
     pub player_blocks_count: usize,
+    #[serde(default)]
+    pub verified_player_blocks_count: usize,
+    #[serde(default)]
+    pub pending_player_blocks_count: usize,
+    #[serde(default)]
+    pub witness_attestations_count: usize,
+    #[serde(default)]
+    pub verified_player_reward: u64,
+    #[serde(default)]
+    pub pending_player_reward: u64,
+    #[serde(default)]
+    pub verification_status: String,
     pub eco_qos_active: bool,
     pub working_set_mb: f64,
 }
@@ -357,7 +369,77 @@ pub fn collect_gaming(
 
     let play_heartbeats_count = count_files_in_dir(&data_dir.join("play-heartbeats"), ".json");
     let play_sessions_count = count_files_in_dir(&data_dir.join("play-sessions"), ".json");
-    let player_blocks_count = count_files_in_dir(&data_dir.join("player-reward-blocks"), ".json");
+
+    let local_account = config
+        .identity_keypair()
+        .ok()
+        .map(|kp| crate::mutual_proof::identity_account_address(&kp.public));
+
+    let witness_attestations = crate::mutual_proof::load_witness_attestations(&config);
+    let peer_witness_count = witness_attestations
+        .iter()
+        .filter(|att| {
+            local_account
+                .as_ref()
+                .map(|addr| *addr != att.witness_address)
+                .unwrap_or(true)
+        })
+        .count();
+
+    let mut verified_session_ids = std::collections::HashSet::new();
+    for att in &witness_attestations {
+        if local_account
+            .as_ref()
+            .map(|addr| *addr != att.witness_address)
+            .unwrap_or(true)
+        {
+            verified_session_ids.insert(crate::hex_32(att.session_id));
+        }
+    }
+
+    let blocks_dir = data_dir.join("player-reward-blocks");
+    let mut completed_blocks = 0usize;
+    let mut verified_blocks = 0usize;
+
+    if let Ok(entries) = fs::read_dir(&blocks_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Ok(text) = fs::read_to_string(&path) {
+                    if let Ok(artifact) =
+                        serde_json::from_str::<crate::node_rewards::PlayerRewardTickArtifact>(&text)
+                    {
+                        if artifact.completed_reward_block_count > 0 {
+                            completed_blocks += artifact.completed_reward_block_count;
+                            let is_verified = artifact.records.iter().any(|r| {
+                                !r.session_id.is_empty()
+                                    && verified_session_ids.contains(&r.session_id)
+                            });
+                            if is_verified {
+                                verified_blocks += artifact.completed_reward_block_count;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let verified_player_blocks_count = verified_blocks;
+    let pending_player_blocks_count = completed_blocks.saturating_sub(verified_blocks);
+    let verified_player_reward = (verified_player_blocks_count as u64) * 850;
+    let pending_player_reward = (pending_player_blocks_count as u64) * 850;
+
+    let verification_status = if completed_blocks == 0 {
+        "Idle".to_string()
+    } else if verified_player_blocks_count > 0 && pending_player_blocks_count == 0 {
+        "Verified".to_string()
+    } else if verified_player_blocks_count > 0 {
+        "PartiallyVerified".to_string()
+    } else {
+        "PendingWitness".to_string()
+    };
+
     let working_set_mb = (crate::os_support::detect_process_working_set_bytes(std::process::id())
         as f64)
         / (1024.0 * 1024.0);
@@ -382,7 +464,13 @@ pub fn collect_gaming(
             is_gaming,
             play_heartbeats_count,
             play_sessions_count,
-            player_blocks_count,
+            player_blocks_count: completed_blocks,
+            verified_player_blocks_count,
+            pending_player_blocks_count,
+            witness_attestations_count: peer_witness_count,
+            verified_player_reward,
+            pending_player_reward,
+            verification_status,
             eco_qos_active: config.runtime.low_impact_mode && config.runtime.os_background_priority,
             working_set_mb: (working_set_mb * 10.0).round() / 10.0,
         },

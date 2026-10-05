@@ -34,8 +34,11 @@ function initElements() {
   els.gameEngagementDesc = document.getElementById("game-engagement-desc");
   els.nodeMemoryUsage = document.getElementById("node-memory-usage");
 
-  // Hero Bento - Right (Reward & Wallet)
   els.totalPlayerReward = document.getElementById("total-player-reward");
+  els.pendingPlayerReward = document.getElementById("pending-player-reward");
+  els.pendingBlocksCount = document.getElementById("pending-blocks-count");
+  els.settlementStatusBadge = document.getElementById("settlement-status-badge");
+  els.verificationNoticeBanner = document.getElementById("verification-notice-banner");
   els.hourlyRewardRate = document.getElementById("hourly-reward-rate");
   els.playerAddressPreview = document.getElementById("player-address-preview");
   els.btnCopyAddress = document.getElementById("btn-copy-address");
@@ -183,6 +186,12 @@ function renderGaming(rawData) {
     play_heartbeats_count = 0,
     play_sessions_count = 0,
     player_blocks_count = 0,
+    verified_player_blocks_count = 0,
+    pending_player_blocks_count = 0,
+    witness_attestations_count = 0,
+    verified_player_reward = 0,
+    pending_player_reward = 0,
+    verification_status = "PendingWitness",
     working_set_mb = 0,
   } = data;
 
@@ -224,12 +233,45 @@ function renderGaming(rawData) {
 
   // Core Metrics
   els.statHeartbeatsCount.textContent = formatNumber(play_heartbeats_count);
-  els.statSessionsCount.textContent = formatNumber(play_sessions_count);
+  els.statSessionsCount.textContent = formatNumber(witness_attestations_count);
 
-  // Player Rewards
-  if (player_blocks_count > 0) {
-    const calculatedReward = player_blocks_count * 850; // 85% of 1000 POLE per block
-    els.totalPlayerReward.textContent = formatNumber(calculatedReward);
+  // Player Rewards - Verified vs Pending
+  if (els.totalPlayerReward) {
+    els.totalPlayerReward.textContent = formatNumber(verified_player_reward);
+  }
+  if (els.pendingPlayerReward) {
+    els.pendingPlayerReward.textContent = formatNumber(pending_player_reward);
+  }
+  if (els.pendingBlocksCount) {
+    els.pendingBlocksCount.textContent = formatNumber(pending_player_blocks_count);
+  }
+
+  // Settlement & Verification Badge
+  if (els.settlementStatusBadge) {
+    if (verified_player_blocks_count > 0) {
+      els.settlementStatusBadge.className = "badge-verified";
+      els.settlementStatusBadge.textContent = "已获其他节点见证验证";
+    } else {
+      els.settlementStatusBadge.className = "badge-pending";
+      els.settlementStatusBadge.textContent = "待其他节点验证";
+    }
+  }
+
+  // Verification Notice Banner
+  if (els.verificationNoticeBanner) {
+    if (pending_player_blocks_count > 0 && verified_player_blocks_count === 0) {
+      els.verificationNoticeBanner.style.display = "block";
+      els.verificationNoticeBanner.className = "verification-notice-banner banner-warning";
+      els.verificationNoticeBanner.innerHTML =
+        `⚠️ <strong>单节点待见证状态</strong>：节点奖励必须经过其他节点验证后方可最终结算发放。当前已有 <strong>${pending_player_blocks_count}</strong> 个区块处于【待见证】队列（预估待结算: ${formatNumber(pending_player_reward)} POLE），须连接并由其他对等节点验证背书后方可正式发放入账。`;
+    } else if (verified_player_blocks_count > 0) {
+      els.verificationNoticeBanner.style.display = "block";
+      els.verificationNoticeBanner.className = "verification-notice-banner banner-success";
+      els.verificationNoticeBanner.innerHTML =
+        `✅ <strong>已验证结算</strong>：${verified_player_blocks_count} 个区块已经过对等见证节点背书，奖励已发放。${pending_player_blocks_count > 0 ? ` (另有 ${pending_player_blocks_count} 个新区块待见证)` : ''}`;
+    } else {
+      els.verificationNoticeBanner.style.display = "none";
+    }
   }
 }
 
@@ -282,7 +324,7 @@ function renderDashboard(rawData) {
   if (tokenomics.player_block_reward) {
     els.hourlyRewardRate.textContent = `${tokenomics.player_block_reward} / Block`;
   }
-  if (tokenomics.player_reward && !state.gaming?.player_blocks_count) {
+  if (tokenomics.player_reward && !state.gaming) {
     els.totalPlayerReward.textContent = formatNumber(tokenomics.player_reward);
   }
   if (els.dtEmissionYear && (tokenomics.emission_year || config.emission_year)) {

@@ -16,7 +16,11 @@ fn temp_root(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!(
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("tmp");
+    let _ = std::fs::create_dir_all(&base);
+    base.join(format!(
         "pole-control-api-{name}-{}-{id}-{nanos}",
         std::process::id()
     ))

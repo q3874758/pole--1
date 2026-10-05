@@ -576,6 +576,104 @@ input:checked + .slider:before {
   font-size: 14px;
 }
 
+.reward-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.badge-pending {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--neon-amber);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.badge-verified {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: var(--neon-emerald);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* Pending Reward Panel */
+.reward-pending-panel {
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px dashed rgba(245, 158, 11, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pending-metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pending-metric-info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pending-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.pending-number {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--neon-amber);
+}
+
+.pending-token {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--neon-amber);
+}
+
+.pending-blocks-tag {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.pending-blocks-tag strong {
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+}
+
+.verification-notice-banner {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.banner-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.banner-success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--neon-emerald);
+}
+
 /* Wallet Bar */
 .wallet-bar {
   background: var(--bg-surface-2);

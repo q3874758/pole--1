@@ -221,6 +221,39 @@ pub fn witness_credits_blocking(base_url: &str, epoch_id: u64) -> Result<BTreeMa
     parse_witness_credits(&body)
 }
 
+/// Blocking variant of [`RestClient::session_settlement`] for synchronous
+/// reward evaluation.
+pub fn session_settlement_blocking(
+    base_url: &str,
+    session_id_hex: &str,
+) -> Result<SessionSettlementView> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|err| CosmosError::Http(err.to_string()))?;
+    let url = format!(
+        "{}/pole.chain.pole.v1.Query/SessionSettlement",
+        base_url.trim_end_matches('/')
+    );
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({ "session_id_hex": session_id_hex }))
+        .send()
+        .map_err(|err| CosmosError::Http(err.to_string()))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        return Err(CosmosError::Rest {
+            status: status.as_u16(),
+            body,
+        });
+    }
+    let body = resp
+        .text()
+        .map_err(|err| CosmosError::Http(err.to_string()))?;
+    parse_session_settlement(&body)
+}
+
 /// REST client for the Cosmos application endpoints (auth, bank, the
 /// PoLE module). Distinct from `TendermintRpc`, which speaks raw
 /// Tendermint.

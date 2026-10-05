@@ -113,7 +113,10 @@
           </div>
 
           <div class="reward-primary-metric">
-            <div class="reward-title-label">已结算挖矿总收益 (POLE)</div>
+            <div class="reward-title-row">
+              <span class="reward-title-label">已验证结算发放总收益 (POLE)</span>
+              <span id="settlement-status-badge" class="badge-pending">待其他节点验证</span>
+            </div>
             <div class="reward-amount-row">
               <span id="total-player-reward" class="reward-number">0.00</span>
               <span class="reward-token">POLE</span>
@@ -123,6 +126,18 @@
               <span>每小时基础激励速率：</span>
               <strong id="hourly-reward-rate">1,000 POLE / Block</strong>
             </div>
+          </div>
+
+          <div class="reward-pending-panel">
+            <div class="pending-metric-row">
+              <div class="pending-metric-info">
+                <span class="pending-label">⏳ 待其他节点验证：</span>
+                <span id="pending-player-reward" class="pending-number">0.00</span>
+                <span class="pending-token">POLE</span>
+              </div>
+              <span class="pending-blocks-tag">待见证区块: <strong id="pending-blocks-count">0</strong> 个</span>
+            </div>
+            <div id="verification-notice-banner" class="verification-notice-banner" style="display: none;"></div>
           </div>
 
           <div class="wallet-bar">

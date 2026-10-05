@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -46,6 +46,8 @@ pub struct EpochRewardArtifact {
     pub local_player_weight_units: Amount,
     pub total_network_weight_units: Amount,
     pub local_player_reward_total: Amount,
+    #[serde(default)]
+    pub pending_player_reward_total: Amount,
     pub total_gvs_units: Amount,
     pub collect_pool: Amount,
     pub store_pool: Amount,
@@ -410,10 +412,38 @@ pub fn compute_local_epoch_rewards(
         .flat_map(|tick| tick.records.iter())
         .map(|record| record.total_network_weight_units)
         .sum::<Amount>();
-    let local_player_reward_total = player_ticks
-        .iter()
-        .map(|tick| tick.total_player_reward)
-        .sum::<Amount>();
+    let verified_sessions = verified_session_ids_for_epoch(config, epoch_id);
+    let mut verified_player_reward_total: Amount = 0;
+    let mut pending_player_reward_total: Amount = 0;
+
+    for tick in &player_ticks {
+        for record in &tick.records {
+            let is_verified =
+                !record.session_id.is_empty() && verified_sessions.contains(&record.session_id);
+            if is_verified {
+                verified_player_reward_total =
+                    verified_player_reward_total.saturating_add(record.player_reward);
+            } else {
+                pending_player_reward_total =
+                    pending_player_reward_total.saturating_add(record.player_reward);
+            }
+        }
+        if tick.records.is_empty() && tick.total_player_reward > 0 {
+            if !verified_sessions.is_empty() {
+                verified_player_reward_total =
+                    verified_player_reward_total.saturating_add(tick.total_player_reward);
+            } else {
+                pending_player_reward_total =
+                    pending_player_reward_total.saturating_add(tick.total_player_reward);
+            }
+        }
+    }
+
+    let verified_player_block_count = if !verified_sessions.is_empty() {
+        player_block_count
+    } else {
+        0
+    };
 
     let total_gvs_units = aggregation
         .groups
@@ -425,7 +455,7 @@ pub fn compute_local_epoch_rewards(
 
     let service_reward_pools = service_reward_pools_for_epoch(
         config,
-        player_block_count,
+        verified_player_block_count,
         total_gvs_units,
         retention_book
             .payloads
@@ -480,9 +510,9 @@ pub fn compute_local_epoch_rewards(
         }
     }
 
-    if local_player_reward_total > 0 {
+    if verified_player_reward_total > 0 {
         reward_record_for_node(&mut reward_map, epoch_id, local_node_id, local_recipient)
-            .player_reward += local_player_reward_total;
+            .player_reward += verified_player_reward_total;
     }
 
     // Witness reward is earned by corroborating play sessions, not by merely
@@ -546,10 +576,6 @@ pub fn compute_local_epoch_rewards(
     }
 
     let reward_root = reward_record_root(&records)?;
-    let local_player_block_count = player_ticks
-        .iter()
-        .map(|tick| tick.completed_reward_block_count)
-        .sum::<usize>();
     let artifact = EpochRewardArtifact {
         epoch_id,
         reward_block_secs: effective_reward_block_secs(config),
@@ -557,11 +583,16 @@ pub fn compute_local_epoch_rewards(
         reward_adjustment_period_blocks: config.reward.reward_adjustment_period_blocks,
         target_network_weight_units: effective_target_network_weight_units(config),
         reward_adjustment_cap_bps: effective_reward_adjustment_cap_bps(config),
-        player_reward_block_count: player_block_count,
+        player_reward_block_count: verified_player_block_count,
         player_reward_pool,
-        local_player_weight_units,
+        local_player_weight_units: if verified_player_reward_total > 0 {
+            local_player_weight_units
+        } else {
+            0
+        },
         total_network_weight_units,
-        local_player_reward_total,
+        local_player_reward_total: verified_player_reward_total,
+        pending_player_reward_total,
         total_gvs_units,
         collect_pool: service_reward_pools.collect_pool,
         store_pool: service_reward_pools.store_pool,
@@ -575,17 +606,21 @@ pub fn compute_local_epoch_rewards(
             .map(|record| EpochRewardEntry {
                 node_id_hex: crate::hex_32(record.node_id),
                 player_block_count: if record.node_id == local_node_id {
-                    local_player_block_count
+                    verified_player_block_count
                 } else {
                     0
                 },
                 player_weight_units: if record.node_id == local_node_id {
-                    local_player_weight_units
+                    if verified_player_reward_total > 0 {
+                        local_player_weight_units
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 },
                 player_reward_units: if record.node_id == local_node_id {
-                    local_player_reward_total
+                    verified_player_reward_total
                 } else {
                     0
                 },
@@ -1219,6 +1254,58 @@ fn load_witness_credits(config: &NodeConfig, epoch_id: EpochId) -> BTreeMap<Stri
     credits
 }
 
+/// Returns the set of session ids for `epoch_id` that have been verified by
+/// independent peer witness attestations (or on-chain session settlements).
+/// Sessions without independent corroboration (e.g. running as an isolated
+/// single node) are not considered verified, and cannot release player rewards.
+fn verified_session_ids_for_epoch(config: &NodeConfig, epoch_id: EpochId) -> BTreeSet<String> {
+    let mut verified = BTreeSet::new();
+    let local_account = config
+        .identity_keypair()
+        .ok()
+        .map(|kp| crate::mutual_proof::identity_account_address(&kp.public));
+    let sessions = crate::mutual_proof::load_play_sessions(config);
+    let attestations = crate::mutual_proof::load_witness_attestations(config);
+    let endpoint = CosmosEndpoint::local_pole(config.chain_id.as_str());
+
+    for session in sessions {
+        if session.epoch_id != epoch_id {
+            continue;
+        }
+
+        let session_hex = crate::hex_32(session.session_id);
+        if let Ok(settlement) = crate::cosmos::query_client::session_settlement_blocking(
+            &endpoint.rest_url,
+            &session_hex,
+        ) {
+            if settlement.valid {
+                verified.insert(session_hex);
+                continue;
+            }
+        }
+
+        // Local verification: must have independent peer witness attestations
+        // (witness != player). A node cannot witness itself.
+        let witness_count = attestations
+            .iter()
+            .filter(|att| {
+                att.session_id == session.session_id
+                    && local_account
+                        .as_ref()
+                        .map(|addr| *addr != att.witness_address)
+                        .unwrap_or(true)
+            })
+            .map(|att| att.witness_address)
+            .collect::<BTreeSet<_>>()
+            .len();
+
+        if witness_count > 0 {
+            verified.insert(session_hex);
+        }
+    }
+    verified
+}
+
 /// A deterministic local `NodeId` for a witness named only by its chain
 /// account.
 ///
@@ -1772,14 +1859,27 @@ mod tests {
         assert_eq!(pools.propose_pool, 0);
     }
 
+    fn test_temp_dir(prefix: &str) -> PathBuf {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("tmp");
+        let _ = std::fs::create_dir_all(&base);
+        let dir = base.join(format!(
+            "{}-{}-{}",
+            prefix,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[test]
     fn activated_governance_app_weight_override_is_used_for_reward_calculation() {
-        let data_dir =
-            std::env::temp_dir().join(format!("pole-gov-app-weight-{}", std::process::id()));
-        if data_dir.exists() {
-            let _ = std::fs::remove_dir_all(&data_dir);
-        }
-
+        let data_dir = test_temp_dir("pole-gov-app-weight");
         let config = fixture_config(&data_dir);
 
         let store_path = PathBuf::from(&config.runtime.data_dir)
@@ -1875,11 +1975,7 @@ mod tests {
     /// `fixed_block_reward * player_weight_units / total_network_weight_units` (integer division).
     #[test]
     fn record_player_reward_tick_full_block_proportional_split_fixture() {
-        let data_dir =
-            std::env::temp_dir().join(format!("pole-reward-fixture-{}", std::process::id()));
-        if data_dir.exists() {
-            let _ = std::fs::remove_dir_all(&data_dir);
-        }
+        let data_dir = test_temp_dir("pole-reward-fixture");
 
         let mut config = fixture_config(&data_dir);
         config.runtime.game_process_names = Vec::new();
@@ -1932,11 +2028,7 @@ mod tests {
     /// Twelve 5-minute slices must match one full reward block (Phase 4 traceability).
     #[test]
     fn record_player_reward_tick_twelve_ticks_match_one_hour_block_fixture() {
-        let data_dir =
-            std::env::temp_dir().join(format!("pole-reward-12tick-{}", std::process::id()));
-        if data_dir.exists() {
-            let _ = std::fs::remove_dir_all(&data_dir);
-        }
+        let data_dir = test_temp_dir("pole-reward-12tick");
 
         let mut config = fixture_config(&data_dir);
         config.runtime.game_process_names = Vec::new();
@@ -2003,10 +2095,7 @@ mod tests {
     fn test_dual_sided_reward_pipeline_player_and_witness() {
         use crate::{KeyPair, PlaySession, WitnessAttestation};
 
-        let root = std::env::temp_dir().join(format!("pole-dual-reward-{}", std::process::id()));
-        if root.exists() {
-            let _ = std::fs::remove_dir_all(&root);
-        }
+        let root = test_temp_dir("pole-dual-reward");
         let mut config = NodeConfig::default();
         config.runtime.data_dir = root.to_string_lossy().into_owned();
         let player_key = KeyPair::from_seed(&[11u8; 32]);
@@ -2110,6 +2199,84 @@ mod tests {
             witness_rec.reward.net_reward,
             witness_rec.reward.verify_reward
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_unverified_single_node_receives_zero_player_reward() {
+        use crate::{KeyPair, PlaySession};
+
+        let root = test_temp_dir("pole-unverified-node");
+        let mut config = NodeConfig::default();
+        config.runtime.data_dir = root.to_string_lossy().into_owned();
+        let player_key = KeyPair::from_seed(&[11u8; 32]);
+        config.node_id_hex = crate::hex_32(player_key.public);
+        std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
+        std::fs::write(
+            root.join("identity.json"),
+            serde_json::to_string(&player_key).unwrap(),
+        )
+        .unwrap();
+
+        // Save a player reward tick
+        let tick_dir = std::path::Path::new(&config.runtime.data_dir).join("player-reward-blocks");
+        std::fs::create_dir_all(&tick_dir).unwrap();
+        let tick = PlayerRewardTickArtifact {
+            epoch_id: 1,
+            slot_id: 1,
+            sampled_interval_secs: 300,
+            reward_block_secs: 3600,
+            reward_adjustment_period_index: 0,
+            adjustment_cycle_index: 0,
+            reward_adjustment_period_blocks: 0,
+            adjustment_cycle_blocks: 0,
+            completed_reward_block_count: 1,
+            fixed_block_reward_basis_period_index: 0,
+            fixed_player_reward_basis_cycle_index: 0,
+            fixed_block_reward_basis_network_weight_units: 0,
+            fixed_player_reward_basis_total_network_weight_units: 0,
+            block_reward: 100_000,
+            fixed_player_reward: 100_000,
+            foreground_process: Some("cs2.exe".into()),
+            active_game_processes: vec!["cs2.exe".into()],
+            records: vec![],
+            total_player_reward: 50_000,
+        };
+        std::fs::write(
+            tick_dir.join("tick-1.json"),
+            serde_json::to_string(&tick).unwrap(),
+        )
+        .unwrap();
+
+        // Save PlaySession for epoch 1, but NO witness attestations (single node running alone)
+        let session_id = [77u8; 32];
+        let session = PlaySession {
+            session_id,
+            node_address: crate::mutual_proof::identity_account_address(&player_key.public),
+            app_id: 730,
+            epoch_id: 1,
+            slot_id: 1,
+            play_seconds: 3600,
+            collector_address: crate::mutual_proof::identity_account_address(&player_key.public),
+            observation_cid: "cid-obs-1".into(),
+            observed_players: 50_000,
+            submitted_at_height: 10,
+            session_signature: vec![0u8; 64],
+        };
+        crate::mutual_proof::save_play_session(&config, &session).unwrap();
+
+        config.reward.reward_source = crate::node_config::RewardSourceMode::Tokenomics;
+
+        // Compute local epoch rewards without any peer witness verification
+        let comp = compute_local_epoch_rewards(&config, 1).unwrap();
+
+        // Player reward must be 0 because no peer node has verified it!
+        assert_eq!(comp.artifact.local_player_reward_total, 0);
+        assert_eq!(comp.artifact.pending_player_reward_total, 50_000);
+        for record in &comp.artifact.records {
+            assert_eq!(record.reward.player_reward, 0);
+        }
 
         let _ = std::fs::remove_dir_all(&root);
     }
