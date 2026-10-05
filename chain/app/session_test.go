@@ -26,6 +26,7 @@ func registerNode(t *testing.T, app *App, ctx sdk.Context, address string, caps 
 	t.Helper()
 	if err := app.PoleKeeper.SetNode(ctx, types.NodeRecord{
 		OperatorAddress: address,
+		RewardAddress:   address,
 		Active:          true,
 		Capabilities:    caps,
 		BondedTokens:    types.MinProposeBondedTokens,
@@ -731,3 +732,75 @@ func TestSubmitRewardRecordsSkipsSplitCheckWithoutWitnessCredits(t *testing.T) {
 		t.Fatalf("expected an epoch without witness credits to keep validating, got: %v", err)
 	}
 }
+
+func TestWitnessRejectsSameRewardAddressSybil(t *testing.T) {
+	f := newSessionFixture(t, 70, 600, 1_000)
+	playerNode, err := f.app.PoleKeeper.GetNode(f.ctx, f.player)
+	if err != nil {
+		t.Fatalf("get player node: %v", err)
+	}
+
+	// Register a sybil witness node sharing the player's reward address
+	sybilWitness := bech32Addr(t, f.app, 71)
+	if err := f.app.PoleKeeper.SetNode(f.ctx, types.NodeRecord{
+		OperatorAddress: sybilWitness,
+		RewardAddress:   playerNode.RewardAddress,
+		Active:          true,
+		Capabilities:    &types.NodeCapabilitySet{Collect: true, Verify: true},
+		BondedTokens:    types.MinProposeBondedTokens,
+	}); err != nil {
+		t.Fatalf("set sybil witness node: %v", err)
+	}
+
+	// Give the sybil witness a batch commit so it satisfies the own-observation check
+	batch := types.BatchCommit{
+		EpochId:          1,
+		CollectorAddress: sybilWitness,
+		Batch:            &types.MerkleCommitment{Root: strings.Repeat("ab", 32), LeafCount: 1},
+		PayloadCid:       "sybil-observation",
+		ObservationCount: 1,
+	}
+	if err := f.app.PoleKeeper.SetBatchCommit(f.ctx, batch); err != nil {
+		t.Fatalf("set sybil batch: %v", err)
+	}
+
+	err = f.attest(t, sybilWitness, "sybil-obs", 1_000)
+	if err == nil {
+		t.Fatalf("expected attestation from same reward address to be rejected")
+	}
+	if !strings.Contains(err.Error(), "shares reward address") {
+		t.Fatalf("expected shares reward address error, got: %v", err)
+	}
+}
+
+func TestSettlementRejectsColludingWitnessRewardAddresses(t *testing.T) {
+	f := newSessionFixture(t, 80, 600, 1_000)
+	f.submitHeartbeats(t, 2)
+
+	// Set witnessA and witnessB to have the same reward address
+	commonRewardAddr := bech32Addr(t, f.app, 89)
+	for _, w := range []string{f.witnessA, f.witnessB} {
+		node, _ := f.app.PoleKeeper.GetNode(f.ctx, w)
+		node.RewardAddress = commonRewardAddr
+		_ = f.app.PoleKeeper.SetNode(f.ctx, node)
+	}
+
+	if err := f.attest(t, f.witnessA, "witness-observation-a", 1_000); err != nil {
+		t.Fatalf("attest witness A: %v", err)
+	}
+	if err := f.attest(t, f.witnessB, "witness-observation-b", 1_000); err != nil {
+		t.Fatalf("attest witness B: %v", err)
+	}
+
+	settlement, err := f.settle(t)
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	if settlement.Valid {
+		t.Fatalf("expected settlement to be invalid due to shared witness reward address")
+	}
+	if !strings.Contains(settlement.InvalidReason, "insufficient distinct witness reward addresses") {
+		t.Fatalf("unexpected invalid reason: %s", settlement.InvalidReason)
+	}
+}
+

@@ -244,6 +244,24 @@ func (k Keeper) validateWitnessIndependence(
 		return fmt.Errorf("witness %s lacks the collect capability", attestation.WitnessAddress)
 	}
 
+	// Witness must satisfy staking requirement
+	if !witness.IsPlayer && witness.BondedTokens < types.RequiredBondedTokensForNode(witness) {
+		return fmt.Errorf(
+			"witness %s has bonded tokens %d below required threshold %d",
+			attestation.WitnessAddress, witness.BondedTokens, types.RequiredBondedTokensForNode(witness),
+		)
+	}
+
+	// Reject sybil collusion where player and witness share the same reward address
+	if playerNode, err := k.GetNode(ctx, session.NodeAddress); err == nil {
+		if playerNode.RewardAddress != "" && witness.RewardAddress != "" && playerNode.RewardAddress == witness.RewardAddress {
+			return fmt.Errorf(
+				"witness %s shares reward address %s with player %s (sybil self-attestation rejected)",
+				attestation.WitnessAddress, witness.RewardAddress, session.NodeAddress,
+			)
+		}
+	}
+
 	// The witness must have collected something in this epoch: that batch
 	// commit is the on-chain evidence that it holds an observation of its
 	// own rather than merely repeating the claim.
@@ -334,18 +352,25 @@ func (k Keeper) SettlePlaySession(ctx context.Context, sessionIDHex string) (typ
 	}
 
 	// Count distinct witnesses and distinct observation payloads. The
-	// distinct-payload count is what defeats N witnesses all forwarding one
-	// observation.
+	// Count distinct witnesses, distinct reward addresses, and distinct observation payloads.
+	// The distinct-reward-address and distinct-payload counts defeat sybil rings and replay.
 	witnesses := map[string]struct{}{}
 	observations := map[string]struct{}{}
+	witnessRewardAddrs := map[string]struct{}{}
 	for _, attestation := range attestations {
 		witnesses[attestation.WitnessAddress] = struct{}{}
 		if attestation.WitnessObservationCid != "" {
 			observations[attestation.WitnessObservationCid] = struct{}{}
 		}
+		if wNode, err := k.GetNode(ctx, attestation.WitnessAddress); err == nil && wNode.RewardAddress != "" {
+			witnessRewardAddrs[wNode.RewardAddress] = struct{}{}
+		} else {
+			witnessRewardAddrs[attestation.WitnessAddress] = struct{}{}
+		}
 	}
 	witnessCount := uint64(len(witnesses))
 	distinctObservations := uint64(len(observations))
+	distinctRewardAddrs := uint64(len(witnessRewardAddrs))
 
 	bucketSeconds := params.HeartbeatBucketSeconds
 	if bucketSeconds == 0 {
@@ -381,6 +406,11 @@ func (k Keeper) SettlePlaySession(ctx context.Context, sessionIDHex string) (typ
 	case witnessCount < params.MinWitnessCount:
 		settlement.InvalidReason = fmt.Sprintf(
 			"insufficient witnesses (%d < %d)", witnessCount, params.MinWitnessCount,
+		)
+	case distinctRewardAddrs < params.MinWitnessCount:
+		settlement.InvalidReason = fmt.Sprintf(
+			"insufficient distinct witness reward addresses (%d < %d)",
+			distinctRewardAddrs, params.MinWitnessCount,
 		)
 	case distinctObservations < params.MinDistinctObservations:
 		settlement.InvalidReason = fmt.Sprintf(

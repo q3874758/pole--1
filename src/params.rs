@@ -102,7 +102,7 @@ impl Default for MutualProofParams {
     fn default() -> Self {
         Self {
             min_witness_count: 2,
-            min_witness_observation_tolerance_ppm: 500_000,
+            min_witness_observation_tolerance_ppm: 50_000,
             min_distinct_observations: 2,
             session_slash_bps: 5_000,
             min_heartbeat_count: 2,
@@ -196,7 +196,7 @@ impl Default for ProtocolParams {
             },
             mutual_proof: MutualProofParams {
                 min_witness_count: 2,
-                min_witness_observation_tolerance_ppm: 500_000,
+                min_witness_observation_tolerance_ppm: 50_000,
                 min_distinct_observations: 2,
                 session_slash_bps: 5_000,
                 min_heartbeat_count: 2,

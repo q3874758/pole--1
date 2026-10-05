@@ -49,7 +49,7 @@ func DefaultParams() Params {
 		MinVerificationCount:              3,
 		MinPlayerVerifierShareBps:         5000,
 		MinWitnessCount:                   2,
-		MinWitnessObservationTolerancePpm: 500_000,
+		MinWitnessObservationTolerancePpm: 50_000,
 		MinDistinctObservations:           2,
 		SessionSlashBps:                   5_000,
 		MinHeartbeatCount:                 2,

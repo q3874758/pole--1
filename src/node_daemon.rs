@@ -2221,6 +2221,50 @@ fn ingest_peer_batch_announcements(
                         && session.collector_address != local_node_id
                         && config.capabilities.collect
                     {
+                        let session_id_hex = crate::hex_32(session.session_id);
+                        if crate::mutual_proof::witness_attestation_path(config, &session_id_hex)
+                            .exists()
+                        {
+                            continue;
+                        }
+
+                        let existing_attestations =
+                            crate::mutual_proof::load_witness_attestations(config);
+                        let existing_sessions = crate::mutual_proof::load_play_sessions(config);
+                        let attested_ids: std::collections::HashSet<_> =
+                            existing_attestations.iter().map(|a| a.session_id).collect();
+
+                        // 1. Quota: Max 64 auto-attestations per epoch to prevent resource exhaustion
+                        const MAX_AUTO_ATTESTATIONS_PER_EPOCH: usize = 64;
+                        let epoch_attestation_count = existing_sessions
+                            .iter()
+                            .filter(|s| {
+                                s.epoch_id == session.epoch_id
+                                    && attested_ids.contains(&s.session_id)
+                            })
+                            .count();
+                        if epoch_attestation_count >= MAX_AUTO_ATTESTATIONS_PER_EPOCH {
+                            eprintln!(
+                                "pole-node: auto-witness quota reached for epoch {} ({}/{}), skipping session {}",
+                                session.epoch_id, epoch_attestation_count, MAX_AUTO_ATTESTATIONS_PER_EPOCH, session_id_hex
+                            );
+                            continue;
+                        }
+
+                        // 2. Peer rate limiting: At most 1 session per peer per app per epoch
+                        let peer_app_already_witnessed = existing_sessions.iter().any(|s| {
+                            s.epoch_id == session.epoch_id
+                                && s.node_address == session.node_address
+                                && s.app_id == session.app_id
+                                && attested_ids.contains(&s.session_id)
+                        });
+                        if peer_app_already_witnessed {
+                            eprintln!(
+                                "pole-node: already auto-witnessed app {} for peer {} in epoch {}, skipping session {}",
+                                session.app_id, crate::hex_32(session.node_address), session.epoch_id, session_id_hex
+                            );
+                            continue;
+                        }
                         let own_obs = runtime.retention_book.payloads.values().find_map(|p| {
                             if p.epoch_id == session.epoch_id {
                                 let path = payload_path(config, &p.payload_cid);
@@ -4118,7 +4162,20 @@ mod tests {
 
     #[test]
     fn test_p2p_play_session_auto_witnessing_flow() {
-        let root = std::env::temp_dir().join(format!("pole-p2p-witness-{}", std::process::id()));
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("tmp");
+        let _ = std::fs::create_dir_all(&base);
+        let root = base.join(format!(
+            "pole-p2p-witness-{}-{id}-{nanos}",
+            std::process::id()
+        ));
         if root.exists() {
             let _ = std::fs::remove_dir_all(&root);
         }

@@ -304,7 +304,7 @@ fn default_pole_params() -> serde_json::Value {
         "min_verification_count": 3,
         "min_player_verifier_share_bps": 5000,
         "min_witness_count": 2,
-        "min_witness_observation_tolerance_ppm": 500_000,
+        "min_witness_observation_tolerance_ppm": 50_000,
         "min_distinct_observations": 2,
         "session_slash_bps": 5000,
         "min_heartbeat_count": 2,
