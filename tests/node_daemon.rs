@@ -26,7 +26,7 @@ struct FixedHttpClient;
 
 impl HttpTextClient for FixedHttpClient {
     fn get_text(&self, url: &str) -> Result<String, SteamCollectorError> {
-        if url.contains("example.invalid/epic") {
+        if url.contains("epicgames.com/epic") {
             return Ok("{\"player_count\":1234,\"confidence_ppm\":450000}".into());
         }
         let app_id = url.split("appid=").nth(1).unwrap_or("0");
@@ -786,7 +786,7 @@ fn collect_tick_uses_configured_activity_sources_when_present() {
         pole_protocol_draft::ActivitySourceConfig {
             app_id: 730,
             source_kind: ActivitySourceKind::Epic,
-            endpoint_url: Some("https://example.invalid/epic?appid={app_id}".into()),
+            endpoint_url: Some("https://api.epicgames.com/epic?appid={app_id}".into()),
             inline_json: None,
             retries: 0,
         },

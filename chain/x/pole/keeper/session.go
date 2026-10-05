@@ -46,7 +46,7 @@ func (k Keeper) GetSessionSettlement(ctx context.Context, sessionIDHex string) (
 
 // playHeartbeatsForSession returns every stored heartbeat for a session.
 func (k Keeper) playHeartbeatsForSession(ctx context.Context, sessionIDHex string) ([]types.PlayHeartbeat, error) {
-	iter, err := k.PlayHeartbeats.Iterate(ctx, nil)
+	iter, err := k.PlayHeartbeats.Iterate(ctx, collections.NewPrefixedPairRange[string, uint64](sessionIDHex))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (k Keeper) playHeartbeatsForSession(ctx context.Context, sessionIDHex strin
 
 // witnessAttestationsForSession returns every stored attestation for a session.
 func (k Keeper) witnessAttestationsForSession(ctx context.Context, sessionIDHex string) ([]types.WitnessAttestation, error) {
-	iter, err := k.WitnessAttestations.Iterate(ctx, nil)
+	iter, err := k.WitnessAttestations.Iterate(ctx, collections.NewPrefixedPairRange[string, string](sessionIDHex))
 	if err != nil {
 		return nil, err
 	}

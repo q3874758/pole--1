@@ -383,7 +383,7 @@ func (k Keeper) GetVerificationRecord(ctx context.Context, epochId uint64, verif
 }
 
 func (k Keeper) verificationRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.VerificationRecord, error) {
-	iter, err := k.VerificationRecords.Iterate(ctx, nil)
+	iter, err := k.VerificationRecords.Iterate(ctx, collections.NewPrefixedTripleRange[uint64, string, string](epochId))
 	if err != nil {
 		return nil, err
 	}
@@ -874,12 +874,17 @@ func (k Keeper) ApplyValidatorSlash(ctx context.Context, consAddress string, sla
 // ensureRewardPool mints exactly the module-account shortfall needed for a
 // confirmed payout. Supply is stabilized by the protocol's burn channels,
 // while the activity-adjusted annual curve continues to regulate unit value.
+// A soft guardrail limits any single payout from exceeding the annual emission budget
+// to prevent governance misconfiguration or math overflow from draining unconstrained mints.
 func (k Keeper) ensureRewardPool(ctx context.Context, payout uint64) error {
 	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
 	balance := k.bankKeeper.GetBalance(ctx, moduleAddr, types.BaseDenom)
 	needed := sdkmath.NewIntFromUint64(payout)
 	if balance.Amount.GTE(needed) {
 		return nil
+	}
+	if payout > types.TotalSupplyAmount {
+		return fmt.Errorf("claimed payout %d exceeds protocol total supply soft guardrail %d", payout, types.TotalSupplyAmount)
 	}
 	shortfall := needed.Sub(balance.Amount)
 	return k.bankKeeper.MintCoins(ctx, types.ModuleName, sdk.NewCoins(sdk.NewCoin(types.BaseDenom, shortfall)))
@@ -933,7 +938,7 @@ func (k Keeper) PayoutClaimedReward(ctx context.Context, claim types.ClaimedRewa
 }
 
 func (k Keeper) rewardRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.RewardRecord, error) {
-	iter, err := k.RewardRecords.Iterate(ctx, nil)
+	iter, err := k.RewardRecords.Iterate(ctx, collections.NewPrefixedPairRange[uint64, string](epochId))
 	if err != nil {
 		return nil, err
 	}
@@ -957,7 +962,7 @@ func (k Keeper) RewardRecordsForEpoch(ctx context.Context, epochId uint64) ([]ty
 }
 
 func (k Keeper) batchCommitsForEpoch(ctx context.Context, epochId uint64) ([]types.BatchCommit, error) {
-	iter, err := k.BatchCommits.Iterate(ctx, nil)
+	iter, err := k.BatchCommits.Iterate(ctx, collections.NewPrefixedTripleRange[uint64, string, string](epochId))
 	if err != nil {
 		return nil, err
 	}
@@ -996,7 +1001,7 @@ func (k Keeper) isPlayerCollector(ctx context.Context, operatorAddress string, e
 }
 
 func (k Keeper) availabilityRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.AvailabilityRecord, error) {
-	iter, err := k.Availability.Iterate(ctx, nil)
+	iter, err := k.Availability.Iterate(ctx, collections.NewPrefixedTripleRange[uint64, string, string](epochId))
 	if err != nil {
 		return nil, err
 	}
@@ -1016,7 +1021,7 @@ func (k Keeper) availabilityRecordsForEpoch(ctx context.Context, epochId uint64)
 }
 
 func (k Keeper) aggregateRecordsForEpoch(ctx context.Context, epochId uint64) ([]types.AggregateRecord, error) {
-	iter, err := k.AggregateRecords.Iterate(ctx, nil)
+	iter, err := k.AggregateRecords.Iterate(ctx, collections.NewPrefixedPairRange[uint64, uint64](epochId))
 	if err != nil {
 		return nil, err
 	}

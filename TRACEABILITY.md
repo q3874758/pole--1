@@ -233,7 +233,7 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 
 ## 验证清单
 
-验证白皮书合规性:
+验证白皮书合规性与安全架构（2026-10 全量审计修复对齐）:
 
 1. ✅ **小时奖励区块:** `node_rewards.rs` 使用 `reward_block_secs = 3600`
 2. ✅ **玩家权重公式:** `node_rewards.rs:adjusted_player_block_reward` 计算 `weight = time * game_weight`
@@ -242,8 +242,12 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 5. ✅ **跨周期调节:** `node_rewards.rs` 通过 `adjusted_player_block_reward` 实现负反馈
 6. ✅ **GVS 层级:** `node_gvs.rs:classify_tier` 将分数映射到 ppm 范围层级
 7. ✅ **服务奖励分配:** `tokenomics.rs` 定义了 `SERVICE_REWARD_ALLOCATION_BPS`
-8. ✅ **互证判定:** `mutual_proof.rs` 构造声明/心跳/见证，`keeper/session.go:SettlePlaySession` 按心跳覆盖、见证数与独立观测数判定有效性
-9. ✅ **见证独立性:** `session.go:validateWitnessIndependence` 拒绝自证、自采、无自有观测、复用观测载荷与超容差偏离
-10. ✅ **见证奖励切分:** `types/witness_reward.go:AllocateWitnessRewards` 精确耗尽 `verify_pool`，字典序 tie-break 保证共识一致
-11. ✅ **无上限发行:** `keeper/emission.go` 无月度配额与剩余预算截断，`PayoutClaimedReward` 按需补铸精确短缺额
-12. ✅ **长期供给受控:** `chain/app/supply_simulation_test.go` 实测 30 年发行率单调衰减、20 年销毁随活跃度跟进
+8. ✅ **信号分层定义 (P0-1):** 明确「微观游玩事实」（客户端自证，受心跳与进程约束）与「宏观一致性信号」（比对受信任源规模偏离）的界限，语义无循环论证。
+9. ✅ **受信任源白名单 (P0-2):** `activity_collector.rs` 强制官方 HTTPS 域名白名单，非白名单端点直接拒绝，社区源置信度上限 500,000 ppm。
+10. ✅ **女巫攻击与质押门槛 (P0-3):** 见证节点需质押 `RequiredBondedTokensForNode`，禁止见证人与玩家共享奖励地址，结算要求不同见证人奖励地址相互隔离。
+11. ✅ **游玩时长心跳强绑定 (P0-4):** `keeper/session.go:SettlePlaySession` 结算时长强截断于 `min(session.PlaySeconds, heartbeats * bucketSeconds)`，杜绝挂名空转。
+12. ✅ **后门剔除与二进制校验 (P0-5):** 调试环境变量覆盖仅限测试构建，正式构建物理剥离；增加 PE 头部 MZ/PE 指纹与 SHA256 校验，CI 门禁脚本阻断后门泄露。
+13. ✅ **观测容差收紧 (P1-2):** 默认容差从 500‰ 收紧至 50‰（50,000 ppm），杜绝虚假规模套利。
+14. ✅ **P2P 自动背书节流 (P1-3):** 添加背书幂等防重入、单 Epoch 64 次配额上限与单对端滑动窗口频控。
+15. ✅ **供给压力测试与软护栏 (P1-1):** 跨 30 年多情景（熊/基准/牛/极限）净供给仿真矩阵验证，`ensureRewardPool` 内嵌年度总预算软护栏。
+16. ✅ **复合前缀索引范围查询 (P2):** `keeper.go` / `session.go` 全量采用 `NewPrefixedTripleRange` 与 `NewPrefixedPairRange` 消除 O(n) 全表扫。

@@ -271,6 +271,7 @@ pub fn is_trusted_source_endpoint(source_kind: ActivitySourceKind, url: &str) ->
         ActivitySourceKind::Epic => {
             lower.starts_with("https://api.epicgames.dev/")
                 || lower.starts_with("https://store.epicgames.com/")
+                || lower.starts_with("https://api.epicgames.com/")
         }
         ActivitySourceKind::Ea => lower.starts_with("https://api.ea.com/"),
         ActivitySourceKind::Gog => lower.starts_with("https://api.gog.com/"),

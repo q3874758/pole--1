@@ -302,3 +302,108 @@ func TestLongRunSupplyInflationRateFallsMonotonically(t *testing.T) {
 		t.Fatalf("pool %s should equal cumulative minted %s", pool.String(), cumulative.String())
 	}
 }
+
+// TestNetSupplyStressTestUnderVaryingActivityAndBurnScenarios executes a sensitivity
+// and stress analysis across multi-decade horizons (10, 20, 30 years) under varying
+// network activity and burn regimes:
+//  1. Bear / Low Activity (actual weight = 25% target): emission factor clamps to +10%,
+//     burn share is modest (500 bps).
+//  2. Baseline (actual weight = 100% target): emission factor is neutral 1.0,
+//     burn share is standard (1,000 bps).
+//  3. Bull / High Activity (actual weight = 400% target): emission factor clamps to -10%,
+//     burn share is elevated (1,500 bps).
+//  4. Extreme Stress / Zero-Burn (actual weight = 25% target): no burn channels active,
+//     giving the absolute theoretical upper bound of gross token supply.
+func TestNetSupplyStressTestUnderVaryingActivityAndBurnScenarios(t *testing.T) {
+	type scenario struct {
+		name          string
+		targetWeight  uint64
+		currentWeight uint64
+		burnShareBps  uint64
+	}
+
+	scenarios := []scenario{
+		{
+			name:          "Bear (Low Activity +10% emission, 500 bps burn)",
+			targetWeight:  100_000,
+			currentWeight: 25_000,
+			burnShareBps:  500,
+		},
+		{
+			name:          "Baseline (Neutral emission, 1000 bps burn)",
+			targetWeight:  100_000,
+			currentWeight: 100_000,
+			burnShareBps:  1_000,
+		},
+		{
+			name:          "Bull (High Activity -10% emission, 1500 bps burn)",
+			targetWeight:  25_000,
+			currentWeight: 100_000,
+			burnShareBps:  1_500,
+		},
+		{
+			name:          "Extreme Stress (Max emission +10%, 0 bps burn)",
+			targetWeight:  100_000,
+			currentWeight: 25_000,
+			burnShareBps:  0,
+		},
+	}
+
+	const years = 30
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			var cumulativeMinted sdkmath.Int = sdkmath.ZeroInt()
+			var cumulativeBurned sdkmath.Int = sdkmath.ZeroInt()
+			var prevNetSupply sdkmath.Int = sdkmath.ZeroInt()
+			var prevAnnualNet sdkmath.Int = sdkmath.ZeroInt()
+
+			for year := uint32(1); year <= years; year++ {
+				adjustedAnnual := types.AnnualAdjustedEmission(
+					year,
+					sc.targetWeight,
+					sc.currentWeight,
+					types.AnnualEmissionCapBps,
+				)
+				minted := sdkmath.NewIntFromUint64(adjustedAnnual)
+				cumulativeMinted = cumulativeMinted.Add(minted)
+
+				burned := minted.MulRaw(int64(sc.burnShareBps)).QuoRaw(10_000)
+				cumulativeBurned = cumulativeBurned.Add(burned)
+
+				netSupply := cumulativeMinted.Sub(cumulativeBurned)
+				currAnnualNet := minted.Sub(burned)
+
+				// Invariant 1: Net supply must always be non-decreasing
+				if netSupply.LT(prevNetSupply) {
+					t.Fatalf("year %d net supply decreased from %s to %s", year, prevNetSupply, netSupply)
+				}
+
+				// Invariant 2: In the tail regime (year >= 4), annual net emission must never increase
+				if year > 4 && prevAnnualNet.IsPositive() {
+					if currAnnualNet.GT(prevAnnualNet) {
+						t.Fatalf("annual net emission rose from year %d (%s) to year %d (%s)",
+							year-1, prevAnnualNet, year, currAnnualNet)
+					}
+				}
+
+				prevNetSupply = netSupply
+				prevAnnualNet = currAnnualNet
+
+				if year == 10 || year == 20 || year == 30 {
+					netSupplyTokens := netSupply.QuoRaw(1_000_000)
+					annualRateBps := currAnnualNet.MulRaw(10_000).Quo(netSupply)
+					t.Logf("[%s] Year %d: Net Supply = %s M tokens (Annual Net Inflation = %s bps)",
+						sc.name, year, netSupplyTokens.String(), annualRateBps.String())
+				}
+			}
+
+			// Invariant 3: Cumulative net supply after 30 years must never exceed the absolute
+			// theoretical maximum (Extreme stress scenario bound: initial supply + 30y max emission).
+			net30 := cumulativeMinted.Sub(cumulativeBurned)
+			maxPossible30 := sdkmath.NewIntFromUint64(types.TotalSupplyAmount + 30*220_000_000)
+			if net30.GT(maxPossible30) {
+				t.Fatalf("net supply at year 30 (%s) exceeded absolute ceiling (%s)", net30, maxPossible30)
+			}
+		})
+	}
+}
