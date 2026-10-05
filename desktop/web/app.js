@@ -43,6 +43,8 @@ function initElements() {
   els.playerAddressPreview = document.getElementById("player-address-preview");
   els.btnCopyAddress = document.getElementById("btn-copy-address");
   els.btnChangeAddress = document.getElementById("btn-change-address");
+  els.btnOpenKeysDir = document.getElementById("btn-open-keys-dir");
+  els.btnOpenDataDir = document.getElementById("btn-open-data-dir");
 
   // 4 Core Metrics
   els.statHeartbeatsCount = document.getElementById("stat-heartbeats-count");
@@ -582,6 +584,28 @@ function setupEvents() {
         showToast("❌ 更新请求失败: " + err.message);
       }
     });
+  }
+
+  // Open Keys Directory
+  const handleOpenKeysDir = async () => {
+    try {
+      showToast("⏳ 正在打开密钥文件夹...");
+      const resp = await apiPost("/api/wallet/open-folder", {});
+      if (resp && resp.ok) {
+        showToast("📁 已在文件管理器中打开密钥目录！");
+      } else {
+        showToast("❌ 打开文件夹失败: " + (resp && resp.error ? resp.error : "未知错误"));
+      }
+    } catch (err) {
+      showToast("❌ 打开文件夹请求失败: " + err.message);
+    }
+  };
+
+  if (els.btnOpenKeysDir) {
+    els.btnOpenKeysDir.addEventListener("click", handleOpenKeysDir);
+  }
+  if (els.btnOpenDataDir) {
+    els.btnOpenDataDir.addEventListener("click", handleOpenKeysDir);
   }
 
   // Tab Switching

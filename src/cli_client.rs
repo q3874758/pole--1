@@ -21,9 +21,9 @@ use crate::bin_commands::{
     governance_propose_thresholds_cmd, governance_propose_tier_weights_cmd,
     governance_show_index_cmd, governance_show_proposal_cmd, governance_show_scheduled_cmd,
     governance_show_summary_cmd, governance_vote_cmd, identity_export_secret_cmd,
-    reward_adjustment_show_index_cmd, reward_adjustment_show_summary_cmd, tokenomics_cmd,
-    wallet_address_cmd, wallet_create_cmd, wallet_export_secret_cmd, wallet_recover_cmd,
-    wallet_set_reward_address_cmd,
+    open_keys_dir_cmd, reward_adjustment_show_index_cmd, reward_adjustment_show_summary_cmd,
+    tokenomics_cmd, wallet_address_cmd, wallet_create_cmd, wallet_export_secret_cmd,
+    wallet_recover_cmd, wallet_set_reward_address_cmd,
 };
 use crate::cosmos::{
     address as cosmos_address, wire_types::BatchCommitWire, wire_types::EpochCommitWire,
@@ -115,6 +115,7 @@ pub const CLIENT_USAGE_COMMANDS: &[&str] = &[
     "  pole-client wallet-export-secret [data-dir] [password]",
     "  pole-client wallet-set-reward-address [config-path] [data-dir] [password]",
     "  pole-client identity-export-secret [config-path]",
+    "  pole-client open-keys-dir [config-path]",
     "  pole-client submit-batch [config-path] [epoch-id] [chain-id]",
     "  pole-client submit-epoch [config-path] [epoch-id] [current-height] [challenge-window-blocks] [chain-id]",
     "  pole-client export-tx [config-path] [type] [epoch-id] [current-height] [challenge-window-blocks]",
@@ -212,6 +213,7 @@ pub const CLIENT_COMMANDS: &[(&str, ClientCommandHandler)] = &[
     ("wallet-export-secret", wallet_export_secret_cmd),
     ("wallet-set-reward-address", wallet_set_reward_address_cmd),
     ("identity-export-secret", identity_export_secret_cmd),
+    ("open-keys-dir", open_keys_dir_cmd),
     ("submit-batch", submit_batch_cmd),
     ("submit-epoch", submit_epoch_cmd),
     ("export-tx", export_tx_cmd),

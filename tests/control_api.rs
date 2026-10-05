@@ -1190,3 +1190,39 @@ fn control_api_serves_service_action_endpoint() {
 
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn control_api_serves_open_wallet_folder_endpoint() {
+    let root = temp_root("open-folder");
+    if root.exists() {
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    std::fs::create_dir_all(&root).unwrap();
+
+    let config_path = root.join("client.json");
+    let mut config = NodeConfig::default();
+    config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
+    config.save_json(&config_path).unwrap();
+    std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let config_path_for_thread = config_path.clone();
+    let handle = thread::spawn(move || {
+        serve_control_api(listener, config_path_for_thread, Some(1)).unwrap();
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(format!("http://{addr}/api/wallet/open-folder"))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+    handle.join().unwrap();
+
+    assert!(response.contains("\"ok\":true"));
+    assert!(response.contains("pole-node-data"));
+
+    std::fs::remove_dir_all(&root).unwrap();
+}

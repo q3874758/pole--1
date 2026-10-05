@@ -217,6 +217,17 @@ pub fn identity_export_secret_cmd(args: &[String]) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+/// `open-keys-dir [config-path]` — open the wallet and keys directory in system explorer.
+pub fn open_keys_dir_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_CONFIG_PATH);
+    let target = crate::control_api::open_wallet_keys_dir(Path::new(config_path))?;
+    println!("opened_path={}", target.display());
+    Ok(())
+}
+
 /// `governance-propose-params [config-path] <proposal-id-hex> <effective-epoch>
 /// <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]`
 /// — propose an emission/reward params update.

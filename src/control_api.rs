@@ -1381,6 +1381,20 @@ pub fn handle_connection(
                 }
             }
         }
+        ("POST", "/api/wallet/open-folder") | ("GET", "/api/wallet/open-folder") => {
+            let res = open_wallet_keys_dir(config_path);
+            let body = match res {
+                Ok(path) => format!(
+                    "{{\"ok\":true,\"path\":{}}}",
+                    serde_json::to_string(&path.to_string_lossy())?
+                ),
+                Err(e) => format!(
+                    "{{\"ok\":false,\"error\":{}}}",
+                    serde_json::to_string(&e.to_string())?
+                ),
+            };
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
+        }
         _ => {
             write_json_response(
                 &mut stream,
@@ -1391,6 +1405,60 @@ pub fn handle_connection(
     }
 
     Ok(())
+}
+
+pub fn open_wallet_keys_dir(config_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let (_, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+    let identity_file = data_dir.join("identity.json");
+    let target_path = if identity_file.exists() {
+        identity_file
+    } else {
+        data_dir
+    };
+    if let Err(e) = open_in_file_explorer(&target_path) {
+        eprintln!(
+            "[control-api] failed to spawn file explorer for {:?}: {e}",
+            target_path
+        );
+    }
+    Ok(target_path)
+}
+
+pub fn open_in_file_explorer(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if path.is_file() {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{}", path.display()))
+                .spawn()?;
+        } else {
+            std::process::Command::new("explorer").arg(path).spawn()?;
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if path.is_file() {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(path)
+                .spawn()?;
+        } else {
+            std::process::Command::new("open").arg(path).spawn()?;
+        }
+        Ok(())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let target = if path.is_file() {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        };
+        std::process::Command::new("xdg-open").arg(target).spawn()?;
+        Ok(())
+    }
 }
 
 pub fn serve(
