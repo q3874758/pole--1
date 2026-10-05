@@ -34,6 +34,9 @@ jobs:
 
       - name: Package portable zip
         run: |
+          if (-not (Test-Path "node.json")) {
+            .\target\release\pole.exe init node.json player
+          }
           Compress-Archive -Path target/release/pole.exe,"PoLE-一键运行.cmd","PoLE-一键运行.vbs","PoLE-停止运行.cmd","PoLE-查看控制面板.url",desktop,node.json -DestinationPath dist/packages/PoLE-$env:VERSION-x64-portable.zip -Force
 
       - name: Compute checksums
