@@ -614,7 +614,15 @@ impl NodeConfig {
     /// are accepted. Encrypted files require the password from
     /// `POLE_IDENTITY_PASSWORD` (or a TTY prompt during generation).
     pub fn identity_keypair(&self) -> Result<KeyPair, NodeConfigError> {
-        let path = Path::new(&self.runtime.data_dir).join("identity.json");
+        let wallet_path = Path::new(&self.runtime.data_dir)
+            .join("wallet")
+            .join("identity.json");
+        let root_path = Path::new(&self.runtime.data_dir).join("identity.json");
+        let path = if wallet_path.exists() {
+            wallet_path
+        } else {
+            root_path
+        };
         let mut text = fs::read_to_string(&path)?;
         // Legacy plaintext format: the KeyPair JSON carries a "secret" field.
         if let Ok(keypair) = serde_json::from_str::<KeyPair>(&text) {

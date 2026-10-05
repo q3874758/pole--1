@@ -1410,12 +1410,35 @@ pub fn handle_connection(
 pub fn open_wallet_keys_dir(config_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let (_, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
     let data_dir = PathBuf::from(&config.runtime.data_dir);
-    let identity_file = data_dir.join("identity.json");
-    let target_path = if identity_file.exists() {
-        identity_file
+    let wallet_dir = data_dir.join("wallet");
+    let _ = fs::create_dir_all(&wallet_dir);
+
+    let root_identity = data_dir.join("identity.json");
+    let wallet_identity = wallet_dir.join("identity.json");
+    if root_identity.exists() && !wallet_identity.exists() {
+        let _ = fs::copy(&root_identity, &wallet_identity);
+    }
+
+    let readme_path = wallet_dir.join("钱包安全说明.txt");
+    if !readme_path.exists() {
+        let _ = fs::write(
+            readme_path,
+            "【PoLE 钱包与密钥存储目录】\r\n\r\n\
+             本文件夹为您的私有密钥专属存储目录：\r\n\
+             - identity.json : 节点身份与出块验证签名私钥（AES-256-GCM 加密）\r\n\
+             - keystore.json : 独立助记词钱包文件（如已通过 wallet-create 创建）\r\n\r\n\
+             安全提醒：\r\n\
+             1. 请妥善保管本文件夹中的文件，切勿随意删除或发送给他人。\r\n\
+             2. 迁移机器时，备份并复制本 wallet 文件夹即可恢复全部身份与资产。\r\n",
+        );
+    }
+
+    let target_path = if wallet_identity.exists() {
+        wallet_identity
     } else {
-        data_dir
+        wallet_dir
     };
+
     if let Err(e) = open_in_file_explorer(&target_path) {
         eprintln!(
             "[control-api] failed to spawn file explorer for {:?}: {e}",

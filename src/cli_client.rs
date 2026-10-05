@@ -3250,8 +3250,9 @@ fn load_or_init_player_config(
     fs::create_dir_all(&resolved.runtime.data_dir)?;
 
     let data_dir = Path::new(&resolved.runtime.data_dir);
+    let wallet_identity_path = data_dir.join("wallet").join("identity.json");
     let identity_path = data_dir.join("identity.json");
-    let needs_identity = !identity_path.exists()
+    let needs_identity = (!identity_path.exists() && !wallet_identity_path.exists())
         || has_placeholder_node_identity(&resolved)
         || resolved.identity_keypair().is_err();
     if needs_identity {
@@ -3385,7 +3386,12 @@ fn write_identity_file(
     identity_keypair: &KeyPair,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(data_dir)?;
+    let wallet_dir = data_dir.join("wallet");
+    let _ = fs::create_dir_all(&wallet_dir);
+
     let identity_path = data_dir.join("identity.json");
+    let wallet_identity_path = wallet_dir.join("identity.json");
+
     // Encrypted keystore format (AES-256-GCM + scrypt). The password comes
     // from POLE_IDENTITY_PASSWORD or an interactive prompt; the secret is
     // never written to disk in the clear.
@@ -3393,7 +3399,22 @@ fn write_identity_file(
     let store =
         crate::EncryptedKeystore::new(identity_keypair.clone(), Some("node identity".to_string()));
     store.encrypt(&password, &identity_path)?;
+    let _ = store.encrypt(&password, &wallet_identity_path);
     password.zeroize();
+
+    let readme_path = wallet_dir.join("钱包安全说明.txt");
+    if !readme_path.exists() {
+        let _ = fs::write(
+            readme_path,
+            "【PoLE 钱包与密钥存储目录】\r\n\r\n\
+             本文件夹为您的私有密钥专属存储目录：\r\n\
+             - identity.json : 节点身份与出块验证签名私钥（AES-256-GCM 加密）\r\n\
+             - keystore.json : 独立助记词钱包文件（如已通过 wallet-create 创建）\r\n\r\n\
+             安全提醒：\r\n\
+             1. 请妥善保管本文件夹中的文件，切勿随意删除或发送给他人。\r\n\
+             2. 迁移机器时，备份并复制本 wallet 文件夹即可恢复全部身份与资产。\r\n",
+        );
+    }
     Ok(())
 }
 
@@ -3459,9 +3480,8 @@ fn start_background_watch(
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
     let child = command.spawn()?;
@@ -3519,9 +3539,8 @@ fn spawn_control_api_server(
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
     let child = command.spawn()?;
