@@ -52,6 +52,10 @@ impl KeyPair {
         hex_encode(&self.address)
     }
 
+    pub fn public_hex(&self) -> String {
+        hex_encode(&self.public)
+    }
+
     pub fn secret_hex(&self) -> String {
         hex_encode(&self.secret)
     }

@@ -188,6 +188,35 @@ pub fn wallet_set_reward_address_cmd(args: &[String]) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+/// `wallet-export-secret [data-dir] [password]` — export the wallet private key hex.
+pub fn wallet_export_secret_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let data_dir = args.get(2).map(PathBuf::from).unwrap_or_else(|| {
+        crate::cli_support::default_data_dir_for_config(Path::new(DEFAULT_CONFIG_PATH)).into()
+    });
+    let password = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| rpassword::prompt_password("wallet password: ").unwrap_or_default());
+    let secret = crate::wallet::export_secret(&data_dir, &password)?;
+    println!("{}", secret);
+    Ok(())
+}
+
+/// `identity-export-secret [config-path]` — export the node identity private key hex.
+pub fn identity_export_secret_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_CONFIG_PATH);
+    let (_config_path, config) = crate::NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let _ = crate::ensure_default_identity_password();
+    let keypair = config.identity_keypair()?;
+    println!("node_id={}", config.node_id_hex);
+    println!("public_key={}", keypair.public_hex());
+    println!("secret_key={}", keypair.secret_hex());
+    Ok(())
+}
+
 /// `governance-propose-params [config-path] <proposal-id-hex> <effective-epoch>
 /// <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]`
 /// — propose an emission/reward params update.
