@@ -28,6 +28,7 @@ pub enum ActivityCollectorError {
     MissingConfidence,
     MissingEndpoint,
     MissingInlineJson,
+    UntrustedEndpoint(String),
 }
 
 impl fmt::Display for ActivityCollectorError {
@@ -39,6 +40,12 @@ impl fmt::Display for ActivityCollectorError {
             Self::MissingConfidence => write!(f, "activity response missing confidence ppm"),
             Self::MissingEndpoint => write!(f, "activity source missing endpoint url"),
             Self::MissingInlineJson => write!(f, "community activity source missing inline json"),
+            Self::UntrustedEndpoint(url) => {
+                write!(
+                    f,
+                    "activity source endpoint url is not trusted for this source kind: {url}"
+                )
+            }
         }
     }
 }
@@ -126,7 +133,8 @@ pub fn parse_community_activity_response(
         .ok_or(ActivityCollectorError::MissingPlayerCount)?;
     let source_confidence_ppm = envelope
         .confidence_ppm
-        .ok_or(ActivityCollectorError::MissingConfidence)?;
+        .ok_or(ActivityCollectorError::MissingConfidence)?
+        .min(500_000); // Unofficial community estimates are capped at 500,000 ppm (50%) max confidence
     Ok(ActivitySample::new(
         app_id,
         observed_players,
@@ -250,6 +258,26 @@ impl LiveActivityCollector for GogLiveCollector {
     }
 }
 
+/// Validates whether a given endpoint URL matches the trusted domain whitelist for its source kind.
+/// Official source kinds (Steam, Epic, EA, GOG) must point to their verified official domains.
+pub fn is_trusted_source_endpoint(source_kind: ActivitySourceKind, url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    #[cfg(any(test, debug_assertions))]
+    if lower.starts_with("http://127.0.0.1") || lower.starts_with("http://localhost") {
+        return true;
+    }
+    match source_kind {
+        ActivitySourceKind::Steam => lower.starts_with("https://api.steampowered.com/"),
+        ActivitySourceKind::Epic => {
+            lower.starts_with("https://api.epicgames.dev/")
+                || lower.starts_with("https://store.epicgames.com/")
+        }
+        ActivitySourceKind::Ea => lower.starts_with("https://api.ea.com/"),
+        ActivitySourceKind::Gog => lower.starts_with("https://api.gog.com/"),
+        ActivitySourceKind::Community => true,
+    }
+}
+
 pub fn collect_configured_activity_source(
     http: &dyn HttpTextClient,
     source_kind: ActivitySourceKind,
@@ -258,6 +286,13 @@ pub fn collect_configured_activity_source(
     endpoint_url: Option<&str>,
     inline_json: Option<&str>,
 ) -> Result<ActivitySample, ActivityCollectorError> {
+    if let Some(endpoint) = endpoint_url {
+        if !is_trusted_source_endpoint(source_kind, endpoint) {
+            return Err(ActivityCollectorError::UntrustedEndpoint(
+                endpoint.to_string(),
+            ));
+        }
+    }
     match source_kind {
         ActivitySourceKind::Steam => {
             let endpoint = endpoint_url.ok_or(ActivityCollectorError::MissingEndpoint)?;
@@ -419,5 +454,25 @@ mod tests {
         assert_eq!(sample.source_kind, ActivitySourceKind::Community);
         assert_eq!(sample.source_confidence_ppm, 120_000);
         assert_eq!(sample.observed_players, 77);
+    }
+
+    #[test]
+    fn test_trusted_source_endpoint_validation() {
+        assert!(is_trusted_source_endpoint(
+            ActivitySourceKind::Steam,
+            "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=730"
+        ));
+        assert!(is_trusted_source_endpoint(
+            ActivitySourceKind::Epic,
+            "https://api.epicgames.dev/telemetry/app42"
+        ));
+        assert!(!is_trusted_source_endpoint(
+            ActivitySourceKind::Steam,
+            "https://evil-spoof.com/fake_steam_api"
+        ));
+        assert!(!is_trusted_source_endpoint(
+            ActivitySourceKind::Epic,
+            "https://attacker.org/players"
+        ));
     }
 }

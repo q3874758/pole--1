@@ -383,14 +383,20 @@ func (k Keeper) SettlePlaySession(ctx context.Context, sessionIDHex string) (typ
 	if err != nil {
 		return types.SessionSettlement{}, err
 	}
-	playerWeightUnits := types.ComputePlayerHourWeight(session.PlaySeconds, gameWeightPPM)
+
+	effectivePlaySeconds := session.PlaySeconds
+	maxCoveredSeconds := heartbeatCount * bucketSeconds
+	if maxCoveredSeconds < effectivePlaySeconds {
+		effectivePlaySeconds = maxCoveredSeconds
+	}
+	playerWeightUnits := types.ComputePlayerHourWeight(effectivePlaySeconds, gameWeightPPM)
 
 	settlement := types.SessionSettlement{
 		SessionIdHex:             session.SessionIdHex,
 		EpochId:                  session.EpochId,
 		AppId:                    session.AppId,
 		NodeAddress:              session.NodeAddress,
-		PlaySeconds:              session.PlaySeconds,
+		PlaySeconds:              effectivePlaySeconds,
 		GameWeightPpm:            gameWeightPPM,
 		PlayerWeightUnits:        playerWeightUnits,
 		WitnessCount:             witnessCount,
