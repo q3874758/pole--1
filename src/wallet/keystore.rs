@@ -105,31 +105,22 @@ pub fn ensure_default_identity_password() -> Option<String> {
 }
 
 fn resolve_or_create_local_identity_token() -> Option<String> {
-    let check_dir = |p: std::path::PathBuf| -> Option<std::path::PathBuf> {
-        let probe = p.join(".probe");
-        if fs::create_dir_all(&p).is_ok() && fs::write(&probe, b"").is_ok() {
-            let _ = fs::remove_file(probe);
-            Some(p)
-        } else {
-            None
-        }
-    };
+    let candidates: Vec<std::path::PathBuf> = [
+        std::env::var_os("LOCALAPPDATA").map(|v| std::path::PathBuf::from(v).join("PoLE")),
+        std::env::var_os("APPDATA").map(|v| std::path::PathBuf::from(v).join("PoLE")),
+        Some(std::path::PathBuf::from(".pole")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
-    let base_dir = std::env::var_os("LOCALAPPDATA")
-        .and_then(|v| check_dir(std::path::PathBuf::from(v).join("PoLE")))
-        .or_else(|| {
-            std::env::var_os("APPDATA")
-                .and_then(|v| check_dir(std::path::PathBuf::from(v).join("PoLE")))
-        })
-        .unwrap_or_else(|| std::path::PathBuf::from(".pole"));
-
-    let _ = fs::create_dir_all(&base_dir);
-    let token_path = base_dir.join(".identity_token");
-
-    if let Ok(content) = fs::read_to_string(&token_path) {
-        let trimmed = content.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+    for dir in &candidates {
+        let token_path = dir.join(".identity_token");
+        if let Ok(content) = fs::read_to_string(&token_path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
         }
     }
 
@@ -137,11 +128,15 @@ fn resolve_or_create_local_identity_token() -> Option<String> {
     rand::rng().fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
 
-    if fs::write(&token_path, &token).is_ok() {
-        Some(token)
-    } else {
-        None
+    for dir in &candidates {
+        let _ = fs::create_dir_all(dir);
+        let token_path = dir.join(".identity_token");
+        if fs::write(&token_path, &token).is_ok() {
+            return Some(token);
+        }
     }
+
+    None
 }
 
 impl EncryptedKeystore {
