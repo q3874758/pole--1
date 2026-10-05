@@ -3360,27 +3360,7 @@ fn stable_hash64(input: &[u8]) -> u64 {
 }
 
 fn should_capture_foreground_process(process_name: &str) -> bool {
-    let normalized = process_name
-        .trim()
-        .to_ascii_lowercase()
-        .trim_end_matches(".exe")
-        .to_string();
-    !normalized.is_empty()
-        && !matches!(
-            normalized.as_str(),
-            "pole-client"
-                | "cmd"
-                | "powershell"
-                | "pwsh"
-                | "conhost"
-                | "windowsterminal"
-                | "explorer"
-                | "devenv"
-                | "code"
-                | "idea64"
-                | "notepad"
-                | "notepad++"
-        )
+    crate::os_support::should_capture_foreground_process(process_name)
 }
 
 fn generate_identity_keypair() -> KeyPair {
@@ -3718,7 +3698,11 @@ fn merge_process_names(existing: &[String], incoming: &[String]) -> Vec<String> 
 }
 
 fn sync_reward_game_mappings(config: &mut NodeConfig) {
-    let normalized_processes = merge_process_names(&[], &config.runtime.game_process_names);
+    let normalized_processes: Vec<String> =
+        merge_process_names(&[], &config.runtime.game_process_names)
+            .into_iter()
+            .filter(|name| !crate::os_support::is_non_game_executable(name))
+            .collect();
     let default_app_id = config
         .runtime
         .target_app_ids
@@ -3730,7 +3714,8 @@ fn sync_reward_game_mappings(config: &mut NodeConfig) {
 
     for process_name in &normalized_processes {
         if let Some(existing) = config.reward.game_mappings.iter().find(|mapping| {
-            canonical_process_name(&mapping.process_name).eq_ignore_ascii_case(process_name)
+            !crate::os_support::is_non_game_executable(&mapping.process_name)
+                && canonical_process_name(&mapping.process_name).eq_ignore_ascii_case(process_name)
         }) {
             let mut mapping = existing.clone();
             mapping.process_name = canonical_process_name(process_name);

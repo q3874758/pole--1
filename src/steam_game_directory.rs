@@ -64,7 +64,7 @@ pub fn infer_reward_game_mapping_from_roots(
     roots: &[PathBuf],
 ) -> Option<RewardGameMapping> {
     let process_name = canonical_process_name(process_name);
-    if process_name.is_empty() {
+    if process_name.is_empty() || crate::os_support::is_non_game_executable(&process_name) {
         return None;
     }
 
@@ -96,14 +96,19 @@ pub fn load_cached_reward_game_mapping(
     cache_path: &Path,
     process_name: &str,
 ) -> Option<RewardGameMapping> {
+    if crate::os_support::is_non_game_executable(process_name) {
+        return None;
+    }
     let cache = RecognitionCache::load_json(cache_path).ok()?;
     let normalized = normalize_process_name(process_name);
     cache.entries.into_iter().find_map(|entry| {
-        (normalize_process_name(&entry.process_name) == normalized).then(|| RewardGameMapping {
-            process_name: canonical_process_name(&entry.process_name),
-            app_id: entry.app_id,
-            game_coefficient_ppm: entry.game_coefficient_ppm,
-        })
+        (!crate::os_support::is_non_game_executable(&entry.process_name)
+            && normalize_process_name(&entry.process_name) == normalized)
+            .then(|| RewardGameMapping {
+                process_name: canonical_process_name(&entry.process_name),
+                app_id: entry.app_id,
+                game_coefficient_ppm: entry.game_coefficient_ppm,
+            })
     })
 }
 
@@ -111,11 +116,15 @@ pub fn store_cached_reward_game_mapping(
     cache_path: &Path,
     mapping: &RewardGameMapping,
 ) -> Result<(), io::Error> {
+    if crate::os_support::is_non_game_executable(&mapping.process_name) {
+        return Ok(());
+    }
     let mut cache = RecognitionCache::load_json(cache_path).unwrap_or_default();
     let normalized = normalize_process_name(&mapping.process_name);
-    cache
-        .entries
-        .retain(|entry| normalize_process_name(&entry.process_name) != normalized);
+    cache.entries.retain(|entry| {
+        !crate::os_support::is_non_game_executable(&entry.process_name)
+            && normalize_process_name(&entry.process_name) != normalized
+    });
     cache.entries.push(RecognitionCacheEntry {
         process_name: canonical_process_name(&mapping.process_name),
         app_id: mapping.app_id,
@@ -133,7 +142,12 @@ impl RecognitionCache {
             return Ok(Self::default());
         }
         let content = fs::read_to_string(path)?;
-        serde_json::from_str(&content).map_err(|err| io::Error::other(err.to_string()))
+        let mut cache: Self =
+            serde_json::from_str(&content).map_err(|err| io::Error::other(err.to_string()))?;
+        cache
+            .entries
+            .retain(|entry| !crate::os_support::is_non_game_executable(&entry.process_name));
+        Ok(cache)
     }
 
     pub fn save_json(&self, path: &Path) -> Result<(), io::Error> {
@@ -166,6 +180,9 @@ fn known_catalog_mapping(process_name: &str) -> Option<RewardGameMapping> {
 
 fn scan_steam_library_roots(process_name: &str, roots: &[PathBuf]) -> Option<RewardGameMapping> {
     let normalized = normalize_process_name(process_name);
+    if normalized.is_empty() || crate::os_support::is_non_game_executable(&normalized) {
+        return None;
+    }
     for root in roots {
         let steamapps_dir = root.join("steamapps");
         if !steamapps_dir.exists() {
@@ -286,6 +303,9 @@ fn process_exists_in_install_dir(install_dir: &Path, normalized_process_name: &s
                 Some(value) => value,
                 None => continue,
             };
+            if crate::os_support::is_non_game_executable(file_name) {
+                continue;
+            }
             if normalize_process_name(file_name) == normalized_process_name {
                 return true;
             }
@@ -385,11 +405,7 @@ fn normalize_root(path: &Path) -> String {
 }
 
 fn normalize_process_name(input: &str) -> String {
-    input
-        .trim()
-        .to_ascii_lowercase()
-        .trim_end_matches(".exe")
-        .to_string()
+    crate::os_support::normalize_process_name(input)
 }
 
 #[cfg(test)]

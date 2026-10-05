@@ -439,7 +439,10 @@ pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEng
 /// Detects which configured target process names are currently running on the system.
 /// Uses native process snapshotting (< 1ms, zero child processes).
 pub fn detect_active_process_names(process_names: &[String]) -> Vec<String> {
-    let configured = normalize_process_names(process_names);
+    let configured: Vec<String> = normalize_process_names(process_names)
+        .into_iter()
+        .filter(|name| !is_non_game_executable(name))
+        .collect();
     if configured.is_empty() {
         return Vec::new();
     }
@@ -513,54 +516,126 @@ pub fn list_running_process_names() -> Vec<String> {
 }
 
 pub fn normalize_process_name(input: &str) -> String {
-    input
-        .trim()
+    let base = std::path::Path::new(input)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(input);
+    base.trim()
         .to_ascii_lowercase()
         .trim_end_matches(".exe")
         .to_string()
 }
 
-pub fn should_capture_foreground_process(process_name: &str) -> bool {
+/// Identifies executables that are background daemons, crash handlers, web helpers,
+/// terminals, editors, developer tools, or system services and must never be treated as games.
+pub fn is_non_game_executable(process_name: &str) -> bool {
     let normalized = normalize_process_name(process_name);
-    !normalized.is_empty()
-        && !matches!(
-            normalized.as_str(),
-            "pole"
-                | "pole-client"
-                | "pole-node"
-                | "cmd"
-                | "powershell"
-                | "pwsh"
-                | "conhost"
-                | "windowsterminal"
-                | "explorer"
-                | "devenv"
-                | "code"
-                | "idea64"
-                | "notepad"
-                | "notepad++"
-                | "svchost"
-                | "taskhostw"
-                | "taskmgr"
-                | "system"
-                | "idle"
-                | "registry"
-                | "smss"
-                | "csrss"
-                | "wininit"
-                | "services"
-                | "lsass"
-                | "fontdrvhost"
-                | "dwm"
-                | "antigravity"
-                | "msedge"
-                | "chrome"
-                | "firefox"
-                | "wemeetapp"
-                | "qq"
-                | "wechat"
-                | "steamwebhelper"
-        )
+    if normalized.is_empty() {
+        return true;
+    }
+
+    // Pattern / Substring matching for crash handlers, error reporters,
+    // installers, web helpers, and anti-cheat components often embedded in game directories:
+    if normalized.contains("crashpad")
+        || normalized.contains("crashhandler")
+        || normalized.contains("crashreport")
+        || normalized.contains("webhelper")
+        || normalized.contains("cefsubprocess")
+        || normalized.contains("anticheat")
+        || normalized.contains("installer")
+        || normalized.contains("unins000")
+        || normalized.contains("uninstall")
+        || normalized.contains("vcredist")
+        || normalized.contains("dxsetup")
+    {
+        return true;
+    }
+
+    matches!(
+        normalized.as_str(),
+        "pole"
+            | "pole-client"
+            | "pole-node"
+            | "pole-genesis"
+            | "pole-sbom"
+            | "cmd"
+            | "powershell"
+            | "pwsh"
+            | "conhost"
+            | "windowsterminal"
+            | "openconsole"
+            | "explorer"
+            | "devenv"
+            | "code"
+            | "idea64"
+            | "notepad"
+            | "notepad++"
+            | "sublime_text"
+            | "svchost"
+            | "taskhostw"
+            | "taskmgr"
+            | "system"
+            | "idle"
+            | "registry"
+            | "smss"
+            | "csrss"
+            | "wininit"
+            | "services"
+            | "lsass"
+            | "fontdrvhost"
+            | "dwm"
+            | "sihost"
+            | "ctfmon"
+            | "rundll32"
+            | "dllhost"
+            | "antigravity"
+            | "msedge"
+            | "chrome"
+            | "firefox"
+            | "brave"
+            | "opera"
+            | "vivaldi"
+            | "wemeetapp"
+            | "qq"
+            | "wechat"
+            | "dingtalk"
+            | "feishu"
+            | "lark"
+            | "discord"
+            | "slack"
+            | "teams"
+            | "steam"
+            | "steamwebhelper"
+            | "steamerrorreporter"
+            | "steamerrorreporter64"
+            | "epicgameslauncher"
+            | "epicwebhelper"
+            | "origin"
+            | "eadesktop"
+            | "eawebhelper"
+            | "goggalaxy"
+            | "uplay"
+            | "upc"
+            | "battle.net"
+            | "agent"
+            | "riotclientux"
+            | "riotclientservices"
+            | "werfault"
+            | "werfaultsecure"
+            | "wermgr"
+            | "qtwebengineprocess"
+            | "beservice"
+            | "battleye"
+            | "vgk"
+            | "vgc"
+            | "punkbuster"
+            | "pbsvc"
+            | "setup"
+    )
+}
+
+pub fn should_capture_foreground_process(process_name: &str) -> bool {
+    !is_non_game_executable(process_name)
 }
 
 pub fn normalize_process_names(process_names: &[String]) -> Vec<String> {

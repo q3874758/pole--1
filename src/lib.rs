@@ -183,8 +183,9 @@ pub use node_storage_audit::{
 pub use node_verifier::{verify_local_epoch, EpochVerificationReport, NodeVerificationError};
 pub use os_support::{
     apply_process_background_priority, detect_foreground_window_title,
-    detect_process_working_set_bytes, is_process_running, kill_process, list_running_process_names,
-    trim_process_working_set, PlayEngagementState,
+    detect_process_working_set_bytes, is_non_game_executable, is_process_running, kill_process,
+    list_running_process_names, should_capture_foreground_process, trim_process_working_set,
+    PlayEngagementState,
 };
 pub use p2p::*;
 pub use params::*;

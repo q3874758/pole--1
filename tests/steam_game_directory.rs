@@ -6,8 +6,22 @@ use pole_protocol_draft::{
     RewardGameMapping,
 };
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("pole-steam-dir-{name}-{}", std::process::id()))
+    let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("tmp");
+    let _ = std::fs::create_dir_all(&base);
+    base.join(format!(
+        "pole-steam-dir-{name}-{}-{id}-{nanos}",
+        std::process::id()
+    ))
 }
 
 #[test]
@@ -81,6 +95,97 @@ fn recognition_cache_roundtrip_returns_cached_mapping() {
     assert_eq!(cached.process_name, "Control_DX12.exe");
     assert_eq!(cached.app_id, 870_780);
     assert_eq!(cached.game_coefficient_ppm, 850_000);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn crash_handlers_and_helpers_are_never_recognized_even_inside_game_dir() {
+    let root = temp_root("crash-handler-exclusion");
+    if root.exists() {
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    let steamapps = root.join("steamapps");
+    let install_dir = steamapps.join("common").join("War of Genesis").join("Game");
+    std::fs::create_dir_all(&install_dir).unwrap();
+    std::fs::write(
+        steamapps.join("appmanifest_4891320.acf"),
+        "\"AppState\"\n{\n    \"appid\"    \"4891320\"\n    \"installdir\"    \"War of Genesis\"\n}\n",
+    )
+    .unwrap();
+    std::fs::write(install_dir.join("Genesis.exe"), b"game").unwrap();
+    std::fs::write(install_dir.join("crashpad_handler.exe"), b"crashpad").unwrap();
+    std::fs::write(install_dir.join("UnityCrashHandler64.exe"), b"unitycrash").unwrap();
+    std::fs::write(install_dir.join("SteamWebHelper.exe"), b"helper").unwrap();
+    std::fs::write(install_dir.join("Antigravity.exe"), b"ide").unwrap();
+
+    // Legitimate game executable is recognized
+    let mapping =
+        infer_reward_game_mapping_from_roots("Genesis.exe", std::slice::from_ref(&root)).unwrap();
+    assert_eq!(mapping.process_name, "Genesis.exe");
+    assert_eq!(mapping.app_id, 4_891_320);
+
+    // Helpers and crash daemons are strictly rejected despite physical presence in game dir
+    assert!(infer_reward_game_mapping_from_roots(
+        "crashpad_handler.exe",
+        std::slice::from_ref(&root)
+    )
+    .is_none());
+    assert!(infer_reward_game_mapping_from_roots(
+        "UnityCrashHandler64.exe",
+        std::slice::from_ref(&root)
+    )
+    .is_none());
+    assert!(infer_reward_game_mapping_from_roots(
+        "SteamWebHelper.exe",
+        std::slice::from_ref(&root)
+    )
+    .is_none());
+    assert!(
+        infer_reward_game_mapping_from_roots("Antigravity.exe", std::slice::from_ref(&root))
+            .is_none()
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn recognition_cache_ignores_and_purges_non_game_entries() {
+    let root = temp_root("cache-purge");
+    if root.exists() {
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    std::fs::create_dir_all(&root).unwrap();
+
+    let cache_path = recognition_cache_path(&root);
+    // Write cache with contaminated entries
+    let raw_json = r#"{
+        "entries": [
+            { "process_name": "crashpad_handler.exe", "app_id": 4891320, "game_coefficient_ppm": 1000000 },
+            { "process_name": "Genesis.exe", "app_id": 4891320, "game_coefficient_ppm": 1000000 },
+            { "process_name": "UnityCrashHandler64.exe", "app_id": 3678970, "game_coefficient_ppm": 1000000 }
+        ]
+    }"#;
+    std::fs::write(&cache_path, raw_json).unwrap();
+
+    // Querying non-game processes from cache returns None
+    assert!(load_cached_reward_game_mapping(&cache_path, "crashpad_handler.exe").is_none());
+    assert!(load_cached_reward_game_mapping(&cache_path, "UnityCrashHandler64.exe").is_none());
+
+    // Valid game still loads
+    let genesis = load_cached_reward_game_mapping(&cache_path, "Genesis.exe").unwrap();
+    assert_eq!(genesis.process_name, "Genesis.exe");
+    assert_eq!(genesis.app_id, 4_891_320);
+
+    // Storing non-game mapping is ignored
+    let bogus = RewardGameMapping {
+        process_name: "crashpad_handler.exe".into(),
+        app_id: 4891320,
+        game_coefficient_ppm: 1_000_000,
+    };
+    store_cached_reward_game_mapping(&cache_path, &bogus).unwrap();
+    assert!(load_cached_reward_game_mapping(&cache_path, "crashpad_handler.exe").is_none());
 
     std::fs::remove_dir_all(root).unwrap();
 }
