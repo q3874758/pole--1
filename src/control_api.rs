@@ -331,6 +331,10 @@ pub struct GamingStatusView {
     #[serde(default)]
     pub pending_player_reward: u64,
     #[serde(default)]
+    pub available_balance: u64,
+    #[serde(default)]
+    pub transferred_reward: u64,
+    #[serde(default)]
     pub verification_status: String,
     pub eco_qos_active: bool,
     pub working_set_mb: f64,
@@ -430,6 +434,13 @@ pub fn collect_gaming(
     let verified_player_reward = (verified_player_blocks_count as u64) * 850;
     let pending_player_reward = (pending_player_blocks_count as u64) * 850;
 
+    let transfers = load_wallet_transfers(&data_dir);
+    let transferred_reward: u64 = transfers
+        .iter()
+        .map(|t| t.amount.saturating_add(t.fee))
+        .sum();
+    let available_balance = verified_player_reward.saturating_sub(transferred_reward);
+
     let verification_status = if completed_blocks == 0 {
         "Idle".to_string()
     } else if verified_player_blocks_count > 0 && pending_player_blocks_count == 0 {
@@ -470,6 +481,8 @@ pub fn collect_gaming(
             witness_attestations_count: peer_witness_count,
             verified_player_reward,
             pending_player_reward,
+            available_balance,
+            transferred_reward,
             verification_status,
             eco_qos_active: config.runtime.low_impact_mode && config.runtime.os_background_priority,
             working_set_mb: (working_set_mb * 10.0).round() / 10.0,
@@ -1395,6 +1408,50 @@ pub fn handle_connection(
             };
             write_json_response(&mut stream, "HTTP/1.1 200 OK", &body)?;
         }
+        ("POST", "/api/wallet/transfer") => {
+            let request = match serde_json::from_str::<WalletTransferRequest>(body) {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_resp = serde_json::json!({
+                        "ok": false,
+                        "error": format!("无效的请求参数: {e}")
+                    });
+                    write_json_response(
+                        &mut stream,
+                        "HTTP/1.1 200 OK",
+                        &serde_json::to_string(&err_resp)?,
+                    )?;
+                    return Ok(());
+                }
+            };
+            match execute_wallet_transfer(config_path, request) {
+                Ok(resp) => {
+                    let json = serde_json::to_string(&resp)?;
+                    write_json_response(&mut stream, "HTTP/1.1 200 OK", &json)?;
+                }
+                Err(e) => {
+                    let err_resp = serde_json::json!({
+                        "ok": false,
+                        "error": e.to_string()
+                    });
+                    write_json_response(
+                        &mut stream,
+                        "HTTP/1.1 200 OK",
+                        &serde_json::to_string(&err_resp)?,
+                    )?;
+                }
+            }
+        }
+        ("GET", "/api/wallet/transfers") => {
+            let (_, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+            let data_dir = PathBuf::from(&config.runtime.data_dir);
+            let transfers = load_wallet_transfers(&data_dir);
+            let json = serde_json::to_string(&serde_json::json!({
+                "ok": true,
+                "transfers": transfers
+            }))?;
+            write_json_response(&mut stream, "HTTP/1.1 200 OK", &json)?;
+        }
         _ => {
             write_json_response(
                 &mut stream,
@@ -1482,6 +1539,168 @@ pub fn open_in_file_explorer(path: &Path) -> std::io::Result<()> {
         std::process::Command::new("xdg-open").arg(target).spawn()?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LocalTransferRecord {
+    pub tx_hash: String,
+    pub from: String,
+    pub to: String,
+    pub amount: u64,
+    pub fee: u64,
+    pub timestamp_millis: u64,
+    pub memo: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WalletTransferRequest {
+    pub to_address: String,
+    pub amount: u64,
+    #[serde(default)]
+    pub fee: Option<u64>,
+    #[serde(default)]
+    pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WalletTransferResponse {
+    pub ok: bool,
+    pub tx_hash: String,
+    pub from_address: String,
+    pub to_address: String,
+    pub amount: u64,
+    pub fee: u64,
+    pub remaining_balance: u64,
+    pub timestamp_millis: u64,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub fn load_wallet_transfers(data_dir: &Path) -> Vec<LocalTransferRecord> {
+    let path = data_dir.join("wallet").join("transfers.json");
+    if let Ok(content) = fs::read_to_string(&path) {
+        if let Ok(records) = serde_json::from_str::<Vec<LocalTransferRecord>>(&content) {
+            return records;
+        }
+    }
+    Vec::new()
+}
+
+pub fn save_wallet_transfers(
+    data_dir: &Path,
+    records: &[LocalTransferRecord],
+) -> std::io::Result<()> {
+    let wallet_dir = data_dir.join("wallet");
+    fs::create_dir_all(&wallet_dir)?;
+    let path = wallet_dir.join("transfers.json");
+    let content = serde_json::to_string_pretty(records)?;
+    fs::write(path, content)
+}
+
+pub fn execute_wallet_transfer(
+    config_path: &Path,
+    req: WalletTransferRequest,
+) -> Result<WalletTransferResponse, Box<dyn std::error::Error>> {
+    let (_, config) = NodeConfig::load_json_with_runtime_paths(config_path)?;
+    let data_dir = PathBuf::from(&config.runtime.data_dir);
+
+    if req.amount == 0 {
+        return Err("转账金额必须大于 0".into());
+    }
+
+    let to_clean = req.to_address.trim().to_lowercase();
+    if to_clean.is_empty() {
+        return Err("目标收款地址不能为空".into());
+    }
+
+    let is_valid_hex = to_clean.len() == 64 && to_clean.chars().all(|c| c.is_ascii_hexdigit());
+    let is_valid_bech = to_clean.starts_with("pole1") || to_clean.starts_with("cosmos1");
+    if !is_valid_hex && !is_valid_bech {
+        return Err("无效的目标收款地址：必须为 64 位十六进制字符或标准链地址".into());
+    }
+
+    let from_address = config.effective_reward_address_hex();
+    if to_clean == from_address.to_lowercase() {
+        return Err("不能向当前自身收款地址转账".into());
+    }
+
+    let gaming_info = collect_gaming(config_path)?;
+    let verified_reward = gaming_info.gaming.verified_player_reward;
+    let transfers = load_wallet_transfers(&data_dir);
+    let total_spent: u64 = transfers
+        .iter()
+        .map(|t| t.amount.saturating_add(t.fee))
+        .sum();
+    let available_balance = verified_reward.saturating_sub(total_spent);
+
+    let fee = req.fee.unwrap_or(0);
+    let required = req.amount.saturating_add(fee);
+
+    if available_balance < required {
+        return Err(format!(
+            "可用余额不足：当前可用为 {} POLE，发起转账需要 {} POLE（包含手续费 {} POLE）。游戏奖励须经其他对等节点见证验证出块后方可入账转账。",
+            available_balance, required, fee
+        )
+        .into());
+    }
+
+    let keypair = config.identity_keypair()?;
+    let to_bytes: [u8; 32] = if is_valid_hex {
+        crate::decode_hex32(&to_clean, "to_address")?
+    } else {
+        crate::stable_hash32(to_clean.as_bytes())
+    };
+
+    let mut tx = crate::transactions::TransferTx {
+        from: keypair.address,
+        to: to_bytes,
+        amount: req.amount as u128,
+        fee: fee as u128,
+        nonce: transfers.len() as u64,
+        pubkey: keypair.public,
+        signature: Vec::new(),
+    };
+    let payload = tx.signing_payload();
+    tx.signature = keypair.sign(&payload);
+
+    let tx_bytes = borsh::to_vec(&tx).unwrap_or_default();
+    let tx_hash = crate::hex_32(crate::stable_hash32(&tx_bytes));
+    let now_millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let record = LocalTransferRecord {
+        tx_hash: tx_hash.clone(),
+        from: from_address.clone(),
+        to: to_clean.clone(),
+        amount: req.amount,
+        fee,
+        timestamp_millis: now_millis,
+        memo: req.memo.unwrap_or_default(),
+        status: "Confirmed".to_string(),
+    };
+
+    let mut new_transfers = transfers;
+    new_transfers.push(record);
+    save_wallet_transfers(&data_dir, &new_transfers)?;
+
+    let remaining_balance = available_balance.saturating_sub(required);
+
+    Ok(WalletTransferResponse {
+        ok: true,
+        tx_hash,
+        from_address,
+        to_address: to_clean,
+        amount: req.amount,
+        fee,
+        remaining_balance,
+        timestamp_millis: now_millis,
+        status: "Confirmed".to_string(),
+        error: None,
+    })
 }
 
 pub fn serve(

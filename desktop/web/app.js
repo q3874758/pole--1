@@ -45,6 +45,19 @@ function initElements() {
   els.btnChangeAddress = document.getElementById("btn-change-address");
   els.btnOpenKeysDir = document.getElementById("btn-open-keys-dir");
   els.btnOpenDataDir = document.getElementById("btn-open-data-dir");
+  els.btnTransferTokens = document.getElementById("btn-transfer-tokens");
+  els.modalTransfer = document.getElementById("modal-transfer");
+  els.btnCloseTransferModal = document.getElementById("btn-close-transfer-modal");
+  els.btnCancelTransfer = document.getElementById("btn-cancel-transfer");
+  els.btnConfirmTransfer = document.getElementById("btn-confirm-transfer");
+  els.btnTransferMax = document.getElementById("btn-transfer-max");
+  els.transferFromAddress = document.getElementById("transfer-from-address");
+  els.transferAvailableBalance = document.getElementById("transfer-available-balance");
+  els.transferPendingTip = document.getElementById("transfer-pending-tip");
+  els.transferToAddress = document.getElementById("transfer-to-address");
+  els.transferAmount = document.getElementById("transfer-amount");
+  els.transferMemo = document.getElementById("transfer-memo");
+  els.transferErrorMsg = document.getElementById("transfer-error-msg");
 
   // 4 Core Metrics
   els.statHeartbeatsCount = document.getElementById("stat-heartbeats-count");
@@ -238,8 +251,11 @@ function renderGaming(rawData) {
   els.statSessionsCount.textContent = formatNumber(witness_attestations_count);
 
   // Player Rewards - Verified vs Pending
+  state.availableBalance = data.available_balance !== undefined ? data.available_balance : verified_player_reward;
+  state.pendingReward = pending_player_reward;
+
   if (els.totalPlayerReward) {
-    els.totalPlayerReward.textContent = formatNumber(verified_player_reward);
+    els.totalPlayerReward.textContent = formatNumber(state.availableBalance);
   }
   if (els.pendingPlayerReward) {
     els.pendingPlayerReward.textContent = formatNumber(pending_player_reward);
@@ -606,6 +622,143 @@ function setupEvents() {
   }
   if (els.btnOpenDataDir) {
     els.btnOpenDataDir.addEventListener("click", handleOpenKeysDir);
+  }
+
+  // Open Transfer Modal
+  const openTransferModal = () => {
+    if (!els.modalTransfer) return;
+    const currentAddr = state.rewardAddress || "";
+    if (els.transferFromAddress) els.transferFromAddress.value = currentAddr;
+
+    const avail = state.availableBalance !== undefined ? state.availableBalance : 0;
+    if (els.transferAvailableBalance) els.transferAvailableBalance.textContent = formatNumber(avail);
+
+    if (els.transferPendingTip) {
+      if (state.pendingReward && state.pendingReward > 0) {
+        els.transferPendingTip.textContent = `(另有 ${formatNumber(state.pendingReward)} POLE 待其他节点见证验证)`;
+      } else {
+        els.transferPendingTip.textContent = "";
+      }
+    }
+
+    if (els.transferToAddress) els.transferToAddress.value = "";
+    if (els.transferAmount) els.transferAmount.value = "";
+    if (els.transferMemo) els.transferMemo.value = "";
+    if (els.transferErrorMsg) {
+      els.transferErrorMsg.style.display = "none";
+      els.transferErrorMsg.textContent = "";
+    }
+    if (els.btnConfirmTransfer) {
+      els.btnConfirmTransfer.disabled = false;
+      els.btnConfirmTransfer.textContent = "确认转账";
+    }
+
+    els.modalTransfer.style.display = "flex";
+  };
+
+  const closeTransferModal = () => {
+    if (els.modalTransfer) els.modalTransfer.style.display = "none";
+  };
+
+  if (els.btnTransferTokens) {
+    els.btnTransferTokens.addEventListener("click", openTransferModal);
+  }
+
+  if (els.btnCloseTransferModal) {
+    els.btnCloseTransferModal.addEventListener("click", closeTransferModal);
+  }
+
+  if (els.btnCancelTransfer) {
+    els.btnCancelTransfer.addEventListener("click", closeTransferModal);
+  }
+
+  if (els.modalTransfer) {
+    els.modalTransfer.addEventListener("click", (e) => {
+      if (e.target === els.modalTransfer) {
+        closeTransferModal();
+      }
+    });
+  }
+
+  if (els.btnTransferMax) {
+    els.btnTransferMax.addEventListener("click", () => {
+      const avail = state.availableBalance !== undefined ? state.availableBalance : 0;
+      if (els.transferAmount) els.transferAmount.value = avail;
+    });
+  }
+
+  if (els.btnConfirmTransfer) {
+    els.btnConfirmTransfer.addEventListener("click", async () => {
+      const toAddr = (els.transferToAddress?.value || "").trim();
+      const amountVal = Number(els.transferAmount?.value || 0);
+      const memo = (els.transferMemo?.value || "").trim();
+      const avail = state.availableBalance !== undefined ? state.availableBalance : 0;
+
+      const showError = (msg) => {
+        if (els.transferErrorMsg) {
+          els.transferErrorMsg.textContent = msg;
+          els.transferErrorMsg.style.display = "block";
+        }
+      };
+
+      if (!toAddr) {
+        showError("请输入收款人地址！");
+        return;
+      }
+
+      if (toAddr.toLowerCase() === (state.rewardAddress || "").toLowerCase()) {
+        showError("不能转账给自己当前的收款地址！");
+        return;
+      }
+
+      const isHex64 = /^[0-9a-fA-F]{64}$/.test(toAddr);
+      const isBech = toAddr.startsWith("pole1") || toAddr.startsWith("cosmos1");
+      if (!isHex64 && !isBech) {
+        showError("收款地址格式不正确！必须为 64 位十六进制地址或 pole1... 链地址。");
+        return;
+      }
+
+      if (!amountVal || amountVal <= 0 || isNaN(amountVal)) {
+        showError("转账金额必须大于 0！");
+        return;
+      }
+
+      if (amountVal > avail) {
+        showError(`转账金额 (${amountVal} POLE) 超出当前可用余额 (${avail} POLE)！游戏奖励须经其他节点见证验证后方可转账。`);
+        return;
+      }
+
+      try {
+        els.btnConfirmTransfer.disabled = true;
+        els.btnConfirmTransfer.textContent = "⏳ 正在签名广播...";
+        if (els.transferErrorMsg) els.transferErrorMsg.style.display = "none";
+        showToast("⏳ 正在签署并广播转账交易...");
+
+        const resp = await apiPost("/api/wallet/transfer", {
+          to_address: toAddr,
+          amount: amountVal,
+          memo: memo,
+        });
+
+        if (resp && resp.ok) {
+          showToast(`🎉 转账成功！交易哈希: ${truncateStr(resp.tx_hash, 6, 6)}`);
+          logToConsole(`[钱包转账成功] 转账 ${amountVal} POLE 至 ${truncateStr(toAddr, 8, 6)}，交易哈希: ${resp.tx_hash}，剩余可用: ${resp.remaining_balance} POLE`);
+          closeTransferModal();
+          await refreshAll();
+        } else {
+          const errMsg = resp && resp.error ? resp.error : "转账处理失败";
+          showError(`❌ 转账失败: ${errMsg}`);
+          logToConsole(`[钱包转账失败] ${errMsg}`);
+          els.btnConfirmTransfer.disabled = false;
+          els.btnConfirmTransfer.textContent = "确认转账";
+        }
+      } catch (err) {
+        showError(`❌ 请求异常: ${err.message}`);
+        logToConsole(`[钱包转账异常] ${err.message}`);
+        els.btnConfirmTransfer.disabled = false;
+        els.btnConfirmTransfer.textContent = "确认转账";
+      }
+    });
   }
 
   // Tab Switching

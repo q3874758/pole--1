@@ -154,6 +154,9 @@
                 <button id="btn-open-keys-dir" class="btn-copy" type="button" title="在系统资源管理器中打开密钥与数据文件夹">
                   📁 打开密钥文件夹
                 </button>
+                <button id="btn-transfer-tokens" class="btn-copy btn-transfer" type="button" title="发起 POLE 通证转账">
+                  💸 转账
+                </button>
               </div>
             </div>
           </div>
@@ -440,6 +443,52 @@
           <span>本地 API 端口 :8787</span>
         </p>
       </footer>
+    </div>
+
+    <!-- 转账模态对话框 (Transfer Modal) -->
+    <div id="modal-transfer" class="modal-overlay" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span class="modal-icon">💸</span>
+            <h3>发起 POLE 转账</h3>
+          </div>
+          <button id="btn-close-transfer-modal" class="modal-close" type="button" title="关闭">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">付款账户 (我的地址)</label>
+            <input id="transfer-from-address" class="form-input readonly-input" type="text" readonly />
+          </div>
+          <div class="balance-display-row">
+            <span class="balance-label">当前可用余额：</span>
+            <span id="transfer-available-balance" class="balance-val">0</span>
+            <span class="balance-unit">POLE</span>
+            <span id="transfer-pending-tip" class="balance-pending-tip"></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">收款人地址 <span class="required">*</span></label>
+            <input id="transfer-to-address" class="form-input" type="text" placeholder="输入对方 64 位十六进制地址 (或 pole1... 链地址)" />
+            <p class="form-hint">支持 PoLE 节点账户地址 (64 位十六进制) 或 Cosmos bech32 格式</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">转账金额 (POLE) <span class="required">*</span></label>
+            <div class="input-with-action">
+              <input id="transfer-amount" class="form-input" type="number" min="1" step="1" placeholder="例如: 100" />
+              <button id="btn-transfer-max" class="btn-input-action" type="button">全部转出</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">转账备注 / Memo (可选)</label>
+            <input id="transfer-memo" class="form-input" type="text" placeholder="例如: 见证收益结算 / 转账" />
+          </div>
+          <div id="transfer-error-msg" class="transfer-error-banner" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-cancel-transfer" class="btn-modal-cancel" type="button">取消</button>
+          <button id="btn-confirm-transfer" class="btn-modal-confirm" type="button">确认转账</button>
+        </div>
+      </div>
     </div>
 
     <script src="/app.js"></script>

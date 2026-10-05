@@ -1226,3 +1226,58 @@ fn control_api_serves_open_wallet_folder_endpoint() {
 
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn control_api_serves_wallet_transfer_endpoints() {
+    let root = temp_root("wallet-transfer");
+    if root.exists() {
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    std::fs::create_dir_all(&root).unwrap();
+
+    let config_path = root.join("client.json");
+    let mut config = NodeConfig::default();
+    config.runtime.data_dir = root.join("pole-node-data").to_string_lossy().into_owned();
+    config.save_json(&config_path).unwrap();
+    std::fs::create_dir_all(&config.runtime.data_dir).unwrap();
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let config_path_for_thread = config_path.clone();
+    let handle = thread::spawn(move || {
+        serve_control_api(listener, config_path_for_thread, Some(2)).unwrap();
+    });
+
+    let client = reqwest::blocking::Client::new();
+
+    // 1. Test POST /api/wallet/transfer with insufficient balance
+    let transfer_payload = serde_json::json!({
+        "to_address": "8fb4159595f244b7e8d6411beac4159595f244b7e8d6411beac4159595f244b7",
+        "amount": 100,
+        "memo": "test transfer"
+    });
+    let response = client
+        .post(format!("http://{addr}/api/wallet/transfer"))
+        .json(&transfer_payload)
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+
+    assert!(response.contains("\"ok\":false"));
+    assert!(response.contains("可用余额不足"));
+
+    // 2. Test GET /api/wallet/transfers
+    let list_response = client
+        .get(format!("http://{addr}/api/wallet/transfers"))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+
+    assert!(list_response.contains("\"ok\":true"));
+    assert!(list_response.contains("\"transfers\":[]"));
+
+    handle.join().unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+}

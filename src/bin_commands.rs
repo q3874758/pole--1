@@ -228,6 +228,46 @@ pub fn open_keys_dir_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+/// `wallet-transfer [config-path] <to-address> <amount> [fee] [memo]` — transfer POLE tokens.
+pub fn wallet_transfer_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 4 {
+        return Err(
+            "usage: pole-client wallet-transfer [config-path] <to-address> <amount> [fee] [memo]"
+                .into(),
+        );
+    }
+    let (config_path_arg, start_index) =
+        crate::parse_config_path_and_rest(args, 2, DEFAULT_CONFIG_PATH);
+    let to_address = args
+        .get(start_index)
+        .ok_or("to-address is required")?
+        .clone();
+    let amount: u64 = args
+        .get(start_index + 1)
+        .ok_or("amount is required")?
+        .parse()?;
+    let fee: Option<u64> = args.get(start_index + 2).and_then(|v| v.parse().ok());
+    let memo = args.get(start_index + 3).cloned();
+
+    let req = crate::control_api::WalletTransferRequest {
+        to_address,
+        amount,
+        fee,
+        memo,
+    };
+    let (config_path, _) = crate::NodeConfig::load_json_with_runtime_paths(config_path_arg)?;
+    let resp = crate::control_api::execute_wallet_transfer(&config_path, req)?;
+    println!("wallet_transfer=ok");
+    println!("tx_hash={}", resp.tx_hash);
+    println!("from={}", resp.from_address);
+    println!("to={}", resp.to_address);
+    println!("amount={}", resp.amount);
+    println!("fee={}", resp.fee);
+    println!("remaining_balance={}", resp.remaining_balance);
+    println!("status={}", resp.status);
+    Ok(())
+}
+
 /// `governance-propose-params [config-path] <proposal-id-hex> <effective-epoch>
 /// <emission-year> <effective-player-block-reward> [tail-start-year tail-rate-bps]`
 /// — propose an emission/reward params update.
