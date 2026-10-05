@@ -36,6 +36,11 @@ jobs:
         # boot helpers are not flagged as dead code.
         run: cargo clippy --all-targets --features integration -- -D warnings
 
+      - name: Security gate - anti-cheat backdoor release check
+        run: |
+          cargo build --release --bin pole --bin pole-client
+          powershell -ExecutionPolicy Bypass -File scripts/ci_security_gate.ps1
+
   chain:
     name: chain (go + integration)
     runs-on: windows-latest

@@ -180,10 +180,120 @@ pub fn kill_process(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(any(test, debug_assertions))]
+fn debug_override_foreground_process() -> Option<String> {
+    std::env::var("POLE_CLIENT_FOREGROUND_PROCESS_OVERRIDE")
+        .ok()
+        .and_then(|override_name| display_process_name(&override_name))
+}
+
+#[cfg(not(any(test, debug_assertions)))]
+fn debug_override_foreground_process() -> Option<String> {
+    None
+}
+
+#[cfg(any(test, debug_assertions))]
+fn debug_override_foreground_title() -> Option<String> {
+    std::env::var("POLE_CLIENT_FOREGROUND_TITLE_OVERRIDE")
+        .ok()
+        .and_then(|override_title| {
+            let trimmed = override_title.trim();
+            if !trimmed.is_empty() {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+#[cfg(not(any(test, debug_assertions)))]
+fn debug_override_foreground_title() -> Option<String> {
+    None
+}
+
+#[cfg(any(test, debug_assertions))]
+fn debug_override_engagement_state() -> Option<PlayEngagementState> {
+    std::env::var("POLE_ENGAGEMENT_STATE_OVERRIDE")
+        .ok()
+        .and_then(|override_val| {
+            let lower = override_val.trim().to_ascii_lowercase();
+            if lower == "main_menu" || lower == "menu" {
+                Some(PlayEngagementState::MainMenu)
+            } else if lower == "in_world" || lower == "world" {
+                Some(PlayEngagementState::InWorld)
+            } else {
+                None
+            }
+        })
+}
+
+#[cfg(not(any(test, debug_assertions)))]
+fn debug_override_engagement_state() -> Option<PlayEngagementState> {
+    None
+}
+
+/// Validates basic PE (Portable Executable) binary structure on disk for a process image path.
+/// Verifies the file exists, can be opened, begins with the DOS 'MZ' header signature (0x5A4D),
+/// and contains a valid PE signature ("PE\0\0") at the e_lfanew offset.
+pub fn is_valid_pe_executable(path: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    use std::io::{Read, Seek, SeekFrom};
+    let mut dos_header = [0u8; 64];
+    if file.read_exact(&mut dos_header).is_err() {
+        return false;
+    }
+    if dos_header[0] != 0x4D || dos_header[1] != 0x5A {
+        return false;
+    }
+    let pe_offset = u32::from_le_bytes([
+        dos_header[0x3C],
+        dos_header[0x3D],
+        dos_header[0x3E],
+        dos_header[0x3F],
+    ]) as u64;
+
+    if !(64..=10 * 1024 * 1024).contains(&pe_offset) {
+        return false;
+    }
+
+    if file.seek(SeekFrom::Start(pe_offset)).is_err() {
+        return false;
+    }
+    let mut pe_signature = [0u8; 4];
+    if file.read_exact(&mut pe_signature).is_err() {
+        return false;
+    }
+    pe_signature == [b'P', b'E', 0, 0]
+}
+
+/// Computes the SHA-256 binary hash fingerprint of an executable on disk.
+pub fn compute_executable_sha256(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).ok()?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Some(hex::encode(hasher.finalize()))
+}
+
 /// Detects the executable name of the active foreground window without child process spawning.
 pub fn detect_foreground_process_name() -> Option<String> {
-    if let Ok(override_name) = std::env::var("POLE_CLIENT_FOREGROUND_PROCESS_OVERRIDE") {
-        return display_process_name(&override_name);
+    if let Some(override_name) = debug_override_foreground_process() {
+        return Some(override_name);
     }
 
     unsafe {
@@ -241,10 +351,15 @@ pub fn detect_foreground_process_name() -> Option<String> {
         }
 
         let raw_path = String::from_utf16_lossy(&buf[..size as usize]);
-        let file_name = std::path::Path::new(&raw_path)
+        let exe_path = std::path::Path::new(&raw_path);
+        let file_name = exe_path
             .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or(&raw_path);
+
+        if exe_path.is_absolute() && !is_valid_pe_executable(exe_path) {
+            return None;
+        }
 
         display_process_name(file_name)
     }
@@ -252,11 +367,8 @@ pub fn detect_foreground_process_name() -> Option<String> {
 
 /// Detects the window title of the current foreground active window.
 pub fn detect_foreground_window_title() -> Option<String> {
-    if let Ok(override_title) = std::env::var("POLE_CLIENT_FOREGROUND_TITLE_OVERRIDE") {
-        let trimmed = override_title.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
+    if let Some(override_title) = debug_override_foreground_title() {
+        return Some(override_title);
     }
 
     unsafe {
@@ -393,14 +505,8 @@ pub fn is_launcher_process_name(process_name: &str) -> bool {
 /// - Parked at launcher, login screen, or main menu without loading the world is rejected.
 pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEngagementState {
     let _ = pid;
-    if let Ok(override_val) = std::env::var("POLE_ENGAGEMENT_STATE_OVERRIDE") {
-        let lower = override_val.trim().to_ascii_lowercase();
-        if lower == "main_menu" || lower == "menu" {
-            return PlayEngagementState::MainMenu;
-        }
-        if lower == "in_world" || lower == "world" {
-            return PlayEngagementState::InWorld;
-        }
+    if let Some(state) = debug_override_engagement_state() {
+        return state;
     }
 
     // 1. Process name matches standalone launcher/bootstrap wrapper
@@ -857,5 +963,27 @@ mod tests {
             PlayEngagementState::InWorld
         );
         std::env::remove_var("POLE_ENGAGEMENT_STATE_OVERRIDE");
+    }
+
+    #[test]
+    fn test_pe_executable_validation_and_fingerprint() {
+        let current_exe = std::env::current_exe().expect("current test exe path");
+        if cfg!(windows) {
+            assert!(is_valid_pe_executable(&current_exe));
+            let hash = compute_executable_sha256(&current_exe);
+            assert!(hash.is_some());
+            assert_eq!(hash.unwrap().len(), 64);
+        }
+
+        // Plain text file or non-existent file should fail PE validation
+        let temp_dir = std::env::temp_dir();
+        let fake_txt = temp_dir.join("pole_test_not_pe.txt");
+        let _ = std::fs::write(&fake_txt, b"This is plain text, not a PE binary.");
+        assert!(!is_valid_pe_executable(&fake_txt));
+        let _ = std::fs::remove_file(&fake_txt);
+
+        assert!(!is_valid_pe_executable(&std::path::PathBuf::from(
+            "non_existent_file.exe"
+        )));
     }
 }
