@@ -4,11 +4,13 @@
 //! weak client heuristics with cryptographic and kernel-backed proof:
 //! - **L1 (Binary Identity)**: Executable physical path, PE integrity, SHA-256 fingerprint,
 //!   offline WinVerifyTrust Authenticode signature validation, and Steam appmanifest matching.
-//! - **L2 (Real 3D Engagement)**: (Planned) Kernel GPU engine utilization counter (PDH),
+//! - **L2 (Real 3D Engagement)**: Kernel GPU engine utilization counter (PDH),
 //!   DirectX/Vulkan module detection, and WASAPI audio peak monitoring.
-//! - **L3 (Hardware RoT & Non-Relayability)**: (Planned) TPM 2.0 TBS quote, Secure Boot
+//! - **L3 (Hardware RoT & Non-Relayability)**: TPM 2.0 TBS quote, Secure Boot
 //!   PCR measurements, and hardware-bound unexportable keys.
-//! - **L4 (Graceful Fallback)**: Transparent confidence degradation when hardware features
+//! - **L4 (Human Presence & Boundary)**: Reserved for human presence attestation, acknowledging
+//!   software-only boundaries against hardware macros and AFK devices.
+//! - **Degraded Fallback**: Transparent confidence degradation when hardware features
 //!   or code signatures are absent, acknowledging residual risks honestly.
 
 pub mod composite;
@@ -21,8 +23,9 @@ pub use composite::{
 };
 
 pub use l1_binary::{
-    generate_l1_binary_proof, inspect_foreground_process_l1, is_known_trusted_publisher,
-    AuthenticodeStatus, BinaryProof, ProofError, ProofTier, SteamManifestInfo,
+    capture_raw_binary_evidence, evaluate_binary_tier, generate_l1_binary_proof,
+    inspect_foreground_process_l1, is_known_trusted_publisher, AuthenticodeStatus, BinaryProof,
+    ProofError, ProofTier, RawBinaryEvidence, SteamManifestInfo,
 };
 
 pub use l2_render::{

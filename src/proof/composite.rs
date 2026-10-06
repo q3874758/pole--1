@@ -1,12 +1,19 @@
-//! Composite multi-layer Proof of Engagement (PoLE) evaluation and L4 graceful degradation.
+//! Composite multi-layer Proof of Engagement (PoLE) evaluation and graceful degradation.
 //!
 //! Synthesizes evidence chains across L1 (Binary Identity), L2 (GPU 3D Render), and L3 (Hardware RoT)
 //! to establish an authoritative, transparent confidence rating for player sessions:
 //! - **Tier 1 (Gold)**: Authenticode signed by trusted publisher + active foreground 3D GPU render + physical bare metal PC.
 //! - **Tier 2 (Silver)**: Standard signed or Steam Manifest verified + 3D GPU render + physical PC.
-//! - **Tier 3 (Bronze)**: Bare PE binary + 3D graphics runtime loaded.
-//! - **Tier 4 (Degraded L4)**: Missing 3D graphics runtime OR virtual machine detected.
+//! - **Tier 3 (Bronze)**: Verified binary with 3D graphics runtime loaded.
+//! - **Tier Degraded Fallback**: Missing 3D graphics runtime, VM detected, or unverified environment.
 //! - **Untrusted**: Invalid PE header or corrupted binary.
+//!
+//! ### Architectural Note on L4 (Human Presence & Physical Boundary)
+//! In PoLE's architectural design, **L4 is reserved for Human Presence & Boundary**
+//! (acknowledging that software cannot definitively prove physical human presence against
+//! hardware-level macros or physical bypasses). To prevent confusing degraded states with
+//! physical human presence verification, fallback operation is explicitly designated as
+//! [`ConfidenceTier::TierDegradedFallback`].
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,8 +33,8 @@ pub enum ConfidenceTier {
     Tier2Silver = 80,
     /// Tier 3 (Bronze, 50): Valid PE binary + 3D graphics runtime loaded (background or foreground)
     Tier3Bronze = 50,
-    /// Tier 4 (Degraded L4, 20): Missing 3D graphics runtime OR virtual machine detected (honest degradation with risk disclosure)
-    Tier4Degraded = 20,
+    /// Degraded Fallback (20): Missing 3D graphics runtime OR virtual machine detected (honest degradation with risk disclosure)
+    TierDegradedFallback = 20,
     /// Untrusted (0): Invalid PE header, corrupted file, or nonexistent process
     Untrusted = 0,
 }
@@ -57,6 +64,12 @@ pub fn evaluate_composite_proof(
     if l1.tier == ProofTier::Untrusted {
         degradation_reasons
             .push("L1: Executable file is invalid or not a valid PE binary".to_string());
+    }
+    if !l1.tier.is_reward_eligible() {
+        degradation_reasons.push(
+            "L1: Bare PE binary without Authenticode signature or Steam manifest is ineligible for rewards"
+                .to_string(),
+        );
     }
     if l2.engagement_level == RenderEngagementLevel::HeadlessOrMock {
         degradation_reasons.push(
@@ -92,10 +105,11 @@ pub fn evaluate_composite_proof(
     {
         ConfidenceTier::Tier3Bronze
     } else {
-        ConfidenceTier::Tier4Degraded
+        ConfidenceTier::TierDegradedFallback
     };
 
-    let is_eligible_for_rewards = confidence_tier >= ConfidenceTier::Tier3Bronze;
+    let is_eligible_for_rewards =
+        confidence_tier >= ConfidenceTier::Tier3Bronze && l1.tier.is_reward_eligible();
 
     let generated_at_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -149,5 +163,60 @@ mod tests {
 
         let evaluated = evaluate_composite_proof(l1, l2, l3);
         assert!(evaluated.confidence_tier <= ConfidenceTier::Tier1Gold);
+    }
+
+    #[test]
+    fn test_bare_binary_ineligible_for_rewards() {
+        use std::path::PathBuf;
+        let raw = crate::proof::RawBinaryEvidence {
+            pid: 1234,
+            process_name: "notepad.exe".to_string(),
+            full_path: PathBuf::from("C:\\Windows\\notepad.exe"),
+            sha256: "abc...".to_string(),
+            authenticode: crate::proof::AuthenticodeStatus::NotSigned,
+            steam_manifest: None,
+            captured_at_millis: 1000,
+        };
+        let l1 = BinaryProof {
+            pid: 1234,
+            process_name: "notepad.exe".to_string(),
+            full_path: PathBuf::from("C:\\Windows\\notepad.exe"),
+            sha256: "abc...".to_string(),
+            tier: ProofTier::L1BareBinary,
+            authenticode: crate::proof::AuthenticodeStatus::NotSigned,
+            steam_manifest: None,
+            verified_at_millis: 1000,
+            raw_evidence: raw,
+        };
+        let l2 = RenderProof {
+            pid: 1234,
+            process_name: "notepad.exe".to_string(),
+            is_foreground: true,
+            primary_backend: crate::proof::GraphicsBackend::DirectX11,
+            loaded_render_modules: vec!["d3d11.dll".to_string()],
+            engagement_level: RenderEngagementLevel::ActiveForeground3D,
+            working_set_bytes: 1024 * 1024,
+            verified_at_millis: 1000,
+        };
+        let l3 = HardwareProof {
+            tpm_status: TpmStatus::Tpm2Available {
+                provider_name: "Microsoft Platform Crypto Provider".to_string(),
+                is_hardware_bound: true,
+            },
+            environment: crate::proof::PlatformEnvironment::PhysicalBareMetal,
+            is_bare_metal: true,
+            verified_at_millis: 1000,
+        };
+
+        let evaluated = evaluate_composite_proof(l1, l2, l3);
+        assert_eq!(evaluated.confidence_tier, ConfidenceTier::Tier3Bronze);
+        assert!(
+            !evaluated.is_eligible_for_rewards,
+            "Bare PE binary must receive 0 reward weight"
+        );
+        assert!(evaluated
+            .degradation_reasons
+            .iter()
+            .any(|r| r.contains("ineligible for rewards")));
     }
 }

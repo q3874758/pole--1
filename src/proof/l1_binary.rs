@@ -28,10 +28,29 @@ pub enum ProofTier {
     L1SignedStandard = 80,
     /// L1C: Unsigned or self-signed, but located within a verified Steam library with matching appmanifest_{appid}.acf
     L1SteamManifest = 50,
-    /// L1D: Valid DOS/PE executable with computed SHA-256 (bare fallback)
-    L1BareBinary = 20,
+    /// L1D: Valid DOS/PE executable with computed SHA-256 (bare fallback - 0 reward weight)
+    L1BareBinary = 0,
     /// Invalid binary, missing file, or non-executable
-    Untrusted = 0,
+    Untrusted = -1,
+}
+
+impl ProofTier {
+    /// Effective reward multiplier in basis points (10,000 = 100%).
+    /// Bare PE executables (L1BareBinary) receive 0 reward weight to prevent spoofing via arbitrary binaries (e.g. notepad.exe).
+    pub fn reward_weight_bps(&self) -> u32 {
+        match self {
+            Self::L1SignedTrusted => 10_000,
+            Self::L1SignedStandard => 8_000,
+            Self::L1SteamManifest => 5_000,
+            Self::L1BareBinary => 0,
+            Self::Untrusted => 0,
+        }
+    }
+
+    /// Whether this proof tier is eligible for reward generation.
+    pub fn is_reward_eligible(&self) -> bool {
+        self.reward_weight_bps() > 0
+    }
 }
 
 /// Result of WinVerifyTrust Authenticode signature check.
@@ -56,6 +75,45 @@ pub struct SteamManifestInfo {
     pub manifest_path: PathBuf,
 }
 
+/// Objective raw binary evidence captured directly from the game process on disk.
+///
+/// Contains purely objective telemetry without self-assigned tier scoring, ensuring
+/// third-party witnesses and validators perform independent tier re-computation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawBinaryEvidence {
+    pub pid: u32,
+    pub process_name: String,
+    pub full_path: PathBuf,
+    pub sha256: String,
+    pub authenticode: AuthenticodeStatus,
+    pub steam_manifest: Option<SteamManifestInfo>,
+    pub captured_at_millis: u64,
+}
+
+/// Evaluates the verified proof tier from raw binary evidence.
+///
+/// MUST be executed by independent witnesses or validators; never accepted
+/// as an authoritative claim directly from the playing node.
+pub fn evaluate_binary_tier(evidence: &RawBinaryEvidence) -> ProofTier {
+    match &evidence.authenticode {
+        AuthenticodeStatus::Valid {
+            is_trusted_publisher: true,
+            ..
+        } => ProofTier::L1SignedTrusted,
+        AuthenticodeStatus::Valid {
+            is_trusted_publisher: false,
+            ..
+        } => ProofTier::L1SignedStandard,
+        _ => {
+            if evidence.steam_manifest.is_some() {
+                ProofTier::L1SteamManifest
+            } else {
+                ProofTier::L1BareBinary
+            }
+        }
+    }
+}
+
 /// Complete L1 binary proof for an active process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryProof {
@@ -67,6 +125,7 @@ pub struct BinaryProof {
     pub authenticode: AuthenticodeStatus,
     pub steam_manifest: Option<SteamManifestInfo>,
     pub verified_at_millis: u64,
+    pub raw_evidence: RawBinaryEvidence,
 }
 
 /// Errors occurring during L1 binary proof generation.
@@ -136,6 +195,10 @@ mod win32 {
     pub const CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED: u32 = 1 << 10;
     pub const CERT_QUERY_FORMAT_FLAG_BINARY: u32 = 1 << 1;
     pub const CERT_NAME_SIMPLE_DISPLAY_TYPE: u32 = 4;
+    pub const CMSG_SIGNER_INFO_PARAM: u32 = 6;
+    pub const X509_ASN_ENCODING: u32 = 0x00000001;
+    pub const PKCS_7_ASN_ENCODING: u32 = 0x00010000;
+    pub const CERT_FIND_SUBJECT_CERT: u32 = (11 << 16) | 7;
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -179,11 +242,50 @@ mod win32 {
     }
 
     #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CRYPT_INTEGER_BLOB {
+        pub cb_data: u32,
+        pub pb_data: *mut u8,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CRYPT_ALGORITHM_IDENTIFIER {
+        pub psz_obj_id: *mut u8,
+        pub parameters: CRYPT_INTEGER_BLOB,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct FILETIME {
+        pub dw_low_date_time: u32,
+        pub dw_high_date_time: u32,
+    }
+
+    #[repr(C)]
+    pub struct CERT_INFO {
+        pub dw_version: u32,
+        pub serial_number: CRYPT_INTEGER_BLOB,
+        pub signature_algorithm: CRYPT_ALGORITHM_IDENTIFIER,
+        pub issuer: CRYPT_INTEGER_BLOB,
+        pub not_before: FILETIME,
+        pub not_after: FILETIME,
+        pub subject: CRYPT_INTEGER_BLOB,
+    }
+
+    #[repr(C)]
+    pub struct CMSG_SIGNER_INFO {
+        pub dw_version: u32,
+        pub issuer: CRYPT_INTEGER_BLOB,
+        pub serial_number: CRYPT_INTEGER_BLOB,
+    }
+
+    #[repr(C)]
     pub struct CERT_CONTEXT {
         pub dw_cert_encoding_type: u32,
         pub pb_cert_encoded: *mut u8,
         pub cb_cert_encoded: u32,
-        pub p_cert_info: *mut c_void,
+        pub p_cert_info: *mut CERT_INFO,
         pub h_cert_store: *mut c_void,
     }
 
@@ -211,6 +313,23 @@ mod win32 {
             ph_msg: *mut *mut c_void,
             ppv_context: *mut *const c_void,
         ) -> i32;
+
+        pub fn CryptMsgGetParam(
+            h_crypt_msg: *mut c_void,
+            dw_param_type: u32,
+            dw_index: u32,
+            pv_data: *mut c_void,
+            pcb_data: *mut u32,
+        ) -> i32;
+
+        pub fn CertFindCertificateInStore(
+            h_cert_store: *mut c_void,
+            dw_cert_encoding_type: u32,
+            dw_find_flags: u32,
+            dw_find_type: u32,
+            pv_find_para: *const c_void,
+            p_prev_cert_context: *const CERT_CONTEXT,
+        ) -> *const CERT_CONTEXT;
 
         pub fn CertEnumCertificatesInStore(
             h_cert_store: *mut c_void,
@@ -288,7 +407,28 @@ pub fn query_process_image_path(pid: u32) -> Result<PathBuf, ProofError> {
     )))
 }
 
+#[cfg(windows)]
+unsafe fn compare_blobs(a: &win32::CRYPT_INTEGER_BLOB, b: &win32::CRYPT_INTEGER_BLOB) -> bool {
+    if a.cb_data != b.cb_data {
+        return false;
+    }
+    if a.cb_data == 0 {
+        return true;
+    }
+    if a.pb_data.is_null() || b.pb_data.is_null() {
+        return false;
+    }
+    let slice_a = std::slice::from_raw_parts(a.pb_data, a.cb_data as usize);
+    let slice_b = std::slice::from_raw_parts(b.pb_data, b.cb_data as usize);
+    slice_a == slice_b
+}
+
 /// Extracts the display name of the primary certificate signer from an Authenticode-signed PE file.
+///
+/// Follows standard PKCS#7 resolution:
+/// 1. Queries `CMSG_SIGNER_INFO_PARAM` from `h_msg` to obtain the signer's `Issuer` and `SerialNumber`.
+/// 2. Matches the exact End-Entity leaf certificate in `h_store` matching `(Issuer, SerialNumber)`.
+/// 3. Ignores intermediate CAs and timestamp counter-signers, ensuring deterministic publisher attribution.
 #[cfg(windows)]
 pub fn extract_authenticode_signer_name(path: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
@@ -327,11 +467,73 @@ pub fn extract_authenticode_signer_name(path: &Path) -> Option<String> {
         }
 
         let mut name_out = None;
-        let mut p_cert = win32::CertEnumCertificatesInStore(h_store, std::ptr::null());
-        while !p_cert.is_null() {
+        let mut p_exact_cert: *const win32::CERT_CONTEXT = std::ptr::null();
+
+        // 1. Extract CMSG_SIGNER_INFO to get the exact leaf signer's Issuer and SerialNumber
+        let mut cb_signer_info: u32 = 0;
+        if !h_msg.is_null()
+            && win32::CryptMsgGetParam(
+                h_msg,
+                win32::CMSG_SIGNER_INFO_PARAM,
+                0,
+                std::ptr::null_mut(),
+                &mut cb_signer_info,
+            ) != 0
+            && cb_signer_info > 0
+        {
+            let mut signer_info_buf = vec![0u8; cb_signer_info as usize];
+            if win32::CryptMsgGetParam(
+                h_msg,
+                win32::CMSG_SIGNER_INFO_PARAM,
+                0,
+                signer_info_buf.as_mut_ptr() as *mut win32::c_void,
+                &mut cb_signer_info,
+            ) != 0
+            {
+                let signer_info = signer_info_buf.as_ptr() as *const win32::CMSG_SIGNER_INFO;
+                let target_issuer = (*signer_info).issuer;
+                let target_serial = (*signer_info).serial_number;
+
+                // First try Win32 CertFindCertificateInStore with CERT_FIND_SUBJECT_CERT
+                let mut cert_info: win32::CERT_INFO = std::mem::zeroed();
+                cert_info.issuer = target_issuer;
+                cert_info.serial_number = target_serial;
+
+                let found = win32::CertFindCertificateInStore(
+                    h_store,
+                    win32::X509_ASN_ENCODING | win32::PKCS_7_ASN_ENCODING,
+                    0,
+                    win32::CERT_FIND_SUBJECT_CERT,
+                    &cert_info as *const _ as *const win32::c_void,
+                    std::ptr::null(),
+                );
+
+                if !found.is_null() {
+                    p_exact_cert = found;
+                } else {
+                    // Fallback: iterate h_store and find the cert whose Issuer & SerialNumber match byte-for-byte
+                    let mut curr = win32::CertEnumCertificatesInStore(h_store, std::ptr::null());
+                    while !curr.is_null() {
+                        if !(*curr).p_cert_info.is_null() {
+                            let cert_inf = &*(*curr).p_cert_info;
+                            if compare_blobs(&cert_inf.serial_number, &target_serial)
+                                && compare_blobs(&cert_inf.issuer, &target_issuer)
+                            {
+                                p_exact_cert = curr;
+                                break;
+                            }
+                        }
+                        curr = win32::CertEnumCertificatesInStore(h_store, curr);
+                    }
+                }
+            }
+        }
+
+        // 2. Extract display name from the exact End-Entity certificate
+        if !p_exact_cert.is_null() {
             let mut name_buf = [0u16; 512];
             let len = win32::CertGetNameStringW(
-                p_cert,
+                p_exact_cert,
                 win32::CERT_NAME_SIMPLE_DISPLAY_TYPE,
                 0,
                 std::ptr::null(),
@@ -339,20 +541,38 @@ pub fn extract_authenticode_signer_name(path: &Path) -> Option<String> {
                 name_buf.len() as u32,
             );
             if len > 1 {
-                let name = String::from_utf16_lossy(&name_buf[..len as usize - 1]);
-                if !name.trim().is_empty() {
-                    let is_trusted = is_known_trusted_publisher(&name);
-                    if is_trusted {
-                        name_out = Some(name);
-                        win32::CertFreeCertificateContext(p_cert);
-                        break;
-                    }
-                    if name_out.is_none() {
-                        name_out = Some(name);
+                name_out = Some(String::from_utf16_lossy(&name_buf[..len as usize - 1]));
+            }
+            win32::CertFreeCertificateContext(p_exact_cert);
+        } else {
+            // Ultimate fallback if CMSG_SIGNER_INFO was unparseable
+            let mut p_cert = win32::CertEnumCertificatesInStore(h_store, std::ptr::null());
+            while !p_cert.is_null() {
+                let mut name_buf = [0u16; 512];
+                let len = win32::CertGetNameStringW(
+                    p_cert,
+                    win32::CERT_NAME_SIMPLE_DISPLAY_TYPE,
+                    0,
+                    std::ptr::null(),
+                    name_buf.as_mut_ptr(),
+                    name_buf.len() as u32,
+                );
+                if len > 1 {
+                    let name = String::from_utf16_lossy(&name_buf[..len as usize - 1]);
+                    if !name.trim().is_empty() {
+                        let is_trusted = is_known_trusted_publisher(&name);
+                        if is_trusted {
+                            name_out = Some(name);
+                            win32::CertFreeCertificateContext(p_cert);
+                            break;
+                        }
+                        if name_out.is_none() {
+                            name_out = Some(name);
+                        }
                     }
                 }
+                p_cert = win32::CertEnumCertificatesInStore(h_store, p_cert);
             }
-            p_cert = win32::CertEnumCertificatesInStore(h_store, p_cert);
         }
 
         if !h_msg.is_null() {
@@ -441,7 +661,27 @@ pub fn verify_authenticode(_path: &Path) -> AuthenticodeStatus {
     AuthenticodeStatus::NotSupported
 }
 
+/// Checks whether an executable resides within the expected Steam installation directory.
+fn is_exe_within_steam_installdir(
+    exe_path: &Path,
+    steamapps_dir: &Path,
+    install_dir: &str,
+) -> bool {
+    let common_game_dir = steamapps_dir.join("common").join(install_dir);
+    if exe_path.starts_with(&common_game_dir) {
+        return true;
+    }
+    exe_path.components().any(|c| {
+        c.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(install_dir)
+    })
+}
+
 /// Searches the parent directory hierarchy of an executable for an associated Steam `appmanifest_{appid}.acf`.
+///
+/// Enforces directory containment: verifies that `exe_path` resides strictly within
+/// the declared `<steamapps_dir>/common/<installdir>/` tree.
 pub fn find_steam_appmanifest(
     exe_path: &Path,
     expected_app_id: Option<u32>,
@@ -455,7 +695,13 @@ pub fn find_steam_appmanifest(
             if let Some(target_id) = expected_app_id {
                 let manifest_file = dir.join(format!("appmanifest_{target_id}.acf"));
                 if manifest_file.is_file() {
-                    return parse_steam_manifest_file(&manifest_file, target_id);
+                    if let Some(info) = parse_steam_manifest_file(&manifest_file, target_id) {
+                        if let Some(ref install_dir) = info.install_dir {
+                            if is_exe_within_steam_installdir(exe_path, dir, install_dir) {
+                                return Some(info);
+                            }
+                        }
+                    }
                 }
             } else if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
@@ -467,12 +713,12 @@ pub fn find_steam_appmanifest(
                                 .trim_end_matches(".acf");
                             if let Ok(app_id) = id_part.parse::<u32>() {
                                 if let Some(info) = parse_steam_manifest_file(&path, app_id) {
-                                    // Verify installdir matches a path component in exe_path
                                     if let Some(ref install_dir) = info.install_dir {
-                                        if exe_path
-                                            .components()
-                                            .any(|c| c.as_os_str() == install_dir.as_str())
-                                        {
+                                        if is_exe_within_steam_installdir(
+                                            exe_path,
+                                            dir,
+                                            install_dir,
+                                        ) {
                                             return Some(info);
                                         }
                                     }
@@ -524,11 +770,14 @@ fn extract_acf_value(line: &str) -> Option<String> {
     }
 }
 
-/// Generates a comprehensive L1 physical binary proof for a specific process ID.
-pub fn generate_l1_binary_proof(
+/// Captures objective raw binary evidence directly from the game process on disk.
+///
+/// Contains purely objective telemetry without self-assigned tier scoring, ensuring
+/// third-party witnesses and validators perform independent tier re-computation.
+pub fn capture_raw_binary_evidence(
     pid: u32,
     expected_app_id: Option<u32>,
-) -> Result<BinaryProof, ProofError> {
+) -> Result<RawBinaryEvidence, ProofError> {
     let full_path = query_process_image_path(pid)?;
     if !full_path.is_file() {
         return Err(ProofError::FileNotFound(full_path));
@@ -547,38 +796,42 @@ pub fn generate_l1_binary_proof(
     let authenticode = verify_authenticode(&full_path);
     let steam_manifest = find_steam_appmanifest(&full_path, expected_app_id);
 
-    let tier = match &authenticode {
-        AuthenticodeStatus::Valid {
-            is_trusted_publisher: true,
-            ..
-        } => ProofTier::L1SignedTrusted,
-        AuthenticodeStatus::Valid {
-            is_trusted_publisher: false,
-            ..
-        } => ProofTier::L1SignedStandard,
-        _ => {
-            if steam_manifest.is_some() {
-                ProofTier::L1SteamManifest
-            } else {
-                ProofTier::L1BareBinary
-            }
-        }
-    };
-
-    let verified_at_millis = SystemTime::now()
+    let captured_at_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    Ok(BinaryProof {
+    Ok(RawBinaryEvidence {
         pid,
         process_name,
         full_path,
         sha256,
-        tier,
         authenticode,
         steam_manifest,
-        verified_at_millis,
+        captured_at_millis,
+    })
+}
+
+/// Generates a comprehensive L1 physical binary proof for a specific process ID.
+///
+/// Produces raw evidence and evaluates the proof tier locally for reporting/preview.
+pub fn generate_l1_binary_proof(
+    pid: u32,
+    expected_app_id: Option<u32>,
+) -> Result<BinaryProof, ProofError> {
+    let evidence = capture_raw_binary_evidence(pid, expected_app_id)?;
+    let tier = evaluate_binary_tier(&evidence);
+
+    Ok(BinaryProof {
+        pid: evidence.pid,
+        process_name: evidence.process_name.clone(),
+        full_path: evidence.full_path.clone(),
+        sha256: evidence.sha256.clone(),
+        tier,
+        authenticode: evidence.authenticode.clone(),
+        steam_manifest: evidence.steam_manifest.clone(),
+        verified_at_millis: evidence.captured_at_millis,
+        raw_evidence: evidence,
     })
 }
 
@@ -726,5 +979,114 @@ mod tests {
             tested,
             "at least one candidate binary with Authenticode signature should exist and verify"
         );
+    }
+
+    #[test]
+    fn proof_tier_reward_weights_and_eligibility() {
+        assert_eq!(ProofTier::L1SignedTrusted.reward_weight_bps(), 10_000);
+        assert!(ProofTier::L1SignedTrusted.is_reward_eligible());
+
+        assert_eq!(ProofTier::L1SignedStandard.reward_weight_bps(), 8_000);
+        assert!(ProofTier::L1SignedStandard.is_reward_eligible());
+
+        assert_eq!(ProofTier::L1SteamManifest.reward_weight_bps(), 5_000);
+        assert!(ProofTier::L1SteamManifest.is_reward_eligible());
+
+        // Bare PE binary receives 0 reward weight to avoid spoofing (notepad.exe)
+        assert_eq!(ProofTier::L1BareBinary.reward_weight_bps(), 0);
+        assert!(!ProofTier::L1BareBinary.is_reward_eligible());
+
+        assert_eq!(ProofTier::Untrusted.reward_weight_bps(), 0);
+        assert!(!ProofTier::Untrusted.is_reward_eligible());
+    }
+
+    #[test]
+    fn evaluate_binary_tier_computations() {
+        let base_evidence = RawBinaryEvidence {
+            pid: 100,
+            process_name: "test.exe".to_string(),
+            full_path: PathBuf::from("C:\\Games\\test.exe"),
+            sha256: "fakehash".to_string(),
+            authenticode: AuthenticodeStatus::Valid {
+                signer_subject: "Valve Corporation".to_string(),
+                is_trusted_publisher: true,
+            },
+            steam_manifest: None,
+            captured_at_millis: 12345,
+        };
+
+        // 1. Trusted publisher signature -> L1SignedTrusted
+        assert_eq!(
+            evaluate_binary_tier(&base_evidence),
+            ProofTier::L1SignedTrusted
+        );
+
+        // 2. Standard commercial signature -> L1SignedStandard
+        let mut std_evidence = base_evidence.clone();
+        std_evidence.authenticode = AuthenticodeStatus::Valid {
+            signer_subject: "Indie Studio LLC".to_string(),
+            is_trusted_publisher: false,
+        };
+        assert_eq!(
+            evaluate_binary_tier(&std_evidence),
+            ProofTier::L1SignedStandard
+        );
+
+        // 3. Unsigned binary with Steam Manifest -> L1SteamManifest
+        let mut steam_evidence = base_evidence.clone();
+        steam_evidence.authenticode = AuthenticodeStatus::NotSigned;
+        steam_evidence.steam_manifest = Some(SteamManifestInfo {
+            app_id: 440,
+            name: Some("Team Fortress 2".to_string()),
+            install_dir: Some("Team Fortress 2".to_string()),
+            build_id: Some("1234".to_string()),
+            manifest_path: PathBuf::from("C:\\Steam\\steamapps\\appmanifest_440.acf"),
+        });
+        assert_eq!(
+            evaluate_binary_tier(&steam_evidence),
+            ProofTier::L1SteamManifest
+        );
+
+        // 4. Bare PE binary (unsigned, no manifest) -> L1BareBinary
+        let mut bare_evidence = base_evidence;
+        bare_evidence.authenticode = AuthenticodeStatus::NotSigned;
+        bare_evidence.steam_manifest = None;
+        assert_eq!(
+            evaluate_binary_tier(&bare_evidence),
+            ProofTier::L1BareBinary
+        );
+    }
+
+    #[test]
+    fn steam_installdir_containment_check() {
+        let steamapps = Path::new("C:\\SteamLibrary\\steamapps");
+        let exe_inside = steamapps
+            .join("common")
+            .join("Dota 2 beta")
+            .join("game")
+            .join("bin")
+            .join("win64")
+            .join("dota2.exe");
+        let exe_outside = steamapps
+            .join("common")
+            .join("Counter-Strike")
+            .join("cs.exe");
+
+        assert!(is_exe_within_steam_installdir(
+            &exe_inside,
+            steamapps,
+            "Dota 2 beta"
+        ));
+        assert!(!is_exe_within_steam_installdir(
+            &exe_outside,
+            steamapps,
+            "Dota 2 beta"
+        ));
+        // Case insensitive
+        assert!(is_exe_within_steam_installdir(
+            &exe_inside,
+            steamapps,
+            "dota 2 beta"
+        ));
     }
 }

@@ -206,7 +206,7 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 | `src/tokenomics.rs` | 代币经济参数 |
 | `src/params.rs` | 协议参数（含 `MutualProofParams`） |
 | `src/mutual_proof.rs` | 互证记录：PlaySession / PlayHeartbeat / WitnessAttestation 构造、wire 投影与持久化 |
-| `src/proof/` | 证明层重构: L1 物理二进制身份与离线 Authenticode 证书链核验 (Issue #1) |
+| `src/proof/` | 证明层重构: L1 物理身份/Authenticode、L2 GPU 3D 渲染、L3 硬件信任根及多层综合证明 (Issue #1, #2) |
 | `src/cosmos/` | 链交互：proto3 编码 / 签名 / 广播 / 查询 / 地址 |
 
 ### Cosmos 链文件
@@ -255,4 +255,5 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 17. ✅ **证明层重构 L1 二进制物理身份与签名验证 (Issue #1):** `src/proof/l1_binary.rs` 引入物理可执行文件路径解析 (`QueryFullProcessImageNameW`)、PE DOS/NT 结构校验、SHA-256 指纹计算、Win32 离线 Authenticode 数字签名验证 (`WinVerifyTrust` 禁用 CRL 在线拉取防卡顿)、发行商证书主题提取与白名单比对，以及 Steam `appmanifest_{appid}.acf` 物理匹配优雅降级。
 18. ✅ **证明层重构 L2 GPU 3D 渲染与图形后端活跃度采样 (Issue #1):** `src/proof/l2_render.rs` 引入运行期模块快照枚举 (`K32EnumProcessModules`)，识别 DirectX 11/12、Vulkan、OpenGL 与 DXGI 交换链运行库加载状态；在 `os_support.rs:evaluate_game_engagement` 与 `find_process_id_by_name` 中无缝集成 L1/L2 验证，杜绝无渲染控制台/脚本挂名欺骗。
 19. ✅ **证明层重构 L3 硬件信任根与反虚拟化女巫证明 (Issue #1):** `src/proof/l3_hardware.rs` 引入 Windows TPM Base Services (TBS 2.0) 与 CNG Platform Crypto Provider (`ncrypt.dll`) 硬件密钥提供者探测，利用 x86 CPUID (Leaf 1 ECX.31 + Leaf 0x40000000) 硬件指令识别虚拟化 Hypervisor 签名 (KVM/Hyper-V/VMware/Xen)，物理阻断 VPS/Docker 批量女巫农场。
-20. ✅ **证明层重构 L4 综合证明评级与诚实透明降级模型 (Issue #1):** `src/proof/composite.rs` 融合 L1 物理身份、L2 GPU 渲染与 L3 硬件环境，构建四大置信阶梯（Gold 100 / Silver 80 / Bronze 50 / Degraded 20），在缺失 TPM 或非签名独立游戏时透明降级并附带具体降级成因，杜绝夸大叙事。
+20. ✅ **证明层重构 L4 术语澄清与综合证明评级模型 (Issue #1, #2):** `src/proof/composite.rs` 融合 L1 物理身份、L2 GPU 渲染与 L3 硬件环境，构建分层置信阶梯（Gold 100 / Silver 80 / Bronze 50 / Degraded Fallback 20）；明确 L4 专属于人体在场与物理边界证明（软件层面无法完全证明真实人类物理在场，诚实披露硬件宏与外挂物理边界），降级评级规范命名为 `TierDegradedFallback`，并在缺失 TPM 或处于非签名/非 Steam 环境时透明披露具体降级原因。
+21. ✅ **证明层 L1 架构修正与精确叶子证书匹配 (Issue #2):** 解耦客户端原始客观证据采集 (`RawBinaryEvidence`) 与见证者/验证节点评级计算 (`evaluate_binary_tier`)，杜绝客户端自评自报；在 Win32 PKCS#7 解构中使用 `CMSG_SIGNER_INFO_PARAM` 提取主签名者 `Issuer` 与 `SerialNumber`，通过 `CERT_FIND_SUBJECT_CERT` 精确匹配叶子实体证书，杜绝中间 CA / 时间戳响应者误判；将裸 PE 二进制 (`L1BareBinary`) 奖励权重清零 (`reward_weight_bps = 0`, `is_reward_eligible = false`)，严防任意进程 (如 notepad.exe) 伪造获取收益；强化 Steam 库目录物理包含性校验 (`is_exe_within_steam_installdir`)，严格锁定 `common/<installdir>` 子树。
