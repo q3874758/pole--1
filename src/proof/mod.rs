@@ -29,8 +29,8 @@ pub use l1_binary::{
 };
 
 pub use l2_render::{
-    classify_graphics_backend, generate_l2_render_proof, is_process_foreground, GraphicsBackend,
-    RenderEngagementLevel, RenderProof,
+    classify_graphics_backend, detect_gpu_device, generate_l2_render_proof, is_process_foreground,
+    query_dxgi_primary_adapter, GpuDeviceType, GraphicsBackend, RenderEngagementLevel, RenderProof,
 };
 
 pub use l3_hardware::{

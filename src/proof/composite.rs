@@ -3,9 +3,9 @@
 //! Synthesizes evidence chains across L1 (Binary Identity), L2 (GPU 3D Render), and L3 (Hardware RoT)
 //! to establish an authoritative, transparent confidence rating for player sessions:
 //! - **Tier 1 (Gold)**: Authenticode signed by trusted publisher + active foreground 3D GPU render + physical bare metal PC.
-//! - **Tier 2 (Silver)**: Standard signed or Steam Manifest verified + 3D GPU render + physical PC.
-//! - **Tier 3 (Bronze)**: Verified binary with 3D graphics runtime loaded.
-//! - **Tier Degraded Fallback**: Missing 3D graphics runtime, VM detected, or unverified environment.
+//! - **Tier 2 (Silver)**: Standard signed or Steam Manifest verified + 3D GPU render + physical PC (OR virtual machine with dedicated hardware GPU passthrough).
+//! - **Tier 3 (Bronze)**: Verified binary with 3D graphics runtime loaded (including virtual machines with standard display adapters).
+//! - **Tier Degraded Fallback**: Missing 3D graphics runtime, non-executable, or unverified environment.
 //! - **Untrusted**: Invalid PE header or corrupted binary.
 //!
 //! ### Architectural Note on L4 (Human Presence & Physical Boundary)
@@ -29,11 +29,11 @@ use crate::proof::ProofError;
 pub enum ConfidenceTier {
     /// Tier 1 (Gold, 100): Valid commercial publisher Authenticode signature + active 3D GPU render + physical bare metal PC
     Tier1Gold = 100,
-    /// Tier 2 (Silver, 80): Valid Authenticode / Steam Manifest + active 3D render + physical PC
+    /// Tier 2 (Silver, 80): Valid Authenticode / Steam Manifest + active 3D render + physical PC (or VM with dedicated hardware GPU passthrough)
     Tier2Silver = 80,
-    /// Tier 3 (Bronze, 50): Valid PE binary + 3D graphics runtime loaded (background or foreground)
+    /// Tier 3 (Bronze, 50): Valid PE binary + 3D graphics runtime loaded (including virtual machines with standard display adapters)
     Tier3Bronze = 50,
-    /// Degraded Fallback (20): Missing 3D graphics runtime OR virtual machine detected (honest degradation with risk disclosure)
+    /// Degraded Fallback (20): Missing 3D graphics runtime or unverified environment (honest degradation with risk disclosure)
     TierDegradedFallback = 20,
     /// Untrusted (0): Invalid PE header, corrupted file, or nonexistent process
     Untrusted = 0,
@@ -77,8 +77,17 @@ pub fn evaluate_composite_proof(
         );
     }
     if !l3.is_bare_metal {
-        degradation_reasons
-            .push("L3: Process running inside virtualized hypervisor/cloud VPS".to_string());
+        if l2.is_hardware_gpu {
+            degradation_reasons.push(
+                "L3: Virtualized environment with dedicated hardware GPU passthrough detected (Eligible for Tier 2 Silver rewards)"
+                    .to_string(),
+            );
+        } else {
+            degradation_reasons.push(
+                "L3: Virtualized environment detected (Eligible for Tier 3 Bronze rewards with active 3D graphics)"
+                    .to_string(),
+            );
+        }
     }
     if matches!(
         l3.tpm_status,
@@ -99,6 +108,12 @@ pub fn evaluate_composite_proof(
         && l2.engagement_level >= RenderEngagementLevel::BackgroundInWorld3D
         && l3.is_bare_metal
     {
+        ConfidenceTier::Tier2Silver
+    } else if l1.tier >= ProofTier::L1SteamManifest
+        && l2.engagement_level >= RenderEngagementLevel::BackgroundInWorld3D
+        && l2.is_hardware_gpu
+    {
+        // Virtual Machine with genuine commercial game + physical hardware GPU passthrough (VFIO/cloud gaming)
         ConfidenceTier::Tier2Silver
     } else if l1.tier >= ProofTier::L1BareBinary
         && l2.engagement_level >= RenderEngagementLevel::BackgroundInWorld3D
@@ -195,6 +210,12 @@ mod tests {
             primary_backend: crate::proof::GraphicsBackend::DirectX11,
             loaded_render_modules: vec!["d3d11.dll".to_string()],
             engagement_level: RenderEngagementLevel::ActiveForeground3D,
+            gpu_device: crate::proof::GpuDeviceType::HardwareGpu {
+                adapter_name: "NVIDIA GeForce GTX 1650".to_string(),
+                vendor_id: 0x10DE,
+                dedicated_vram_bytes: 4 * 1024 * 1024 * 1024,
+            },
+            is_hardware_gpu: true,
             working_set_bytes: 1024 * 1024,
             verified_at_millis: 1000,
         };
@@ -218,5 +239,137 @@ mod tests {
             .degradation_reasons
             .iter()
             .any(|r| r.contains("ineligible for rewards")));
+    }
+
+    #[test]
+    fn test_vm_with_gpu_passthrough_promotes_to_silver() {
+        use std::path::PathBuf;
+        let raw = crate::proof::RawBinaryEvidence {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            full_path: PathBuf::from("C:\\Steam\\steamapps\\common\\dota2.exe"),
+            sha256: "abc...".to_string(),
+            authenticode: crate::proof::AuthenticodeStatus::Valid {
+                signer_subject: "Valve Corporation".to_string(),
+                is_trusted_publisher: true,
+            },
+            steam_manifest: None,
+            captured_at_millis: 1000,
+        };
+        let l1 = BinaryProof {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            full_path: PathBuf::from("C:\\Steam\\steamapps\\common\\dota2.exe"),
+            sha256: "abc...".to_string(),
+            tier: ProofTier::L1SignedTrusted,
+            authenticode: crate::proof::AuthenticodeStatus::Valid {
+                signer_subject: "Valve Corporation".to_string(),
+                is_trusted_publisher: true,
+            },
+            steam_manifest: None,
+            verified_at_millis: 1000,
+            raw_evidence: raw,
+        };
+        let l2 = RenderProof {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            is_foreground: true,
+            primary_backend: crate::proof::GraphicsBackend::DirectX11,
+            loaded_render_modules: vec!["d3d11.dll".to_string(), "nvwgf2umx.dll".to_string()],
+            engagement_level: RenderEngagementLevel::ActiveForeground3D,
+            gpu_device: crate::proof::GpuDeviceType::HardwareGpu {
+                adapter_name: "NVIDIA GeForce RTX 4090 (VFIO Passthrough)".to_string(),
+                vendor_id: 0x10DE,
+                dedicated_vram_bytes: 24 * 1024 * 1024 * 1024,
+            },
+            is_hardware_gpu: true,
+            working_set_bytes: 2048 * 1024 * 1024,
+            verified_at_millis: 1000,
+        };
+        let l3 = HardwareProof {
+            tpm_status: TpmStatus::NotPresent,
+            environment: crate::proof::PlatformEnvironment::VirtualMachine {
+                hypervisor_signature: "KVMKVMKVM\0\0\0".to_string(),
+            },
+            is_bare_metal: false,
+            verified_at_millis: 1000,
+        };
+
+        let evaluated = evaluate_composite_proof(l1, l2, l3);
+        assert_eq!(
+            evaluated.confidence_tier,
+            ConfidenceTier::Tier2Silver,
+            "VM with physical GPU passthrough must promote to Silver"
+        );
+        assert!(evaluated.is_eligible_for_rewards);
+        assert!(evaluated
+            .degradation_reasons
+            .iter()
+            .any(|r| r.contains("Tier 2 Silver rewards")));
+    }
+
+    #[test]
+    fn test_vm_without_hardware_gpu_stays_bronze() {
+        use std::path::PathBuf;
+        let raw = crate::proof::RawBinaryEvidence {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            full_path: PathBuf::from("C:\\Steam\\steamapps\\common\\dota2.exe"),
+            sha256: "abc...".to_string(),
+            authenticode: crate::proof::AuthenticodeStatus::Valid {
+                signer_subject: "Valve Corporation".to_string(),
+                is_trusted_publisher: true,
+            },
+            steam_manifest: None,
+            captured_at_millis: 1000,
+        };
+        let l1 = BinaryProof {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            full_path: PathBuf::from("C:\\Steam\\steamapps\\common\\dota2.exe"),
+            sha256: "abc...".to_string(),
+            tier: ProofTier::L1SignedTrusted,
+            authenticode: crate::proof::AuthenticodeStatus::Valid {
+                signer_subject: "Valve Corporation".to_string(),
+                is_trusted_publisher: true,
+            },
+            steam_manifest: None,
+            verified_at_millis: 1000,
+            raw_evidence: raw,
+        };
+        let l2 = RenderProof {
+            pid: 4321,
+            process_name: "dota2.exe".to_string(),
+            is_foreground: true,
+            primary_backend: crate::proof::GraphicsBackend::DirectX11,
+            loaded_render_modules: vec!["d3d11.dll".to_string(), "vm3dum64.dll".to_string()],
+            engagement_level: RenderEngagementLevel::ActiveForeground3D,
+            gpu_device: crate::proof::GpuDeviceType::VirtualOrSoftware {
+                adapter_name: "VMware SVGA 3D".to_string(),
+            },
+            is_hardware_gpu: false,
+            working_set_bytes: 512 * 1024 * 1024,
+            verified_at_millis: 1000,
+        };
+        let l3 = HardwareProof {
+            tpm_status: TpmStatus::NotPresent,
+            environment: crate::proof::PlatformEnvironment::VirtualMachine {
+                hypervisor_signature: "VMwareVMware".to_string(),
+            },
+            is_bare_metal: false,
+            verified_at_millis: 1000,
+        };
+
+        let evaluated = evaluate_composite_proof(l1, l2, l3);
+        assert_eq!(
+            evaluated.confidence_tier,
+            ConfidenceTier::Tier3Bronze,
+            "VM with virtual SVGA must stay in Bronze"
+        );
+        assert!(evaluated.is_eligible_for_rewards);
+        assert!(evaluated
+            .degradation_reasons
+            .iter()
+            .any(|r| r.contains("Tier 3 Bronze rewards")));
     }
 }
