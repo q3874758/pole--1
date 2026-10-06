@@ -12,8 +12,14 @@
 //!   or code signatures are absent, acknowledging residual risks honestly.
 
 pub mod l1_binary;
+pub mod l2_render;
 
 pub use l1_binary::{
     generate_l1_binary_proof, inspect_foreground_process_l1, is_known_trusted_publisher,
     AuthenticodeStatus, BinaryProof, ProofError, ProofTier, SteamManifestInfo,
+};
+
+pub use l2_render::{
+    classify_graphics_backend, generate_l2_render_proof, is_process_foreground, GraphicsBackend,
+    RenderEngagementLevel, RenderProof,
 };

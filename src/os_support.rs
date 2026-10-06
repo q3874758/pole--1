@@ -504,7 +504,6 @@ pub fn is_launcher_process_name(process_name: &str) -> bool {
 /// - In-world gaming (even when character is AFK / sleeping) is valid and fully rewarded.
 /// - Parked at launcher, login screen, or main menu without loading the world is rejected.
 pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEngagementState {
-    let _ = pid;
     if let Some(state) = debug_override_engagement_state() {
         return state;
     }
@@ -514,15 +513,27 @@ pub fn evaluate_game_engagement(process_name: &str, pid: Option<u32>) -> PlayEng
         return PlayEngagementState::MainMenu;
     }
 
-    // 2. Foreground window title detection
+    // 2. Physical PE & L1 binary validation if PID is known or can be resolved
+    let effective_pid = pid.or_else(|| find_process_id_by_name(process_name));
+    if let Some(pid_val) = effective_pid {
+        if pid_val != 0 {
+            if let Ok(l1_proof) = crate::proof::generate_l1_binary_proof(pid_val, None) {
+                if l1_proof.tier == crate::proof::ProofTier::Untrusted {
+                    return PlayEngagementState::MainMenu;
+                }
+            }
+        }
+    }
+
+    // 3. Foreground window title detection
     if let Some(title) = detect_foreground_window_title() {
         if is_main_menu_or_launcher_title(&title) {
             return PlayEngagementState::MainMenu;
         }
     }
 
-    // 3. Low working-set threshold check for 3D PC games
-    if let Some(pid_val) = pid {
+    // 4. Low working-set threshold check for 3D PC games
+    if let Some(pid_val) = effective_pid {
         let working_set = detect_process_working_set_bytes(pid_val);
         // Modern 3D PC games (cs2, elden ring, etc.) occupy multi-GB when world assets load;
         // Under 120MB strongly indicates initial launcher or title stub.
@@ -619,6 +630,51 @@ pub fn list_running_process_names() -> Vec<String> {
         }
     }
     names
+}
+
+/// Finds the PID of the first running process matching the given process name.
+#[cfg(windows)]
+pub fn find_process_id_by_name(process_name: &str) -> Option<u32> {
+    let target = normalize_process_name(process_name);
+    if target.is_empty() {
+        return None;
+    }
+
+    unsafe {
+        let snapshot = win32::CreateToolhelp32Snapshot(win32::TH32CS_SNAPPROCESS, 0);
+        if !snapshot.is_null() && snapshot != win32::INVALID_HANDLE_VALUE {
+            let mut entry = std::mem::zeroed::<win32::PROCESSENTRY32W>();
+            entry.dw_size = std::mem::size_of::<win32::PROCESSENTRY32W>() as u32;
+
+            if win32::Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    let len = entry
+                        .sz_exe_file
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.sz_exe_file.len());
+                    let exe_name = String::from_utf16_lossy(&entry.sz_exe_file[..len]);
+                    if normalize_process_name(&exe_name) == target {
+                        win32::CloseHandle(snapshot);
+                        return Some(entry.th32_process_id);
+                    }
+
+                    entry.dw_size = std::mem::size_of::<win32::PROCESSENTRY32W>() as u32;
+                    if win32::Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            win32::CloseHandle(snapshot);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(windows))]
+pub fn find_process_id_by_name(_process_name: &str) -> Option<u32> {
+    None
 }
 
 pub fn normalize_process_name(input: &str) -> String {
@@ -894,6 +950,20 @@ mod tests {
         let current_pid = std::process::id();
         assert!(is_process_running(current_pid));
         assert!(!is_process_running(0));
+    }
+
+    #[test]
+    fn test_find_process_id_by_name() {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_name) = exe_path.file_name().and_then(|f| f.to_str()) {
+                let pid = find_process_id_by_name(exe_name);
+                assert!(
+                    pid.is_some(),
+                    "current exe should be found by name: {exe_name}"
+                );
+            }
+        }
+        assert_eq!(find_process_id_by_name("non_existent_proc_12345.exe"), None);
     }
 
     #[test]

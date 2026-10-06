@@ -253,3 +253,4 @@ Rust 链下节点通过 `src/cosmos/` 把链下 artifact 构造为 Cosmos SDK �
 15. ✅ **供给压力测试与软护栏 (P1-1):** 跨 30 年多情景（熊/基准/牛/极限）净供给仿真矩阵验证，`ensureRewardPool` 内嵌年度总预算软护栏。
 16. ✅ **复合前缀索引范围查询 (P2):** `keeper.go` / `session.go` 全量采用 `NewPrefixedTripleRange` 与 `NewPrefixedPairRange` 消除 O(n) 全表扫。
 17. ✅ **证明层重构 L1 二进制物理身份与签名验证 (Issue #1):** `src/proof/l1_binary.rs` 引入物理可执行文件路径解析 (`QueryFullProcessImageNameW`)、PE DOS/NT 结构校验、SHA-256 指纹计算、Win32 离线 Authenticode 数字签名验证 (`WinVerifyTrust` 禁用 CRL 在线拉取防卡顿)、发行商证书主题提取与白名单比对，以及 Steam `appmanifest_{appid}.acf` 物理匹配优雅降级。
+18. ✅ **证明层重构 L2 GPU 3D 渲染与图形后端活跃度采样 (Issue #1):** `src/proof/l2_render.rs` 引入运行期模块快照枚举 (`K32EnumProcessModules`)，识别 DirectX 11/12、Vulkan、OpenGL 与 DXGI 交换链运行库加载状态；在 `os_support.rs:evaluate_game_engagement` 与 `find_process_id_by_name` 中无缝集成 L1/L2 验证，杜绝无渲染控制台/脚本挂名欺骗。
