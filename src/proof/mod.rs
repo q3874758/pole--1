@@ -11,8 +11,14 @@
 //! - **L4 (Graceful Fallback)**: Transparent confidence degradation when hardware features
 //!   or code signatures are absent, acknowledging residual risks honestly.
 
+pub mod composite;
 pub mod l1_binary;
 pub mod l2_render;
+pub mod l3_hardware;
+
+pub use composite::{
+    evaluate_composite_proof, generate_composite_proof, CompositeProof, ConfidenceTier,
+};
 
 pub use l1_binary::{
     generate_l1_binary_proof, inspect_foreground_process_l1, is_known_trusted_publisher,
@@ -22,4 +28,9 @@ pub use l1_binary::{
 pub use l2_render::{
     classify_graphics_backend, generate_l2_render_proof, is_process_foreground, GraphicsBackend,
     RenderEngagementLevel, RenderProof,
+};
+
+pub use l3_hardware::{
+    detect_platform_environment, generate_l3_hardware_proof, probe_tpm_status, HardwareProof,
+    PlatformEnvironment, TpmStatus,
 };
